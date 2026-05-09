@@ -455,7 +455,7 @@ def main():
 
     problem = RVEProblem.from_yaml(REPO / "examples" / "ud_tow.yaml")
     total_strain = 0.01
-    exaggeration = 15.0
+    exaggeration = 5.0
 
     solve_loadcase, _mesh_ref, _V_ref = _build_periodic_loadcase_solver(problem)
     panels = []
