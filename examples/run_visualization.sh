@@ -1,28 +1,34 @@
 #!/usr/bin/env bash
-# End-to-end visualization run for the UD-tow example.
+# End-to-end visualization run for one of the example RVEs.
+#
+# Usage:
+#     bash examples/run_visualization.sh                          # ud_tow (default)
+#     bash examples/run_visualization.sh examples/mesomech_2yarns.yaml
 #
 # Runs the homogenization solve, the analytical-references plot, and the
-# six-loadcase KUBC iso-view figure with the typst-compiled inputs/outputs/BCs
-# table composited underneath.
-#
-# Requires the b3-tex micromamba env (see README.md):
-#     micromamba create -n b3-tex -c conda-forge python=3.12 fenics-dolfinx \
-#                                    dolfinx_mpc mpich numpy pyyaml pytest
-#     micromamba activate b3-tex
-#     pip install treeparse pyvista matplotlib scipy scikit-image pillow
-#     pip install -e .
+# six-loadcase periodic-BC iso-view figure with the typst-compiled
+# inputs/outputs/BCs/verification table composited underneath.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-micromamba run -n b3-tex b3-tex solve     examples/ud_tow.yaml --out results
-micromamba run -n b3-tex python           examples/plot_results.py
-micromamba run -n b3-tex python           examples/visualize_deformation.py
+YAML="${1:-examples/ud_tow.yaml}"
+STEM="$(basename "$YAML" .yaml)"
+if [ "$STEM" = "ud_tow" ]; then
+    OUT="results"
+else
+    OUT="results/$STEM"
+fi
+mkdir -p "$OUT"
+
+micromamba run -n b3-tex b3-tex solve "$YAML" --out "$OUT" --backend periodic
+micromamba run -n b3-tex python examples/plot_results.py "$YAML" "$OUT" || true
+micromamba run -n b3-tex python examples/visualize_deformation.py "$YAML"
 
 echo
 echo "wrote:"
-echo "  results/C_eff.npz                    (effective 6x6 stiffness)"
-echo "  results/c_eff_vs_reference.png       (Voigt / Reuss / MT / FE diagonal bars)"
-echo "  results/cylinder_geometry.png        (slice of the implicit phase field)"
-echo "  results/uniaxial_deformation_iso.png (six KUBC loadcases + tables)"
+echo "  $OUT/C_eff.npz                       (effective 6x6 stiffness)"
+echo "  $OUT/c_eff_vs_reference.png          (Voigt / Reuss / MT / FE diagonal bars, where applicable)"
+echo "  $OUT/cylinder_geometry.png           (slice of the implicit phase field, where applicable)"
+echo "  $OUT/uniaxial_deformation_iso.png    (six loadcases + tables)"

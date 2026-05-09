@@ -1,0 +1,49 @@
+# Two-yarn mesomech RVE: two perpendicular straight tows in a matrix cube.
+# Yarn material is derived from constituents (fibre + matrix + V_f) via Chamis
+# rule-of-mixtures, mirroring cmpp's uni1 preprocessor.
+
+domain:
+  size: [1.0, 1.0, 1.0]
+  mesh_resolution: [16, 16, 16]
+
+periodic_tolerance: 1.0e-8
+
+# Constituents are declared first; the chamis-derived yarn material references
+# them by name.
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9
+    e_t: 15.0e9
+    g_lt: 24.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.70
+
+# Two perpendicular yarns at z = 0.4 and z = 0.6 (offset to avoid intersection),
+# emulating the warp/weft pattern of a plain weave at the simplest level
+# (straight tows, no undulation).
+field:
+  type: multi_straight_yarn
+  matrix_material: matrix
+  yarn_material: yarn
+  yarns:
+    - axis_point: [0.5, 0.5, 0.4]
+      axis_direction: [1.0, 0.0, 0.0]
+      radius: 0.18
+    - axis_point: [0.5, 0.5, 0.6]
+      axis_direction: [0.0, 1.0, 0.0]
+      radius: 0.18
+
+solver:
+  backend: dolfinx_periodic

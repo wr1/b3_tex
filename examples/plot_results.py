@@ -38,7 +38,23 @@ def estimate_yarn_volume_fraction(problem, n=40):
 
 
 def main():
-    problem = RVEProblem.from_yaml(REPO / "examples" / "ud_tow.yaml")
+    import sys
+
+    yaml_arg = sys.argv[1] if len(sys.argv) > 1 else "examples/ud_tow.yaml"
+    out_arg = sys.argv[2] if len(sys.argv) > 2 else None
+
+    yaml_path = Path(yaml_arg)
+    if not yaml_path.is_absolute():
+        yaml_path = REPO / yaml_path
+    problem = RVEProblem.from_yaml(yaml_path)
+
+    if not isinstance(problem.field, CylinderYarnField):
+        print(
+            f"plot_results: skipping (Mori-Tanaka closed form is only set up for CylinderYarnField; "
+            f"{type(problem.field).__name__} is multi-yarn)"
+        )
+        return
+
     matrix = problem.materials[problem.field.matrix_material]
     yarn = problem.materials[problem.field.yarn_material]
     vf = estimate_yarn_volume_fraction(problem)
@@ -47,7 +63,9 @@ def main():
     Cv = voigt_bound([matrix, yarn], [1 - vf, vf])
     Cr = reuss_bound([matrix, yarn], [1 - vf, vf])
 
-    data = np.load(REPO / "results" / "C_eff.npz")
+    out_dir = REPO / (out_arg if out_arg else "results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    data = np.load(out_dir / "C_eff.npz")
     C_fe = data["effective_stiffness"]
 
     labels = ["C11", "C22", "C33", "C44", "C55", "C66"]
@@ -74,7 +92,7 @@ def main():
     ax.set_yscale("log")
     ax.grid(True, axis="y", which="both", alpha=0.3)
     fig.tight_layout()
-    out_a = REPO / "results" / "c_eff_vs_reference.png"
+    out_a = out_dir / "c_eff_vs_reference.png"
     fig.savefig(out_a, dpi=150)
     plt.close(fig)
     print(f"wrote {out_a}")
@@ -99,7 +117,7 @@ def main():
     ax.set_ylabel("z")
     ax.set_title(f"Phase field, slice x = 0.5\n(yarn cylinder along x, radius {problem.field.radius})")
     fig.tight_layout()
-    out_b = REPO / "results" / "cylinder_geometry.png"
+    out_b = out_dir / "cylinder_geometry.png"
     fig.savefig(out_b, dpi=150)
     plt.close(fig)
     print(f"wrote {out_b}")

@@ -154,7 +154,11 @@ def _build_pyvista_grid(V, u_sol, vm_per_cell, total_strain, voigt_index):
 
 
 def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
-    """Render the undeformed FE mesh with cells coloured by phase membership."""
+    """Render the undeformed FE mesh with cells coloured by phase membership.
+
+    For multi-yarn fields, each yarn gets a slightly different shade based on
+    its index so the bundles can be told apart at a glance.
+    """
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
     mesh = dolfinx.mesh.create_box(
@@ -167,7 +171,22 @@ def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
     centroids = _cell_centroids(mesh)
     samples = problem.field.sample(centroids)
     yarn_name = problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
-    phase = np.array([1.0 if s.material == yarn_name else 0.0 for s in samples])
+    yarns = getattr(problem.field, "yarns", None)
+    if yarns is not None and not isinstance(yarns, np.ndarray):
+        yarns_seq = list(yarns) if isinstance(yarns, tuple) else None
+    else:
+        yarns_seq = None
+
+    if yarns_seq is not None and len(yarns_seq) > 1:
+        phase = np.zeros(len(samples))
+        for i, sample in enumerate(samples):
+            if sample.material == yarn_name:
+                for k, yarn in enumerate(yarns_seq):
+                    if yarn.contains(centroids[i:i+1])[0]:
+                        phase[i] = 1.0 + 0.5 * k
+                        break
+    else:
+        phase = np.array([1.0 if s.material == yarn_name else 0.0 for s in samples])
 
     cells, cell_types, points = dolfinx.plot.vtk_mesh(V)
     grid = pv.UnstructuredGrid(cells, cell_types, points)
@@ -447,13 +466,19 @@ def _composite(parts: list[Path], out_path: Path) -> None:
 
 
 def main():
+    import sys
+
     pv.OFF_SCREEN = True
     try:
         pv.start_xvfb(wait=0.2)
     except Exception:
         pass
 
-    problem = RVEProblem.from_yaml(REPO / "examples" / "ud_tow.yaml")
+    yaml_arg = sys.argv[1] if len(sys.argv) > 1 else "examples/ud_tow.yaml"
+    yaml_path = Path(yaml_arg)
+    if not yaml_path.is_absolute():
+        yaml_path = REPO / yaml_path
+    problem = RVEProblem.from_yaml(yaml_path)
     total_strain = 0.01
     exaggeration = 15.0
 
@@ -475,7 +500,11 @@ def main():
 
     vm_clim = np.percentile(np.concatenate(overall_vm), [70.0, 92.0])
 
+    yaml_stem = yaml_path.stem
     results_dir = REPO / "results"
+    if yaml_stem != "ud_tow":
+        results_dir = REPO / "results" / yaml_stem
+    results_dir.mkdir(parents=True, exist_ok=True)
     mesh_png = results_dir / "_mesh_panel.png"
     loadcases_png = results_dir / "_loadcases_3d.png"
     table_png = results_dir / "_loadcases_table.png"

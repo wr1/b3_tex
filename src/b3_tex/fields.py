@@ -49,6 +49,46 @@ def _as_points_2d(points: ArrayLike) -> NDArray[np.float64]:
 
 
 @dataclass(frozen=True)
+class StraightYarn:
+    """A single straight cylindrical yarn segment defined by a centerline + radius.
+
+    The yarn's local 1-axis is the unit ``axis_direction``. The yarn occupies the
+    infinite cylinder of given ``radius`` around the line through ``axis_point``
+    in the direction ``axis_direction``.
+    """
+
+    axis_point: NDArray[np.float64]
+    axis_direction: NDArray[np.float64]
+    radius: float
+
+    def __post_init__(self) -> None:
+        if self.radius <= 0:
+            raise ValueError("radius must be positive")
+        ap = np.asarray(self.axis_point, dtype=float)
+        ad = np.asarray(self.axis_direction, dtype=float)
+        if ap.shape != (3,) or ad.shape != (3,):
+            raise ValueError("axis_point and axis_direction must have shape (3,)")
+        n = np.linalg.norm(ad)
+        if n == 0:
+            raise ValueError("axis_direction must be non-zero")
+        object.__setattr__(self, "axis_point", ap)
+        object.__setattr__(self, "axis_direction", ad / n)
+
+    @property
+    def rotation(self) -> NDArray[np.float64]:
+        return orthonormal_frame_along(self.axis_direction)
+
+    def radial_distance(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
+        rel = points - self.axis_point
+        axial = rel @ self.axis_direction
+        perp = rel - np.outer(axial, self.axis_direction)
+        return np.linalg.norm(perp, axis=1)
+
+    def contains(self, points: NDArray[np.float64]) -> NDArray[np.bool_]:
+        return self.radial_distance(points) <= self.radius
+
+
+@dataclass(frozen=True)
 class CylinderYarnField:
     """Single straight UD-tow yarn embedded in a matrix.
 
@@ -97,4 +137,43 @@ class CylinderYarnField:
                 result.append(PhaseSample(self.yarn_material, yarn_rot))
             else:
                 result.append(PhaseSample(self.matrix_material, identity))
+        return result
+
+
+@dataclass(frozen=True)
+class MultiStraightYarnField:
+    """A bundle of straight cylindrical yarns embedded in a matrix.
+
+    All yarns share the same ``yarn_material`` (typically Chamis-derived from a
+    fibre + matrix system); their local frame at each point is aligned with the
+    yarn's own ``axis_direction``. At any 3D point, the field reports the *first*
+    yarn whose cylinder contains the point; if none, it's matrix.
+    """
+
+    matrix_material: str
+    yarn_material: str
+    yarns: tuple[StraightYarn, ...]
+
+    def __post_init__(self) -> None:
+        if not self.yarns:
+            raise ValueError("MultiStraightYarnField requires at least one yarn")
+
+    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+        pts = _as_points_2d(points)
+        n = pts.shape[0]
+        yarn_idx = -np.ones(n, dtype=int)
+        for k, yarn in enumerate(self.yarns):
+            unassigned = yarn_idx < 0
+            if not np.any(unassigned):
+                break
+            mask = yarn.contains(pts[unassigned])
+            unassigned_indices = np.where(unassigned)[0]
+            yarn_idx[unassigned_indices[mask]] = k
+        identity = np.eye(3)
+        result: list[PhaseSample] = []
+        for ki in yarn_idx:
+            if ki < 0:
+                result.append(PhaseSample(self.matrix_material, identity))
+            else:
+                result.append(PhaseSample(self.yarn_material, self.yarns[ki].rotation))
         return result

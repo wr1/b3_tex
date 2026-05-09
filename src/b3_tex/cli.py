@@ -24,8 +24,6 @@ def _estimate_yarn_volume_fraction(problem: RVEProblem, n: int = 40) -> float:
         axis=1,
     )
     samples = problem.field.sample(pts)
-    if not isinstance(problem.field, CylinderYarnField):
-        raise NotImplementedError("v1 only supports CylinderYarnField")
     yarn_name = problem.field.yarn_material
     return sum(1 for s in samples if s.material == yarn_name) / len(samples)
 
@@ -43,25 +41,27 @@ def _validate_cmd(config: str) -> None:
 
 def _reference_cmd(config: str) -> None:
     problem = RVEProblem.from_yaml(config)
-    if not isinstance(problem.field, CylinderYarnField):
-        raise NotImplementedError("reference subcommand only supports CylinderYarnField for v1")
-    matrix = problem.materials[problem.field.matrix_material]
-    yarn = problem.materials[problem.field.yarn_material]
+    field = problem.field
+    matrix = problem.materials[field.matrix_material]
     vf = _estimate_yarn_volume_fraction(problem)
+    yarn = problem.materials[field.yarn_material]
 
-    Cmt = mori_tanaka_cylinder(matrix=matrix, fibre=yarn, fibre_volume_fraction=vf)
     Cv = voigt_bound([matrix, yarn], [1 - vf, vf])
     Cr = reuss_bound([matrix, yarn], [1 - vf, vf])
-    e_consts = engineering_constants_transverse_iso(Cmt)
-
-    print(f"yarn volume fraction (estimated) = {vf:.4f}")
+    print(f"yarn volume fraction (estimated, all yarns combined) = {vf:.4f}")
     print()
-    print("Mori-Tanaka engineering constants (axis 1 = fibre direction):")
-    for label in ("e_l", "e_t", "g_lt", "nu_lt", "nu_tt", "g_tt"):
-        print(f"  {label:>6} = {e_consts[label]:.4e}")
+    print("Voigt diagonal [GPa]:", np.diag(Cv) / 1e9)
+    print("Reuss diagonal [GPa]:", np.diag(Cr) / 1e9)
     print()
-    print("Voigt diagonal:", np.diag(Cv))
-    print("Reuss diagonal:", np.diag(Cr))
+    if isinstance(field, CylinderYarnField):
+        Cmt = mori_tanaka_cylinder(matrix=matrix, fibre=yarn, fibre_volume_fraction=vf)
+        e_consts = engineering_constants_transverse_iso(Cmt)
+        print("Mori-Tanaka engineering constants (axis 1 = fibre direction):")
+        for label in ("e_l", "e_t", "g_lt", "nu_lt", "nu_tt", "g_tt"):
+            print(f"  {label:>6} = {e_consts[label]:.4e}")
+    else:
+        print("(Mori-Tanaka closed form skipped for non-CylinderYarnField; ")
+        print(" Voigt/Reuss provide the bracketing bounds.)")
 
 
 def _solve_cmd(config: str, out: str, backend: str) -> None:

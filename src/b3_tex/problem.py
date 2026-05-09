@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from b3_tex.fields import CylinderYarnField, PhaseField
+from b3_tex.fields import CylinderYarnField, MultiStraightYarnField, PhaseField, StraightYarn
 from b3_tex.materials import Material
 
 
@@ -43,6 +43,23 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             axis_point=np.asarray(config["axis_point"], dtype=float),
             axis_direction=np.asarray(config["axis_direction"], dtype=float),
             radius=float(config["radius"]),
+        )
+    if kind == "multi_straight_yarn":
+        matrix_name = str(config["matrix_material"])
+        yarn_name = str(config["yarn_material"])
+        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+            if name not in materials:
+                raise ValueError(f"{label} {name!r} is not in materials")
+        yarns = tuple(
+            StraightYarn(
+                axis_point=np.asarray(y["axis_point"], dtype=float),
+                axis_direction=np.asarray(y["axis_direction"], dtype=float),
+                radius=float(y["radius"]),
+            )
+            for y in config["yarns"]
+        )
+        return MultiStraightYarnField(
+            matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns
         )
     raise ValueError(f"unknown field type {kind!r}")
 
@@ -78,7 +95,7 @@ class RVEProblem:
 
         materials: dict[str, Material] = {}
         for entry in config["materials"]:
-            material = Material.from_config(entry)
+            material = Material.from_config(entry, registry=materials)
             materials[material.name] = material
 
         field = _build_field(config["field"], materials)

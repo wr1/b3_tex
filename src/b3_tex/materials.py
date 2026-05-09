@@ -66,7 +66,33 @@ class Material:
         )
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "Material":
+    def from_chamis(
+        cls,
+        name: str,
+        *,
+        matrix: "Material",
+        fibre: "Material",
+        fibre_volume_fraction: float,
+    ) -> "Material":
+        """Construct a yarn (transverse-isotropic UD) Material from constituents
+        via Chamis rule-of-mixtures."""
+        from b3_tex.micromechanics import chamis_ud_stiffness
+
+        return cls(
+            name=name,
+            stiffness=chamis_ud_stiffness(
+                matrix=matrix, fibre=fibre, fibre_volume_fraction=fibre_volume_fraction
+            ),
+        )
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any], registry: dict[str, "Material"] | None = None) -> "Material":
+        """Build a Material from a YAML/JSON config dict.
+
+        ``registry`` is an optional mapping of already-built materials by name,
+        used to resolve cross-references (e.g. a ``chamis`` yarn that refers to
+        previously-defined ``matrix`` and ``fibre`` materials).
+        """
         name = str(config["name"])
         kind = str(config.get("type", ""))
         if kind == "isotropic":
@@ -83,6 +109,24 @@ class Material:
             return cls.orthotropic(name, **{k: float(config[k]) for k in keys})
         if kind == "stiffness":
             return cls(name=name, stiffness=np.asarray(config["stiffness"], dtype=float))
+        if kind == "chamis":
+            if registry is None:
+                raise ValueError(
+                    "chamis material requires a registry of previously defined materials "
+                    "(matrix and fibre); pass `registry=...` to from_config"
+                )
+            for ref in ("matrix", "fibre"):
+                if config[ref] not in registry:
+                    raise ValueError(
+                        f"chamis material {name!r} references {ref}={config[ref]!r}, "
+                        f"which is not in the registry; declare it before this material in the YAML"
+                    )
+            return cls.from_chamis(
+                name,
+                matrix=registry[str(config["matrix"])],
+                fibre=registry[str(config["fibre"])],
+                fibre_volume_fraction=float(config["fibre_volume_fraction"]),
+            )
         raise ValueError(f"unknown material type {kind!r}")
 
     def rotated(self, rotation: ArrayLike) -> NDArray[np.float64]:
