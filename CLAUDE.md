@@ -20,12 +20,24 @@
 - Transverse-isotropic stiffness has its symmetry axis along local 1 (the fibre
   direction).
 
-## v1 boundary conditions
+## Boundary-condition backends
 
-The DOLFINx backend uses **KUBC** (Dirichlet `u = E·x` on the boundary), not
-periodic BCs. Periodic BCs via `dolfinx_mpc` are deferred to v1.5; the
-overlapping-slave behaviour at corner master nodes proved fragile with a corner
-pin and needs a more careful formulation.
+Two backends live in `backends/`:
+
+- `dolfinx_periodic_backend.py` (default) — matching-face periodic BCs via
+  `dolfinx_mpc`. Two non-obvious tricks: (1) the three axis slave masks must be
+  non-overlapping (axis 0 excludes y=L and z=L sub-edges, axis 1 excludes z=L,
+  axis 2 takes the rest) so any face/edge/corner DOF is assigned to exactly
+  one chain; (2) the rigid-body translation is removed by pinning each
+  component independently at the origin via sub-space Dirichlet BCs —
+  `dirichletbc(np.zeros(3), block_dofs, V)` on a vector function space only
+  pins the first component in DOLFINx 0.10.
+- `dolfinx_backend.py` — KUBC (`u = E·x` on the boundary). Simpler, useful as
+  an upper bound and a sanity check.
+
+Periodic recovers a homogeneous-matrix stiffness to machine precision and is
+bounded above by KUBC in the energy sense (`eigvalsh(C_kubc - C_periodic) >= 0`
+to ~5e-3 relative tolerance) — both invariants are pinned by tests.
 
 ## Validation
 

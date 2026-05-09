@@ -14,15 +14,19 @@ adaptive refinement.
 - Single straight UD tow (cylinder) embedded in a matrix cube.
 - Yarn modelled as a transverse-isotropic continuum with axis along the
   cylinder direction; matrix is isotropic.
-- DOLFINx backend with structured tetrahedral mesh and **Kinematic Uniform
-  Boundary Conditions** (KUBC: `u = E·x` on the entire boundary).
+- Two DOLFINx backends, both on a structured tetrahedral mesh:
+  - `periodic` (default) — matching-face periodic BCs via `dolfinx_mpc`,
+    with non-overlapping slave masks per axis and three sub-space corner pins
+    to remove the rigid-body translation.
+  - `kubc` — Dirichlet `u = E·x` on the entire boundary; useful as an upper
+    bound and as a validation cross-check.
 - Six macro-strain loadcases → effective 6×6 stiffness.
 - Validation against rule-of-mixtures, Voigt bound, and a Mori-Tanaka
-  closed-form reference.
+  closed-form reference; periodic recovers the homogeneous-matrix stiffness
+  to machine precision and is bounded above by KUBC in the energy sense.
 
-Deferred to later milestones: adaptive mesh refinement, matching-face periodic
-BCs (via `dolfinx_mpc`), non-matching periodic BCs, woven/braided textiles, and
-TexGen ingest.
+Deferred to later milestones: adaptive mesh refinement, non-matching periodic
+BCs (mortar coupling), woven/braided textiles, TexGen ingest.
 
 ## Setup
 
@@ -42,7 +46,8 @@ pip install -e .
 micromamba activate b3-tex
 b3-tex validate  examples/ud_tow.yaml
 b3-tex reference examples/ud_tow.yaml
-b3-tex solve     examples/ud_tow.yaml --out results
+b3-tex solve     examples/ud_tow.yaml --out results              # periodic BC
+b3-tex solve     examples/ud_tow.yaml --out results --backend kubc
 ```
 
 `solve` writes the effective stiffness and the six loadcase strain/stress

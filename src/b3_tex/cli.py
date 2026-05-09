@@ -64,29 +64,35 @@ def _reference_cmd(config: str) -> None:
     print("Reuss diagonal:", np.diag(Cr))
 
 
-def _solve_cmd(config: str, out: str) -> None:
+def _solve_cmd(config: str, out: str, backend: str) -> None:
     problem = RVEProblem.from_yaml(config)
     try:
-        from b3_tex.backends.dolfinx_backend import solve as solve_dolfinx
+        if backend == "periodic":
+            from b3_tex.backends.dolfinx_periodic_backend import solve as solve_fe
+        elif backend == "kubc":
+            from b3_tex.backends.dolfinx_backend import solve as solve_fe
+        else:
+            print(f"unknown backend {backend!r}; expected 'kubc' or 'periodic'", file=sys.stderr)
+            sys.exit(2)
     except ImportError as exc:
         print(
             "FEniCSx (DOLFINx + dolfinx_mpc) is not importable in this Python environment.\n"
             "Install via:\n"
             "  micromamba create -n b3-tex -c conda-forge python=3.12 fenics-dolfinx dolfinx_mpc \\\n"
-            "                                    mpich pyvista numpy pyyaml pytest\n"
+            "                                    mpich numpy pyyaml pytest\n"
             "  micromamba activate b3-tex\n"
-            "  pip install -e <repo>\n"
+            "  pip install treeparse && pip install -e <repo>\n"
             f"\nUnderlying error: {exc}",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    result = solve_dolfinx(problem)
+    result = solve_fe(problem)
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
     result.save_npz(out_dir / "C_eff.npz")
     np.set_printoptions(precision=4, suppress=True)
-    print("Effective stiffness:")
+    print(f"Effective stiffness ({backend} BC):")
     print(result.effective_stiffness)
     print(f"Saved to {out_dir / 'C_eff.npz'}")
 
@@ -109,7 +115,7 @@ _app = cli(
         ),
         command(
             name="solve",
-            help="Run the periodic FEniCSx homogenization (six macro-strain loadcases).",
+            help="Run the FEniCSx homogenization (six macro-strain loadcases).",
             callback=_solve_cmd,
             arguments=[argument(name="config", arg_type=str, help="Path to RVE YAML.")],
             options=[
@@ -118,7 +124,14 @@ _app = cli(
                     arg_type=str,
                     default="results",
                     help="Output directory for C_eff.npz.",
-                )
+                ),
+                option(
+                    flags=["--backend", "-b"],
+                    arg_type=str,
+                    default="periodic",
+                    choices=["periodic", "kubc"],
+                    help="Boundary-condition backend.",
+                ),
             ],
         ),
     ],
