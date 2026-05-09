@@ -25,13 +25,18 @@
 Two backends live in `backends/`:
 
 - `dolfinx_periodic_backend.py` (default) — matching-face periodic BCs via
-  `dolfinx_mpc`. Two non-obvious tricks: (1) the three axis slave masks must be
-  non-overlapping (axis 0 excludes y=L and z=L sub-edges, axis 1 excludes z=L,
-  axis 2 takes the rest) so any face/edge/corner DOF is assigned to exactly
-  one chain; (2) the rigid-body translation is removed by pinning each
-  component independently at the origin via sub-space Dirichlet BCs —
-  `dirichletbc(np.zeros(3), block_dofs, V)` on a vector function space only
-  pins the first component in DOLFINx 0.10.
+  `dolfinx_mpc`. Three non-obvious tricks pin together to make this work:
+  (1) the three axis slave masks must be non-overlapping (axis 0 excludes
+  y=L and z=L sub-edges, axis 1 excludes z=L, axis 2 takes the rest) so
+  any face/edge/corner DOF is assigned to exactly one cascading chain
+  ending at (0,0,0); (2) the rigid-body translation pin must sit at an
+  **interior** node (here the geometric centre) — pinning a corner DOF
+  silently fails because that DOF is a multi-axis master and the MPC
+  elimination overrides the BC, leaving the homogenization correct but
+  with a non-zero residual translation; (3) each component is pinned
+  independently via sub-space Dirichlet BCs because
+  `dirichletbc(np.zeros(3), block_dofs, V)` on a blocked vector V in
+  DOLFINx 0.10 only pins the first component.
 - `dolfinx_backend.py` — KUBC (`u = E·x` on the boundary). Simpler, useful as
   an upper bound and a sanity check.
 

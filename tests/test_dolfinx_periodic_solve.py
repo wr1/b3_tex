@@ -54,6 +54,87 @@ def test_periodic_homogeneous_recovers_isotropic_stiffness_to_machine_precision(
     np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
 
 
+def test_periodic_cascading_corner_handling_and_pin_enforcement():
+    """All 8 corners must inherit the same u_tilde via the cascading periodic
+    chain (axis 2 -> axis 1 -> axis 0 -> origin). The interior pin must enforce
+    u_tilde(centre) = 0 exactly so there is no residual rigid translation.
+    """
+    import dolfinx
+    import dolfinx_mpc
+    import ufl
+    from mpi4py import MPI
+
+    from b3_tex.backends.dolfinx_periodic_backend import (
+        _build_periodic_mpc, _build_pin_bcs,
+        _cell_centroids, _global_stiffness_at_cell_centroids, _voigt_strain,
+    )
+
+    cfg = _ud_tow_config(mesh_n=4, radius=0.001)
+    cfg["materials"] = [
+        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+    ]
+    cfg["field"]["yarn_material"] = "matrix"
+    problem = RVEProblem.from_config(cfg)
+
+    L = 1.0
+    mesh = dolfinx.mesh.create_box(
+        MPI.COMM_WORLD,
+        [np.array([0.0, 0.0, 0.0]), np.array([L, L, L])],
+        [4, 4, 4],
+        cell_type=dolfinx.mesh.CellType.tetrahedron,
+    )
+    V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
+    T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
+    C_func = dolfinx.fem.Function(T)
+    centroids = _cell_centroids(mesh)
+    C_func.x.array[:] = _global_stiffness_at_cell_centroids(problem, centroids).reshape(-1)
+    C_func.x.scatter_forward()
+
+    E_voigt = dolfinx.fem.Constant(mesh, np.zeros(6))
+    u = ufl.TrialFunction(V); v = ufl.TestFunction(V)
+    a_form = ufl.inner(ufl.dot(C_func, _voigt_strain(u, ufl)), _voigt_strain(v, ufl)) * ufl.dx
+    L_form = -ufl.inner(ufl.dot(C_func, E_voigt), _voigt_strain(v, ufl)) * ufl.dx
+
+    bcs = _build_pin_bcs(V, mesh)
+    mpc = _build_periodic_mpc(V, problem, bcs)
+
+    u_sol = dolfinx.fem.Function(mpc.function_space)
+    solver = dolfinx_mpc.LinearProblem(
+        a_form, L_form, mpc, bcs=bcs, u=u_sol,
+        petsc_options_prefix="t_corner_",
+        petsc_options={"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"},
+    )
+    E_voigt.value = np.array([1.0, 0, 0, 0, 0, 0])
+    solver.solve()
+
+    coords = V.tabulate_dof_coordinates()
+    arr = u_sol.x.array.reshape(-1, 3)
+
+    def at(p, tol=1e-9):
+        idx = np.where(np.all(np.isclose(coords, p, atol=tol), axis=1))[0]
+        return arr[idx[0]] if idx.size else None
+
+    u_centre = at((0.5, 0.5, 0.5))
+    assert u_centre is not None
+    np.testing.assert_allclose(u_centre, 0.0, atol=1e-12)
+
+    ref = at((0, 0, 0))
+    assert ref is not None
+    for c in [(L, 0, 0), (0, L, 0), (0, 0, L), (L, L, 0), (L, 0, L), (0, L, L), (L, L, L)]:
+        u_c = at(c)
+        assert u_c is not None
+        np.testing.assert_allclose(u_c, ref, atol=1e-10)
+
+    for p_master, p_slave in (
+        ((0, 0.5, 0.5), (L, 0.5, 0.5)),
+        ((0.5, 0, 0.5), (0.5, L, 0.5)),
+        ((0.5, 0.5, 0), (0.5, 0.5, L)),
+    ):
+        u_m = at(p_master); u_s = at(p_slave)
+        assert u_m is not None and u_s is not None
+        np.testing.assert_allclose(u_m, u_s, atol=1e-10)
+
+
 def test_periodic_ud_tow_effective_stiffness_is_symmetric_and_positive_definite():
     problem = RVEProblem.from_config(_ud_tow_config(mesh_n=8))
     from b3_tex.backends.dolfinx_periodic_backend import solve

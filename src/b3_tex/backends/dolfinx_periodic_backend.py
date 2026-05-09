@@ -58,18 +58,36 @@ def _voigt_strain(u, ufl_module):
 
 
 def _build_pin_bcs(V, mesh):
-    """Pin u_x, u_y, u_z independently at the (0,0,0) corner via sub-spaces."""
+    """Pin u_x, u_y, u_z independently at an interior node via sub-spaces.
+
+    The pin is placed at the geometric centre of the box, which is interior to
+    the FE mesh and therefore neither a slave nor a master of any periodic
+    chain. Pinning a corner DOF (which is a multi-axis master in the cascading
+    chain) is silently overridden by ``dolfinx_mpc`` and leaves a residual
+    rigid translation in ``u_tilde`` even though the homogenized stress is
+    correct.
+    """
     import dolfinx
+
+    bbox = mesh.geometry.x
+    cx = float(0.5 * (bbox[:, 0].min() + bbox[:, 0].max()))
+    cy = float(0.5 * (bbox[:, 1].min() + bbox[:, 1].max()))
+    cz = float(0.5 * (bbox[:, 2].min() + bbox[:, 2].max()))
+    centre = (cx, cy, cz)
 
     bcs = []
     for comp in range(3):
         V_sub = V.sub(comp)
         V_sub_c, _ = V_sub.collapse()
 
-        def at_origin(x):
-            return np.isclose(x[0], 0.0) & np.isclose(x[1], 0.0) & np.isclose(x[2], 0.0)
+        def at_centre(x, c=centre):
+            return (
+                np.isclose(x[0], c[0])
+                & np.isclose(x[1], c[1])
+                & np.isclose(x[2], c[2])
+            )
 
-        dofs = dolfinx.fem.locate_dofs_geometrical((V_sub, V_sub_c), at_origin)
+        dofs = dolfinx.fem.locate_dofs_geometrical((V_sub, V_sub_c), at_centre)
         zero = dolfinx.fem.Function(V_sub_c)
         bcs.append(dolfinx.fem.dirichletbc(zero, dofs, V_sub))
     return bcs
