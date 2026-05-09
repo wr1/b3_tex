@@ -48,6 +48,21 @@ b3-tex solve     examples/ud_tow.yaml --out results
 `solve` writes the effective stiffness and the six loadcase strain/stress
 columns to `results/C_eff.npz`.
 
+For the visualization figures (`pip install -e ".[viz]"` first, plus a system
+`typst` binary):
+
+```sh
+bash examples/run_visualization.sh
+```
+
+writes:
+
+* `results/c_eff_vs_reference.png` — Voigt / Reuss / MT / FE diagonal bars,
+* `results/cylinder_geometry.png` — slice through the implicit phase field,
+* `results/uniaxial_deformation_iso.png` — six KUBC loadcases (3 axial,
+  3 shear) rendered in PyVista, with a typst-compiled inputs/outputs/BC
+  table composited underneath.
+
 ## Tests
 
 ```sh

@@ -18,6 +18,13 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+viz = [
+  "matplotlib>=3.7",
+  "pyvista>=0.43",
+  "scipy>=1.10",
+  "scikit-image>=0.22",
+  "pillow>=10.0",
+]
 
 [project.scripts]
 b3-tex = "b3_tex.cli:main"
