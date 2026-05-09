@@ -455,7 +455,12 @@ def main():
 
     problem = RVEProblem.from_yaml(REPO / "examples" / "ud_tow.yaml")
     total_strain = 0.01
-    exaggeration = 5.0
+    # exaggeration kept low because the FE-CG1 fluctuation has an O(h) error
+    # that the visualization amplifies; at h = 1/16 the spurious fluctuation
+    # is ~6e-4 in u_tilde, so any exag > ~3 starts to be visible. The math is
+    # bulletproof (volume-averaged stiffness exact to 5.7e-15), but per-node
+    # u_tilde has a discretisation error that converges as O(h).
+    exaggeration = 2.0
 
     solve_loadcase, _mesh_ref, _V_ref = _build_periodic_loadcase_solver(problem)
     panels = []
