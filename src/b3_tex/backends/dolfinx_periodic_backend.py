@@ -94,7 +94,15 @@ def _build_pin_bcs(V, mesh):
 
 
 def _build_periodic_mpc(V, problem: RVEProblem, bcs):
-    """Add three non-overlapping periodic constraints (axis 0, 1, 2)."""
+    """Add 7 non-overlapping periodic constraints: 3 face + 3 edge + 1 corner.
+
+    Following the canonical pattern from dolfinx_mpc's `demo_periodic_gep.py`,
+    each slave DOF is assigned to **exactly one** constraint; the relation
+    function shifts 1 coordinate for face slaves, 2 for edge slaves, and 3 for
+    the corner slave. Crucially, this avoids relying on dolfinx_mpc's chain
+    resolution for cascading constraints (which silently produces wrong master
+    coordinates and a non-zero spurious fluctuation field).
+    """
     import dolfinx_mpc
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
@@ -102,30 +110,82 @@ def _build_periodic_mpc(V, problem: RVEProblem, bcs):
 
     mpc = dolfinx_mpc.MultiPointConstraint(V)
 
-    def slave_x(x, Lx=Lx, Ly=Ly, Lz=Lz, tol=tol):
+    # 3 face constraints (interior of each upper face, excluding edges)
+    def face_x(x, Lx=Lx, Ly=Ly, Lz=Lz, tol=tol):
         return np.logical_and(
             np.isclose(x[0], Lx),
             np.logical_and(x[1] < Ly - tol, x[2] < Lz - tol),
         )
 
-    def relation_x(x, Lx=Lx):
+    def face_y(x, Ly=Ly, Lx=Lx, Lz=Lz, tol=tol):
+        return np.logical_and(
+            np.isclose(x[1], Ly),
+            np.logical_and(x[0] < Lx - tol, x[2] < Lz - tol),
+        )
+
+    def face_z(x, Lz=Lz, Lx=Lx, Ly=Ly, tol=tol):
+        return np.logical_and(
+            np.isclose(x[2], Lz),
+            np.logical_and(x[0] < Lx - tol, x[1] < Ly - tol),
+        )
+
+    def rel_face_x(x, Lx=Lx):
         out = x.copy(); out[0] -= Lx; return out
 
-    def slave_y(x, Ly=Ly, Lz=Lz, tol=tol):
-        return np.logical_and(np.isclose(x[1], Ly), x[2] < Lz - tol)
-
-    def relation_y(x, Ly=Ly):
+    def rel_face_y(x, Ly=Ly):
         out = x.copy(); out[1] -= Ly; return out
 
-    def slave_z(x, Lz=Lz):
-        return np.isclose(x[2], Lz)
-
-    def relation_z(x, Lz=Lz):
+    def rel_face_z(x, Lz=Lz):
         out = x.copy(); out[2] -= Lz; return out
 
-    mpc.create_periodic_constraint_geometrical(V, slave_x, relation_x, bcs=bcs)
-    mpc.create_periodic_constraint_geometrical(V, slave_y, relation_y, bcs=bcs)
-    mpc.create_periodic_constraint_geometrical(V, slave_z, relation_z, bcs=bcs)
+    mpc.create_periodic_constraint_geometrical(V, face_x, rel_face_x, bcs=bcs)
+    mpc.create_periodic_constraint_geometrical(V, face_y, rel_face_y, bcs=bcs)
+    mpc.create_periodic_constraint_geometrical(V, face_z, rel_face_z, bcs=bcs)
+
+    # 3 edge constraints (intersection of two upper faces, excluding the corner)
+    def edge_xy(x, Lx=Lx, Ly=Ly, Lz=Lz, tol=tol):
+        return np.logical_and(
+            np.logical_and(np.isclose(x[0], Lx), np.isclose(x[1], Ly)),
+            x[2] < Lz - tol,
+        )
+
+    def edge_xz(x, Lx=Lx, Lz=Lz, Ly=Ly, tol=tol):
+        return np.logical_and(
+            np.logical_and(np.isclose(x[0], Lx), np.isclose(x[2], Lz)),
+            x[1] < Ly - tol,
+        )
+
+    def edge_yz(x, Ly=Ly, Lz=Lz, Lx=Lx, tol=tol):
+        return np.logical_and(
+            np.logical_and(np.isclose(x[1], Ly), np.isclose(x[2], Lz)),
+            x[0] < Lx - tol,
+        )
+
+    def rel_edge_xy(x, Lx=Lx, Ly=Ly):
+        out = x.copy(); out[0] -= Lx; out[1] -= Ly; return out
+
+    def rel_edge_xz(x, Lx=Lx, Lz=Lz):
+        out = x.copy(); out[0] -= Lx; out[2] -= Lz; return out
+
+    def rel_edge_yz(x, Ly=Ly, Lz=Lz):
+        out = x.copy(); out[1] -= Ly; out[2] -= Lz; return out
+
+    mpc.create_periodic_constraint_geometrical(V, edge_xy, rel_edge_xy, bcs=bcs)
+    mpc.create_periodic_constraint_geometrical(V, edge_xz, rel_edge_xz, bcs=bcs)
+    mpc.create_periodic_constraint_geometrical(V, edge_yz, rel_edge_yz, bcs=bcs)
+
+    # 1 corner constraint
+    def corner(x, Lx=Lx, Ly=Ly, Lz=Lz):
+        return np.logical_and(
+            np.isclose(x[0], Lx),
+            np.logical_and(np.isclose(x[1], Ly), np.isclose(x[2], Lz)),
+        )
+
+    def rel_corner(x, Lx=Lx, Ly=Ly, Lz=Lz):
+        out = x.copy(); out[0] -= Lx; out[1] -= Ly; out[2] -= Lz; return out
+
+    mpc.create_periodic_constraint_geometrical(V, corner, rel_corner, bcs=bcs)
+
     mpc.finalize()
     return mpc
 
