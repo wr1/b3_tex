@@ -1,0 +1,47 @@
+# 2x2 plain-weave RVE with sinusoidal yarn paths and Chamis-derived UD stiffness.
+# Geometry follows the canonical plain-weave pattern: 2 warps along x and
+# 2 wefts along y, undulating in z so each warp goes over one weft and under
+# the next. Period = Lx/2 = Ly/2 (two repeats per cube). The unit cell is
+# periodic in all three axes.
+#
+# Modelled after cmpp's plain-weave test case (pw1.xml-style); the constituent
+# values are typical glass/epoxy.
+
+domain:
+  size: [1.0, 1.0, 0.4]
+  mesh_resolution: [24, 24, 12]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 70.0e9
+    e_t: 70.0e9
+    g_lt: 28.0e9
+    nu_lt: 0.25
+    nu_tt: 0.25
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.65
+
+field:
+  type: plain_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.4]
+  n_warp: 2
+  n_weft: 2
+  yarn_radius: 0.075
+  amplitude: 0.08
+
+solver:
+  backend: dolfinx_periodic

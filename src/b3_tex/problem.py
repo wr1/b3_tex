@@ -9,7 +9,15 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from b3_tex.fields import CylinderYarnField, MultiStraightYarnField, PhaseField, StraightYarn
+from b3_tex.fields import (
+    CylinderYarnField,
+    MultiStraightYarnField,
+    PhaseField,
+    SinusoidalYarn,
+    StraightYarn,
+    WeaveField,
+    plain_weave_yarns,
+)
 from b3_tex.materials import Material
 
 
@@ -44,6 +52,40 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             axis_direction=np.asarray(config["axis_direction"], dtype=float),
             radius=float(config["radius"]),
         )
+    if kind == "plain_weave":
+        matrix_name = str(config["matrix_material"])
+        yarn_name = str(config["yarn_material"])
+        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+            if name not in materials:
+                raise ValueError(f"{label} {name!r} is not in materials")
+        domain_size = tuple(float(s) for s in config["domain_size"])
+        yarns = plain_weave_yarns(
+            domain_size=domain_size,
+            n_warp=int(config["n_warp"]),
+            n_weft=int(config["n_weft"]),
+            yarn_radius=float(config["yarn_radius"]),
+            amplitude=float(config["amplitude"]),
+        )
+        return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
+    if kind == "weave":
+        matrix_name = str(config["matrix_material"])
+        yarn_name = str(config["yarn_material"])
+        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+            if name not in materials:
+                raise ValueError(f"{label} {name!r} is not in materials")
+        yarns = tuple(
+            SinusoidalYarn(
+                axis=str(y["axis"]),
+                inplane_position=float(y["inplane_position"]),
+                z_mid=float(y["z_mid"]),
+                amplitude=float(y["amplitude"]),
+                period=float(y["period"]),
+                phase=float(y.get("phase", 0.0)),
+                radius=float(y["radius"]),
+            )
+            for y in config["yarns"]
+        )
+        return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
     if kind == "multi_straight_yarn":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
