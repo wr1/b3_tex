@@ -40,7 +40,9 @@ field:
   domain_size: [1.0, 1.0, 0.4]
   n_warp: 2
   n_weft: 2
-  yarn_radius: 0.075
+  # Elliptical cross-section: flat ribbon, ~3:1 aspect ratio (typical woven yarn).
+  yarn_half_width: 0.20
+  yarn_half_height: 0.07
   amplitude: 0.08
 
 solver:

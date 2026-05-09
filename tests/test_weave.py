@@ -12,7 +12,7 @@ from b3_tex.problem import RVEProblem
 def test_sinusoidal_yarn_centerline_returns_yarn():
     yarn = SinusoidalYarn(
         axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, radius=0.05,
+        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
     )
     pts = np.array([[0.25, 0.5, 0.2 + 0.05 * np.sin(2 * np.pi * 0.25)]])
     assert yarn.contains(pts)[0]
@@ -21,7 +21,7 @@ def test_sinusoidal_yarn_centerline_returns_yarn():
 def test_sinusoidal_yarn_off_centerline_outside():
     yarn = SinusoidalYarn(
         axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, radius=0.05,
+        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
     )
     pts = np.array([[0.25, 0.5, 0.5]])  # well above centerline
     assert not yarn.contains(pts)[0]
@@ -30,7 +30,7 @@ def test_sinusoidal_yarn_off_centerline_outside():
 def test_sinusoidal_yarn_local_tangent_has_z_slope_nonzero():
     yarn = SinusoidalYarn(
         axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, radius=0.05,
+        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
     )
     pts = np.array([[0.0, 0.5, 0.2]])  # centerline at x=0; tangent slope = amp*2pi/period * cos(0) > 0
     R = yarn.rotation_at(pts)
@@ -42,7 +42,7 @@ def test_sinusoidal_yarn_local_tangent_has_z_slope_nonzero():
 def test_sinusoidal_yarn_rotation_is_orthonormal():
     yarn = SinusoidalYarn(
         axis="y", inplane_position=0.3, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.5, radius=0.05,
+        amplitude=0.05, period=1.0, phase=0.5, half_width=0.05, half_height=0.05,
     )
     pts = np.array([[0.3, 0.4, 0.2]])
     R = yarn.rotation_at(pts)[0]
@@ -53,7 +53,7 @@ def test_plain_weave_yarns_count():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
         n_warp=2, n_weft=2,
-        yarn_radius=0.05, amplitude=0.05,
+        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
     )
     assert len(yarns) == 4
     assert sum(1 for y in yarns if y.axis == "x") == 2
@@ -64,7 +64,7 @@ def test_plain_weave_warp_phases_alternate():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
         n_warp=2, n_weft=2,
-        yarn_radius=0.05, amplitude=0.05,
+        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
     )
     warps = [y for y in yarns if y.axis == "x"]
     assert abs(warps[0].phase - 0.0) < 1e-12
@@ -75,7 +75,7 @@ def test_weave_field_classifies_yarn_at_centerline_intersection():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
         n_warp=2, n_weft=2,
-        yarn_radius=0.075, amplitude=0.08,
+        yarn_half_width=0.075, yarn_half_height=0.075, amplitude=0.08,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
     # The warp at y=0.25 (j=0, phase=0) passes through z = 0.2 + 0.08 * sin(2pi*0.25/0.5) = 0.2.
@@ -89,7 +89,7 @@ def test_weave_field_matrix_outside_yarns():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
         n_warp=2, n_weft=2,
-        yarn_radius=0.05, amplitude=0.05,
+        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
     samples = field.sample(np.array([[0.0, 0.0, 0.0]]))
@@ -112,7 +112,7 @@ def test_problem_from_config_plain_weave():
             "yarn_material": "yarn",
             "domain_size": [1.0, 1.0, 0.4],
             "n_warp": 2, "n_weft": 2,
-            "yarn_radius": 0.075, "amplitude": 0.08,
+            "yarn_half_width": 0.20, "yarn_half_height": 0.07, "amplitude": 0.08,
         },
     }
     problem = RVEProblem.from_config(cfg)
@@ -137,9 +137,11 @@ def test_problem_from_config_weave_explicit_yarns():
             "yarn_material": "yarn",
             "yarns": [
                 {"axis": "x", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 0.5, "phase": 0.0, "radius": 0.075},
+                 "amplitude": 0.08, "period": 0.5, "phase": 0.0,
+                 "half_width": 0.20, "half_height": 0.07},
                 {"axis": "y", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 0.5, "phase": np.pi, "radius": 0.075},
+                 "amplitude": 0.08, "period": 0.5, "phase": np.pi,
+                 "half_width": 0.20, "half_height": 0.07},
             ],
         },
     }

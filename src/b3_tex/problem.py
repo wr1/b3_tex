@@ -63,7 +63,8 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             domain_size=domain_size,
             n_warp=int(config["n_warp"]),
             n_weft=int(config["n_weft"]),
-            yarn_radius=float(config["yarn_radius"]),
+            yarn_half_width=float(config["yarn_half_width"]),
+            yarn_half_height=float(config["yarn_half_height"]),
             amplitude=float(config["amplitude"]),
         )
         return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
@@ -81,7 +82,8 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
                 amplitude=float(y["amplitude"]),
                 period=float(y["period"]),
                 phase=float(y.get("phase", 0.0)),
-                radius=float(y["radius"]),
+                half_width=float(y["half_width"]),
+                half_height=float(y["half_height"]),
             )
             for y in config["yarns"]
         )

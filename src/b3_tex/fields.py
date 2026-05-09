@@ -145,17 +145,18 @@ _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 @dataclass(frozen=True)
 class SinusoidalYarn:
-    """A yarn whose centerline is sinusoidal in the out-of-plane direction.
+    """A yarn with a sinusoidal centerline and an elliptical cross-section.
 
     A warp yarn running along ``x`` at fixed ``y_pos`` undulates in ``z``:
 
         centerline(s) = (s, y_pos, z_mid + amplitude * sin(2*pi*s/period + phase))
 
-    and is straight in the in-plane perpendicular direction. The local fibre
-    direction at any point is the unit tangent of the centerline at the
-    closest projection. For small ``amplitude * 2*pi / period`` (typical for
-    woven composites) the closest projection onto the centerline is well
-    approximated by the running-axis coordinate of the query point.
+    The cross-section perpendicular to the centerline tangent is an ellipse
+    with in-plane semi-axis ``half_width`` (along the perpendicular in-plane
+    axis) and out-of-plane semi-axis ``half_height`` (along the tangent's
+    normal in the (running-axis, z) plane). For typical woven yarns
+    ``half_width > half_height`` (flat ribbon). For ``half_width ==
+    half_height`` the cross-section is circular.
     """
 
     axis: str  # "x" or "y" — the direction along which the yarn runs
@@ -164,13 +165,14 @@ class SinusoidalYarn:
     amplitude: float
     period: float
     phase: float
-    radius: float
+    half_width: float    # in-plane semi-axis (perpendicular to running axis, in plane)
+    half_height: float   # out-of-plane semi-axis (perpendicular to centerline tangent)
 
     def __post_init__(self) -> None:
         if self.axis not in ("x", "y"):
             raise ValueError("SinusoidalYarn axis must be 'x' or 'y'")
-        if self.radius <= 0:
-            raise ValueError("radius must be positive")
+        if self.half_width <= 0 or self.half_height <= 0:
+            raise ValueError("half_width and half_height must be positive")
         if self.period <= 0:
             raise ValueError("period must be positive")
 
@@ -197,16 +199,13 @@ class SinusoidalYarn:
         s = points[:, ra]
         dy = points[:, ip] - self.inplane_position
         dz = points[:, 2] - self._z_at(s)
-        # Perpendicular distance, projected out the tangent in (running, z) plane:
-        # tangent = (1, 0, dz/ds); the (dy, dz) deviation projects onto (1, dz/ds).
-        # For small amplitude * 2pi / period we ignore the projection correction;
-        # for moderate undulation we keep it.
         slope = self._dz_ds_at(s)
         denom = np.sqrt(1.0 + slope * slope)
-        # In-plane deviation is already perpendicular to tangent in (running, ip) plane.
-        # The (running, z) plane gives a perpendicular distance:
+        # Distance perpendicular to tangent, in the (running-axis, z) plane:
         perp_z = np.abs(dz) / denom
-        return np.sqrt(dy * dy + perp_z * perp_z) <= self.radius
+        # In-plane deviation is already perpendicular to the tangent.
+        # Elliptical containment: (dy / half_width)^2 + (dz_perp / half_height)^2 <= 1.
+        return (dy / self.half_width) ** 2 + (perp_z / self.half_height) ** 2 <= 1.0
 
     def rotation_at(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return one rotation matrix per point, with first column = unit tangent."""
@@ -276,18 +275,20 @@ def plain_weave_yarns(
     domain_size: tuple[float, float, float],
     n_warp: int,
     n_weft: int,
-    yarn_radius: float,
+    yarn_half_width: float,
+    yarn_half_height: float,
     amplitude: float,
 ) -> tuple[SinusoidalYarn, ...]:
     """Build a tuple of SinusoidalYarn matching a plain-weave (1x1) pattern.
 
     Yarn count: ``n_warp`` warp yarns evenly spaced in y, plus ``n_weft`` weft
-    yarns evenly spaced in x. The warp at row ``j`` has phase
-    ``phase_warp_j = j * pi / n_weft`` so adjacent warps cross opposite wefts —
-    actually with n_warp == n_weft the phase pattern is just alternating
-    0 / pi between adjacent warps. The weft phase is offset by pi/2 relative to
-    the warp's average so that warp and weft are vertically opposite at every
-    crossing point (over/under).
+    yarns evenly spaced in x. Adjacent warps alternate phase 0 / pi so each
+    crosses the wefts in opposite phase. The weft phase is offset by pi
+    relative to the warp so warp and weft are over/under at every crossing.
+
+    Yarn cross-section is an ellipse with in-plane semi-axis ``yarn_half_width``
+    and out-of-plane semi-axis ``yarn_half_height`` (typically half_width >
+    half_height for woven textiles).
     """
     Lx, Ly, Lz = domain_size
     z_mid = 0.5 * Lz
@@ -301,14 +302,16 @@ def plain_weave_yarns(
         phase = (j % 2) * np.pi
         yarns.append(SinusoidalYarn(
             axis="x", inplane_position=y_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_x, phase=phase, radius=yarn_radius,
+            amplitude=amplitude, period=period_x, phase=phase,
+            half_width=yarn_half_width, half_height=yarn_half_height,
         ))
     for i in range(n_weft):
         x_pos = (i + 0.5) * Lx / n_weft
         phase = (i % 2) * np.pi + np.pi
         yarns.append(SinusoidalYarn(
             axis="y", inplane_position=x_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_y, phase=phase, radius=yarn_radius,
+            amplitude=amplitude, period=period_y, phase=phase,
+            half_width=yarn_half_width, half_height=yarn_half_height,
         ))
     return tuple(yarns)
 

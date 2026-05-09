@@ -1,0 +1,47 @@
+# Densely-packed plain weave with flat tows.
+#
+# 2 warp + 2 weft yarns (1×1 plain), each yarn an elliptical ribbon: ~6.5:1
+# in-plane / out-of-plane aspect ratio. Tow half-width 0.235 leaves only a
+# ~0.03 in-plane gap between adjacent tows so the in-plane fill is close to
+# unity. Amplitude 0.04 gives clean over/under crossings without
+# interpenetration (2·amp > half_height_warp + half_height_weft).
+
+domain:
+  size: [1.0, 1.0, 0.16]
+  mesh_resolution: [32, 32, 8]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9
+    e_t: 15.0e9
+    g_lt: 24.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.70
+
+field:
+  type: plain_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.16]
+  n_warp: 2
+  n_weft: 2
+  yarn_half_width: 0.235      # nearly touches neighbouring tow (gap ≈ 0.03)
+  yarn_half_height: 0.035     # flat ribbon, aspect ratio ≈ 6.7:1
+  amplitude: 0.04             # over/under crossing, no interpenetration
+
+solver:
+  backend: dolfinx_periodic
