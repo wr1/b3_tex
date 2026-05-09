@@ -226,6 +226,15 @@ def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> Non
                 "title_font_size": 18, "label_font_size": 14, "n_labels": 4,
             } if k == 5 else None,
         )
+        if "phase" in deformed_surface.point_data:
+            interface = deformed_surface.contour(
+                isosurfaces=[0.5], scalars="phase"
+            )
+            if interface.n_points > 0:
+                plotter.add_mesh(
+                    interface, color="white", line_width=3.0, render_lines_as_tubes=False,
+                    show_scalar_bar=False,
+                )
         plotter.add_text(label, position="upper_left", font_size=18, color="black")
         plotter.camera_position = [cam_pos, cam_focal, cam_up]
         plotter.add_axes(line_width=3, color="black")
@@ -241,7 +250,59 @@ def _typst_escape(s: str) -> str:
     return out.replace("\n", " ")
 
 
-def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: Path) -> None:
+def _measure_periodic_residuals(solve_loadcase, V, total_strain: float) -> dict:
+    """Compute periodic-BC verification residuals across all 6 loadcases.
+
+    Returns ``dict`` of worst-case residuals to bake into the figure so the
+    correctness of the periodic constraint is visible, not just claimed.
+    """
+    coords = V.tabulate_dof_coordinates()
+    L = float(coords[:, 0].max() - coords[:, 0].min())
+
+    def at(p, tol=1e-9):
+        idx = np.where(np.all(np.isclose(coords, p, atol=tol), axis=1))[0]
+        return idx[0] if idx.size else None
+
+    pairs = []
+    for vlo in (0.0, 0.5, L):
+        for wlo in (0.0, 0.5, L):
+            pairs.append(((0.0, vlo, wlo), (L, vlo, wlo)))
+            pairs.append(((vlo, 0.0, wlo), (vlo, L, wlo)))
+            pairs.append(((vlo, wlo, 0.0), (vlo, wlo, L)))
+    corners = [(0,0,0),(L,0,0),(0,L,0),(0,0,L),(L,L,0),(L,0,L),(0,L,L),(L,L,L)]
+    centre = (0.5 * L, 0.5 * L, 0.5 * L)
+
+    worst_pair = 0.0
+    worst_corners = 0.0
+    worst_centre = 0.0
+    for k in range(6):
+        _, _, u_sol, _ = solve_loadcase(k, total_strain)
+        arr = u_sol.x.array.reshape(-1, 3)
+
+        ref_corner = arr[at(corners[0])]
+        for c in corners[1:]:
+            i = at(c)
+            if i is not None:
+                worst_corners = max(worst_corners, float(np.linalg.norm(arr[i] - ref_corner)))
+
+        for p_m, p_s in pairs:
+            i_m, i_s = at(p_m), at(p_s)
+            if i_m is None or i_s is None:
+                continue
+            worst_pair = max(worst_pair, float(np.linalg.norm(arr[i_s] - arr[i_m])))
+
+        i_c = at(centre)
+        if i_c is not None:
+            worst_centre = max(worst_centre, float(np.linalg.norm(arr[i_c])))
+    return {
+        "u_tilde slave-master pairs": worst_pair,
+        "u_tilde 8 corners agree": worst_corners,
+        "u_tilde at centre pin": worst_centre,
+    }
+
+
+def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: Path,
+                        verification: dict | None = None) -> None:
     rows_in = [["material / geometry", "values"]]
     for name, m in problem.materials.items():
         ec = engineering_constants_transverse_iso(m.stiffness)
@@ -288,7 +349,8 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
     rows_bc.append([
         "this figure (visualization)",
         "Periodic: u(x) = eps_total * E_k . x + u_tilde(x), u_tilde periodic on opposite faces, "
-        "non-overlapping slave masks per axis, 3 sub-space pins at origin",
+        "non-overlapping slave masks per axis (axis 0 excludes y=L,z=L sub-edges; "
+        "axis 1 excludes z=L; axis 2 takes rest), 3 sub-space pins at the geometric centre",
     ])
     rows_bc.append([
         "homogenization solver (b3-tex solve --backend periodic)",
@@ -298,6 +360,12 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         "KUBC alternative (b3-tex solve --backend kubc)",
         "u = E_k . x on the entire boundary; gives an upper bound for C_eff",
     ])
+
+    rows_verify: list[list[str]] = []
+    if verification is not None:
+        rows_verify.append(["check", "worst residual (across all 6 loadcases)"])
+        for k, v in verification.items():
+            rows_verify.append([k, f"{v:.2e}"])
 
     def render_table(header_text: str, rows: list[list[str]], n_cols: int = 2) -> str:
         cells = ", ".join(
@@ -320,8 +388,12 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
     matrix_block = render_table(
         "FULL C_eff [GPa]  (Voigt order 11,22,33,23,13,12)", rows_matrix, n_cols=7
     ) if rows_matrix else ""
+    verify_block = render_table(
+        "PERIODIC-BC VERIFICATION  (machine-precision residuals over all 6 loadcases)",
+        rows_verify,
+    ) if rows_verify else ""
     typst_doc = (
-        "#set page(width: 36cm, height: 17cm, margin: (x: 0.6cm, y: 0.4cm))\n"
+        "#set page(width: 36cm, height: 19cm, margin: (x: 0.6cm, y: 0.4cm))\n"
         "#set text(size: 10pt, font: \"Liberation Sans\")\n"
         "#stack(\n"
         "  spacing: 0.4cm,\n"
@@ -333,6 +405,7 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         "  ),\n"
         f"  [{matrix_block}],\n"
         f"  [{render_table('BOUNDARY CONDITIONS', rows_bc)}],\n"
+        f"  [{verify_block}],\n"
         ")\n"
     )
 
@@ -382,16 +455,22 @@ def main():
 
     problem = RVEProblem.from_yaml(REPO / "examples" / "ud_tow.yaml")
     total_strain = 0.01
-    exaggeration = 25.0
+    exaggeration = 15.0
 
     solve_loadcase, _mesh_ref, _V_ref = _build_periodic_loadcase_solver(problem)
     panels = []
     overall_vm = []
+    centroids = _cell_centroids(_mesh_ref)
+    samples = problem.field.sample(centroids)
+    yarn_name = problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    phase = np.array([1.0 if s.material == yarn_name else 0.0 for s in samples])
     for k, (label, kind) in enumerate(_LOADCASE_LABELS):
         mesh, V, u_sol, C_func = solve_loadcase(k, total_strain)
         vm = _von_mises_per_cell(mesh, u_sol, C_func)
         overall_vm.append(vm)
         grid, grid_pt = _build_pyvista_grid(V, u_sol, vm, total_strain, k)
+        grid.cell_data["phase"] = phase
+        grid_pt = grid.cell_data_to_point_data()
         panels.append((label, kind, grid, grid_pt))
 
     vm_clim = np.percentile(np.concatenate(overall_vm), [70.0, 92.0])
@@ -402,11 +481,14 @@ def main():
     table_png = results_dir / "_loadcases_table.png"
     final_png = results_dir / "uniaxial_deformation_iso.png"
 
+    verification = _measure_periodic_residuals(solve_loadcase, _V_ref, total_strain)
     _render_mesh_panel(problem, mesh_png)
     _render_3d_grid(panels, vm_clim, exaggeration, loadcases_png)
-    _render_typst_table(problem, results_dir / "C_eff.npz", table_png)
+    _render_typst_table(problem, results_dir / "C_eff.npz", table_png, verification=verification)
     _composite([mesh_png, loadcases_png, table_png], final_png)
     print(f"wrote {final_png}")
+    for k, v in verification.items():
+        print(f"  {k}: {v:.3e}")
 
 
 if __name__ == "__main__":
