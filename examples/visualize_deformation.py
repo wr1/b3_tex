@@ -32,6 +32,10 @@ from b3_tex.backends.dolfinx_backend import (
     _global_stiffness_at_cell_centroids,
     _voigt_strain,
 )
+from b3_tex.backends.dolfinx_periodic_backend import (
+    _build_periodic_mpc,
+    _build_pin_bcs,
+)
 from b3_tex.problem import RVEProblem
 from b3_tex.reference import engineering_constants_transverse_iso
 
@@ -58,11 +62,16 @@ _UNIT_TENSORS = (
 )
 
 
-def _solve_kubc(problem: RVEProblem, voigt_index: int, total_strain: float):
-    """Apply KUBC ``u = total_strain * E_k . x`` and return ``(V, u_sol, C_func)``."""
+def _build_periodic_loadcase_solver(problem: RVEProblem):
+    """Set up the periodic-BC system once and return ``(solve_loadcase, mesh, V)``.
+
+    ``solve_loadcase(voigt_index, total_strain)`` applies ``E = total_strain * E_k``
+    and writes ``u_tilde`` into a stable ``u_sol``, returning ``(mesh, V, u_sol, C_func)``.
+    """
+    import dolfinx_mpc
+
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
-    E_tensor = total_strain * _UNIT_TENSORS[voigt_index]
 
     mesh = dolfinx.mesh.create_box(
         MPI.COMM_WORLD,
@@ -78,36 +87,33 @@ def _solve_kubc(problem: RVEProblem, voigt_index: int, total_strain: float):
     C_func.x.array[:] = _global_stiffness_at_cell_centroids(problem, centroids).reshape(-1)
     C_func.x.scatter_forward()
 
+    E_voigt = dolfinx.fem.Constant(mesh, np.zeros(6))
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
     a_form = ufl.inner(ufl.dot(C_func, _voigt_strain(u, ufl)), _voigt_strain(v, ufl)) * ufl.dx
-    L_form = ufl.inner(dolfinx.fem.Constant(mesh, np.zeros(3)), v) * ufl.dx
+    L_form = -ufl.inner(ufl.dot(C_func, E_voigt), _voigt_strain(v, ufl)) * ufl.dx
 
-    def on_boundary(x):
-        return (
-            np.isclose(x[0], 0.0) | np.isclose(x[0], Lx)
-            | np.isclose(x[1], 0.0) | np.isclose(x[1], Ly)
-            | np.isclose(x[2], 0.0) | np.isclose(x[2], Lz)
-        )
+    bcs = _build_pin_bcs(V, mesh)
+    mpc = _build_periodic_mpc(V, problem, bcs)
 
-    boundary_dofs = dolfinx.fem.locate_dofs_geometrical(V, on_boundary)
-    bc_disp = dolfinx.fem.Function(V)
-    bc_disp.interpolate(lambda x, E=E_tensor: np.einsum("ij,jp->ip", E, x[:3]))
-    bc_disp.x.scatter_forward()
-    bc = dolfinx.fem.dirichletbc(bc_disp, boundary_dofs)
-
-    u_sol = dolfinx.fem.Function(V)
-    problem_solver = dolfinx.fem.petsc.LinearProblem(
-        a_form, L_form, u=u_sol, bcs=[bc],
+    u_sol = dolfinx.fem.Function(mpc.function_space, name="u_tilde")
+    linear_problem = dolfinx_mpc.LinearProblem(
+        a_form, L_form, mpc, bcs=bcs, u=u_sol,
         petsc_options_prefix="b3tex_viz_",
         petsc_options={
-            "ksp_type": "preonly",
-            "pc_type": "lu",
-            "pc_factor_mat_solver_type": "mumps",
+            "ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps",
         },
     )
-    problem_solver.solve()
-    return mesh, V, u_sol, C_func
+
+    def solve_loadcase(voigt_index: int, total_strain: float):
+        unit = np.zeros(6)
+        unit[voigt_index] = total_strain
+        E_voigt.value = unit
+        u_sol.x.array[:] = 0.0
+        linear_problem.solve()
+        return mesh, V, u_sol, C_func
+
+    return solve_loadcase, mesh, V
 
 
 def _von_mises_per_cell(mesh, u_sol, C_func):
@@ -131,42 +137,70 @@ def _von_mises_per_cell(mesh, u_sol, C_func):
     )
 
 
-def _build_pyvista_grid(V, u_sol, vm_per_cell):
+def _build_pyvista_grid(V, u_sol, vm_per_cell, total_strain, voigt_index):
+    """Build a PyVista grid with the *total* displacement ``u_total = E_k . x + u_tilde``,
+    so warping by it shows the full deformation (not just the periodic fluctuation)."""
     cells, cell_types, points = dolfinx.plot.vtk_mesh(V)
     grid = pv.UnstructuredGrid(cells, cell_types, points)
-    grid["u"] = u_sol.x.array.reshape(-1, 3)
+    E = total_strain * _UNIT_TENSORS[voigt_index]
+    pts = np.asarray(grid.points)
+    u_macro = pts @ E.T
+    u_tilde = u_sol.x.array.reshape(-1, 3)[: pts.shape[0]]
+    u_total = u_macro + u_tilde
+    u_total -= u_total.mean(axis=0, keepdims=True)
+    grid["u"] = u_total
     grid.cell_data["vm"] = vm_per_cell
     return grid, grid.cell_data_to_point_data()
 
 
 def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> None:
+    deformed_meshes = [
+        grid_pt.warp_by_vector("u", factor=exaggeration) for _, _, _, grid_pt in panels
+    ]
+    bounds = np.array([m.bounds for m in deformed_meshes])
+    xmin, ymin, zmin = bounds[:, 0::2].min(axis=0)
+    xmax, ymax, zmax = bounds[:, 1::2].max(axis=0)
+    cx, cy, cz = 0.5 * (xmin + xmax), 0.5 * (ymin + ymax), 0.5 * (zmin + zmax)
+    span = max(xmax - xmin, ymax - ymin, zmax - zmin) * 1.05
+    cam_pos = (cx + 1.8 * span, cy + 1.8 * span, cz + 1.4 * span)
+    cam_focal = (cx, cy, cz)
+    cam_up = (0.0, 0.0, 1.0)
+
     plotter = pv.Plotter(shape=(2, 3), off_screen=True, window_size=(2400, 1300))
-    for k, (label, _kind, grid, grid_pt) in enumerate(panels):
+    for k, ((label, _kind, _grid, _grid_pt), deformed) in enumerate(
+        zip(panels, deformed_meshes, strict=True)
+    ):
         row, col = divmod(k, 3)
         plotter.subplot(row, col)
-        deformed = grid_pt.warp_by_vector("u", factor=exaggeration)
-        plotter.add_mesh(grid.outline(), color="lightgrey", line_width=3, style="wireframe")
-        plotter.add_mesh(deformed.outline(), color="red", line_width=4)
-        contours = deformed.contour(isosurfaces=list(vm_clim), scalars="vm")
-        if contours.n_points > 0:
-            plotter.add_mesh(
-                contours, scalars="vm", cmap="plasma", opacity=0.22,
-                show_scalar_bar=(k == 5),
-                clim=tuple(vm_clim),
-                scalar_bar_args={
-                    "title": "von Mises [Pa]",
-                    "title_font_size": 18, "label_font_size": 14, "n_labels": 4,
-                } if k == 5 else None,
-            )
+        deformed_surface = deformed.extract_surface()
+        plotter.add_mesh(
+            deformed_surface,
+            scalars="vm",
+            cmap="plasma",
+            clim=tuple(vm_clim),
+            show_edges=True,
+            edge_color="black",
+            line_width=0.4,
+            opacity=1.0,
+            show_scalar_bar=(k == 5),
+            scalar_bar_args={
+                "title": "von Mises [Pa]",
+                "title_font_size": 18, "label_font_size": 14, "n_labels": 4,
+            } if k == 5 else None,
+        )
         plotter.add_text(label, position="upper_left", font_size=18, color="black")
-        plotter.view_isometric()
+        plotter.camera_position = [cam_pos, cam_focal, cam_up]
         plotter.add_axes(line_width=3, color="black")
     plotter.screenshot(str(out_path))
     plotter.close()
 
 
 def _typst_escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    """Escape typst markup characters so cell content renders as plain text."""
+    out = s.replace("\\", "\\\\")
+    for ch in ("*", "_", "[", "]", "#", "<", ">", "@", "~", "$"):
+        out = out.replace(ch, "\\" + ch)
+    return out.replace("\n", " ")
 
 
 def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: Path) -> None:
@@ -207,16 +241,21 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
     rows_bc = [["where", "boundary condition"]]
     rows_bc.append([
         "this figure (visualization)",
-        "KUBC: u = eps_total * E_k . x on the entire boundary, for each of the 6 unit Voigt strains",
+        "Periodic: u(x) = eps_total * E_k . x + u_tilde(x), u_tilde periodic on opposite faces, "
+        "non-overlapping slave masks per axis, 3 sub-space pins at origin",
     ])
     rows_bc.append([
-        "homogenization solver (b3-tex solve)",
-        "Same: KUBC, 6 unit Voigt strains; effective stiffness = volume-averaged stress per loadcase",
+        "homogenization solver (b3-tex solve --backend periodic)",
+        "Same periodic BC, 6 unit Voigt strains; effective stiffness = volume-averaged stress per loadcase",
+    ])
+    rows_bc.append([
+        "KUBC alternative (b3-tex solve --backend kubc)",
+        "u = E_k . x on the entire boundary; gives an upper bound for C_eff",
     ])
 
     def render_table(header_text: str, rows: list[list[str]]) -> str:
         cells = ", ".join(
-            f'[#text(size: 8pt)[#raw("{_typst_escape(c)}")]]'
+            f'[#text(size: 9pt)[{_typst_escape(c)}]]'
             for row in rows for c in row
         )
         return (
@@ -226,19 +265,22 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
             "  columns: (auto, 1fr),\n"
             "  inset: 5pt,\n"
             "  stroke: 0.4pt,\n"
-            "  align: (left, left),\n"
+            "  align: (left + top, left + top),\n"
             f"  {cells}\n"
             ")\n"
         )
 
     typst_doc = (
-        "#set page(width: 24cm, height: 9cm, margin: (x: 0.5cm, y: 0.4cm))\n"
+        "#set page(width: 32cm, height: 13cm, margin: (x: 0.6cm, y: 0.4cm))\n"
         "#set text(size: 10pt, font: \"Liberation Sans\")\n"
-        "#grid(\n"
-        "  columns: (1fr, 1fr, 1fr),\n"
-        "  column-gutter: 0.4cm,\n"
-        f"  [{render_table('INPUTS', rows_in)}],\n"
-        f"  [{render_table('OUTPUTS  (effective stiffness)', rows_out)}],\n"
+        "#stack(\n"
+        "  spacing: 0.4cm,\n"
+        "  grid(\n"
+        "    columns: (1fr, 1fr),\n"
+        "    column-gutter: 0.6cm,\n"
+        f"    [{render_table('INPUTS', rows_in)}],\n"
+        f"    [{render_table('OUTPUTS  (effective stiffness)', rows_out)}],\n"
+        "  ),\n"
         f"  [{render_table('BOUNDARY CONDITIONS', rows_bc)}],\n"
         ")\n"
     )
@@ -290,13 +332,14 @@ def main():
     total_strain = 0.01
     exaggeration = 25.0
 
+    solve_loadcase, _mesh_ref, _V_ref = _build_periodic_loadcase_solver(problem)
     panels = []
     overall_vm = []
     for k, (label, kind) in enumerate(_LOADCASE_LABELS):
-        mesh, V, u_sol, C_func = _solve_kubc(problem, k, total_strain)
+        mesh, V, u_sol, C_func = solve_loadcase(k, total_strain)
         vm = _von_mises_per_cell(mesh, u_sol, C_func)
         overall_vm.append(vm)
-        grid, grid_pt = _build_pyvista_grid(V, u_sol, vm)
+        grid, grid_pt = _build_pyvista_grid(V, u_sol, vm, total_strain, k)
         panels.append((label, kind, grid, grid_pt))
 
     vm_clim = np.percentile(np.concatenate(overall_vm), [70.0, 92.0])
