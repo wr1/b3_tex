@@ -153,6 +153,44 @@ def _build_pyvista_grid(V, u_sol, vm_per_cell, total_strain, voigt_index):
     return grid, grid.cell_data_to_point_data()
 
 
+def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
+    """Render the undeformed FE mesh with cells coloured by phase membership."""
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    nx, ny, nz = problem.mesh_resolution
+    mesh = dolfinx.mesh.create_box(
+        MPI.COMM_WORLD,
+        [np.array([0.0, 0.0, 0.0]), np.array([Lx, Ly, Lz])],
+        [nx, ny, nz],
+        cell_type=dolfinx.mesh.CellType.tetrahedron,
+    )
+    V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
+    centroids = _cell_centroids(mesh)
+    samples = problem.field.sample(centroids)
+    yarn_name = problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    phase = np.array([1.0 if s.material == yarn_name else 0.0 for s in samples])
+
+    cells, cell_types, points = dolfinx.plot.vtk_mesh(V)
+    grid = pv.UnstructuredGrid(cells, cell_types, points)
+    grid.cell_data["phase"] = phase
+
+    plotter = pv.Plotter(off_screen=True, window_size=(2400, 750))
+    plotter.add_mesh(
+        grid, scalars="phase", cmap=["#bcd0e4", "#cc4422"],
+        clim=(0.0, 1.0),
+        show_edges=True, edge_color="black", line_width=0.4,
+        opacity=1.0, show_scalar_bar=False,
+    )
+    plotter.add_text(
+        f"FE mesh (tet) — {nx}x{ny}x{nz} structured + {len(phase)} cells; "
+        f"yarn = red, matrix = blue (cell-centroid phase classification)",
+        position="upper_left", font_size=18, color="black",
+    )
+    plotter.view_isometric()
+    plotter.add_axes(line_width=3, color="black")
+    plotter.screenshot(str(out_path))
+    plotter.close()
+
+
 def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> None:
     deformed_meshes = [
         grid_pt.warp_by_vector("u", factor=exaggeration) for _, _, _, grid_pt in panels
@@ -227,6 +265,7 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
     rows_in.append(["mesh", f"{tuple(problem.mesh_resolution)} (tetrahedron)"])
 
     rows_out = [["effective constant", "value"]]
+    rows_matrix: list[list[str]] = []
     if c_eff_npz is not None and c_eff_npz.exists():
         data = np.load(c_eff_npz)
         C = data["effective_stiffness"]
@@ -235,6 +274,13 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         rows_out.append(["nu_xy, nu_xz, nu_yz", f"{-S[0,1]/S[0,0]:.3f}, {-S[0,2]/S[0,0]:.3f}, {-S[1,2]/S[1,1]:.3f}"])
         rows_out.append(["G_xy, G_xz, G_yz [GPa]", f"{1/S[5,5]/1e9:.2f}, {1/S[4,4]/1e9:.2f}, {1/S[3,3]/1e9:.2f}"])
         rows_out.append(["max diag [GPa]", f"{np.max(np.diag(C))/1e9:.2f}"])
+        labels = ["", "11", "22", "33", "23", "13", "12"]
+        rows_matrix.append(labels)
+        for i in range(6):
+            row = [labels[i + 1]]
+            for j in range(6):
+                row.append(f"{C[i, j] / 1e9:.2f}")
+            rows_matrix.append(row)
     else:
         rows_out.append(["(run b3-tex solve first)", "—"])
 
@@ -253,25 +299,29 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         "u = E_k . x on the entire boundary; gives an upper bound for C_eff",
     ])
 
-    def render_table(header_text: str, rows: list[list[str]]) -> str:
+    def render_table(header_text: str, rows: list[list[str]], n_cols: int = 2) -> str:
         cells = ", ".join(
             f'[#text(size: 9pt)[{_typst_escape(c)}]]'
             for row in rows for c in row
         )
+        cols_spec = "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
         return (
             f"#text(weight: \"bold\", size: 12pt)[{header_text}]\n"
             "#v(2pt)\n"
             "#table(\n"
-            "  columns: (auto, 1fr),\n"
+            f"  columns: {cols_spec},\n"
             "  inset: 5pt,\n"
             "  stroke: 0.4pt,\n"
-            "  align: (left + top, left + top),\n"
+            "  align: (left + top),\n"
             f"  {cells}\n"
             ")\n"
         )
 
+    matrix_block = render_table(
+        "FULL C_eff [GPa]  (Voigt order 11,22,33,23,13,12)", rows_matrix, n_cols=7
+    ) if rows_matrix else ""
     typst_doc = (
-        "#set page(width: 32cm, height: 13cm, margin: (x: 0.6cm, y: 0.4cm))\n"
+        "#set page(width: 36cm, height: 17cm, margin: (x: 0.6cm, y: 0.4cm))\n"
         "#set text(size: 10pt, font: \"Liberation Sans\")\n"
         "#stack(\n"
         "  spacing: 0.4cm,\n"
@@ -281,6 +331,7 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         f"    [{render_table('INPUTS', rows_in)}],\n"
         f"    [{render_table('OUTPUTS  (effective stiffness)', rows_out)}],\n"
         "  ),\n"
+        f"  [{matrix_block}],\n"
         f"  [{render_table('BOUNDARY CONDITIONS', rows_bc)}],\n"
         ")\n"
     )
@@ -302,10 +353,9 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         shutil.copy(rendered, out_path)
 
 
-def _composite(top_png: Path, bottom_png: Path, out_path: Path) -> None:
-    top = Image.open(top_png)
-    bottom = Image.open(bottom_png)
-    target_w = max(top.width, bottom.width)
+def _composite(parts: list[Path], out_path: Path) -> None:
+    images = [Image.open(p) for p in parts]
+    target_w = max(im.width for im in images)
 
     def fit_width(img, w):
         if img.width == w:
@@ -313,11 +363,13 @@ def _composite(top_png: Path, bottom_png: Path, out_path: Path) -> None:
         h = round(img.height * w / img.width)
         return img.resize((w, h), Image.LANCZOS)
 
-    top = fit_width(top, target_w)
-    bottom = fit_width(bottom, target_w)
-    composite = Image.new("RGB", (target_w, top.height + bottom.height), "white")
-    composite.paste(top, (0, 0))
-    composite.paste(bottom, (0, top.height))
+    images = [fit_width(im, target_w) for im in images]
+    total_h = sum(im.height for im in images)
+    composite = Image.new("RGB", (target_w, total_h), "white")
+    y = 0
+    for im in images:
+        composite.paste(im, (0, y))
+        y += im.height
     composite.save(out_path)
 
 
@@ -345,13 +397,15 @@ def main():
     vm_clim = np.percentile(np.concatenate(overall_vm), [70.0, 92.0])
 
     results_dir = REPO / "results"
-    top_png = results_dir / "_loadcases_3d.png"
-    bottom_png = results_dir / "_loadcases_table.png"
+    mesh_png = results_dir / "_mesh_panel.png"
+    loadcases_png = results_dir / "_loadcases_3d.png"
+    table_png = results_dir / "_loadcases_table.png"
     final_png = results_dir / "uniaxial_deformation_iso.png"
 
-    _render_3d_grid(panels, vm_clim, exaggeration, top_png)
-    _render_typst_table(problem, results_dir / "C_eff.npz", bottom_png)
-    _composite(top_png, bottom_png, final_png)
+    _render_mesh_panel(problem, mesh_png)
+    _render_3d_grid(panels, vm_clim, exaggeration, loadcases_png)
+    _render_typst_table(problem, results_dir / "C_eff.npz", table_png)
+    _composite([mesh_png, loadcases_png, table_png], final_png)
     print(f"wrote {final_png}")
 
 
