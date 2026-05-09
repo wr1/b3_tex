@@ -1,0 +1,34 @@
+# Single straight UD tow embedded in a matrix cube.
+# Yarn cylinder runs along the global x-axis through the cube centre.
+# Materials are HTA-like carbon fibre + epoxy matrix, in SI (Pa).
+
+domain:
+  size: [1.0, 1.0, 1.0]
+  mesh_resolution: [16, 16, 16]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: yarn
+    type: transverse_isotropic
+    e_l: 140.0e9
+    e_t: 10.0e9
+    g_lt: 5.0e9
+    nu_lt: 0.28
+    nu_tt: 0.40
+
+field:
+  type: cylinder_yarn
+  matrix_material: matrix
+  yarn_material: yarn
+  axis_point: [0.5, 0.5, 0.5]
+  axis_direction: [1.0, 0.0, 0.0]
+  radius: 0.4
+
+solver:
+  backend: dolfinx

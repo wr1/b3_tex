@@ -1,0 +1,169 @@
+"""Voigt / 4th-order tensor utilities for 3D linear elasticity.
+
+Conventions:
+
+* Voigt order is ``(11, 22, 33, 23, 13, 12)`` — i.e. ``VOIGT_PAIRS``.
+* Strain Voigt vectors use engineering shear: ``[e11, e22, e33, 2*e23, 2*e13, 2*e12]``.
+* Stress Voigt vectors are direct: ``[s11, s22, s33, s23, s13, s12]``.
+* Stiffness ``C_voigt`` satisfies ``s_voigt = C_voigt @ e_voigt`` (no factors of 2).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from numpy.typing import ArrayLike, NDArray
+
+VOIGT_PAIRS: tuple[tuple[int, int], ...] = (
+    (0, 0),
+    (1, 1),
+    (2, 2),
+    (1, 2),
+    (0, 2),
+    (0, 1),
+)
+
+_PAIR_OF_IJ = {
+    (0, 0): 0, (1, 1): 1, (2, 2): 2,
+    (1, 2): 3, (2, 1): 3,
+    (0, 2): 4, (2, 0): 4,
+    (0, 1): 5, (1, 0): 5,
+}
+
+
+def _check_3x3(value: ArrayLike, *, name: str) -> NDArray[np.float64]:
+    arr = np.asarray(value, dtype=float)
+    if arr.shape != (3, 3):
+        raise ValueError(f"{name} must have shape (3, 3), got {arr.shape}")
+    return arr
+
+
+def stiffness_voigt_to_tensor(c_voigt: ArrayLike) -> NDArray[np.float64]:
+    c = np.asarray(c_voigt, dtype=float)
+    if c.shape != (6, 6):
+        raise ValueError(f"stiffness must have shape (6, 6), got {c.shape}")
+    tensor = np.zeros((3, 3, 3, 3), dtype=float)
+    for a, (i, j) in enumerate(VOIGT_PAIRS):
+        for b, (k, l) in enumerate(VOIGT_PAIRS):
+            value = c[a, b]
+            tensor[i, j, k, l] = value
+            tensor[j, i, k, l] = value
+            tensor[i, j, l, k] = value
+            tensor[j, i, l, k] = value
+    return tensor
+
+
+def stiffness_tensor_to_voigt(c_tensor: ArrayLike) -> NDArray[np.float64]:
+    c = np.asarray(c_tensor, dtype=float)
+    if c.shape != (3, 3, 3, 3):
+        raise ValueError(f"stiffness tensor must have shape (3, 3, 3, 3), got {c.shape}")
+    voigt = np.zeros((6, 6), dtype=float)
+    for a, (i, j) in enumerate(VOIGT_PAIRS):
+        for b, (k, l) in enumerate(VOIGT_PAIRS):
+            voigt[a, b] = c[i, j, k, l]
+    return voigt
+
+
+def rotate_stiffness(c_voigt: ArrayLike, rotation: ArrayLike) -> NDArray[np.float64]:
+    R = _check_3x3(rotation, name="rotation")
+    if not np.allclose(R.T @ R, np.eye(3), atol=1e-8):
+        raise ValueError("rotation must be orthogonal (R^T R = I)")
+    c = stiffness_voigt_to_tensor(c_voigt)
+    rotated = np.einsum("ia,jb,kc,ld,abcd->ijkl", R, R, R, R, c, optimize=True)
+    return stiffness_tensor_to_voigt(rotated)
+
+
+def isotropic_stiffness(youngs_modulus: float, poisson_ratio: float) -> NDArray[np.float64]:
+    if youngs_modulus <= 0:
+        raise ValueError("youngs_modulus must be positive")
+    if not (-1.0 < poisson_ratio < 0.5):
+        raise ValueError("poisson_ratio must be in (-1, 0.5)")
+    lam = youngs_modulus * poisson_ratio / ((1 + poisson_ratio) * (1 - 2 * poisson_ratio))
+    mu = youngs_modulus / (2 * (1 + poisson_ratio))
+    c = np.zeros((6, 6), dtype=float)
+    c[0:3, 0:3] = lam
+    for i in range(3):
+        c[i, i] = lam + 2 * mu
+    for i in range(3, 6):
+        c[i, i] = mu
+    return c
+
+
+def orthotropic_stiffness(
+    *,
+    e1: float, e2: float, e3: float,
+    nu12: float, nu13: float, nu23: float,
+    g12: float, g13: float, g23: float,
+) -> NDArray[np.float64]:
+    for name, value in {"e1": e1, "e2": e2, "e3": e3, "g12": g12, "g13": g13, "g23": g23}.items():
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
+    nu21 = nu12 * e2 / e1
+    nu31 = nu13 * e3 / e1
+    nu32 = nu23 * e3 / e2
+    compliance = np.array(
+        [
+            [1 / e1, -nu21 / e2, -nu31 / e3, 0, 0, 0],
+            [-nu12 / e1, 1 / e2, -nu32 / e3, 0, 0, 0],
+            [-nu13 / e1, -nu23 / e2, 1 / e3, 0, 0, 0],
+            [0, 0, 0, 1 / g23, 0, 0],
+            [0, 0, 0, 0, 1 / g13, 0],
+            [0, 0, 0, 0, 0, 1 / g12],
+        ],
+        dtype=float,
+    )
+    return np.linalg.inv(compliance)
+
+
+def transverse_isotropic_stiffness(
+    *,
+    e_l: float, e_t: float, g_lt: float, nu_lt: float, nu_tt: float,
+) -> NDArray[np.float64]:
+    """Build a transverse-isotropic stiffness with the local 1-axis as the symmetry axis.
+
+    The 2-3 plane is the isotropic plane: ``E2 = E3 = e_t``, ``nu23 = nu_tt``,
+    ``G23 = e_t / (2 (1 + nu_tt))``, ``G12 = G13 = g_lt``, ``nu12 = nu13 = nu_lt``.
+    """
+    g_tt = e_t / (2 * (1 + nu_tt))
+    return orthotropic_stiffness(
+        e1=e_l, e2=e_t, e3=e_t,
+        nu12=nu_lt, nu13=nu_lt, nu23=nu_tt,
+        g12=g_lt, g13=g_lt, g23=g_tt,
+    )
+
+
+def voigt_strain_to_tensor(strain_voigt: ArrayLike) -> NDArray[np.float64]:
+    v = np.asarray(strain_voigt, dtype=float)
+    if v.shape != (6,):
+        raise ValueError(f"strain must have shape (6,), got {v.shape}")
+    return np.array(
+        [
+            [v[0], v[5] / 2, v[4] / 2],
+            [v[5] / 2, v[1], v[3] / 2],
+            [v[4] / 2, v[3] / 2, v[2]],
+        ],
+        dtype=float,
+    )
+
+
+def voigt_stress_to_tensor(stress_voigt: ArrayLike) -> NDArray[np.float64]:
+    v = np.asarray(stress_voigt, dtype=float)
+    if v.shape != (6,):
+        raise ValueError(f"stress must have shape (6,), got {v.shape}")
+    return np.array(
+        [
+            [v[0], v[5], v[4]],
+            [v[5], v[1], v[3]],
+            [v[4], v[3], v[2]],
+        ],
+        dtype=float,
+    )
+
+
+def tensor_strain_to_voigt(strain_tensor: ArrayLike) -> NDArray[np.float64]:
+    t = _check_3x3(strain_tensor, name="strain_tensor")
+    return np.array([t[0, 0], t[1, 1], t[2, 2], 2 * t[1, 2], 2 * t[0, 2], 2 * t[0, 1]])
+
+
+def tensor_stress_to_voigt(stress_tensor: ArrayLike) -> NDArray[np.float64]:
+    t = _check_3x3(stress_tensor, name="stress_tensor")
+    return np.array([t[0, 0], t[1, 1], t[2, 2], t[1, 2], t[0, 2], t[0, 1]])

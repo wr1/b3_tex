@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "b3-tex"
+version = "0.1.0"
+description = "Implicit modelling and periodic homogenization of textile composite RVEs on FEniCSx."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "wr1" }]
+dependencies = [
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "treeparse>=0.2.5",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+b3-tex = "b3_tex.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/b3_tex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "fenicsx: requires a working DOLFINx and dolfinx_mpc installation",
+]
