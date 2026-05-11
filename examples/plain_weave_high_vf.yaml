@@ -1,0 +1,62 @@
+# High-fibre-volume-fraction plain weave (super-ellipse cross-section).
+#
+# Same envelope as plain_weave_dense.yaml (4 tows, near-touching in-plane,
+# z-stack just inside the no-interpenetration bound) but with
+# `power: 4.0` instead of the default `power: 2.0` (ellipse). The super-ellipse
+# fills the inter-tow corners that the ellipse leaves as resin, lifting the
+# bundle volume fraction (tow volume / RVE volume) from ~0.65 (p=2) to ~0.80
+# (p=4) -- realistic for a tightly compacted textile lamina.
+#
+# The implicit point-lookup field handles this without explicit contact
+# meshing: every cell-centroid query is independent, so adjacent tows that
+# nearly touch in-plane or in-z just classify cleanly to one yarn or the other
+# (symmetric argmin tie-break in WeaveField.sample).
+#
+# Geometric constraints (verify before changing):
+#   - 2*amplitude  > 2*half_height           ; no z-interpenetration of opposite-phase tows
+#     here: 0.080  > 0.076                   ; gap 0.004
+#   - amplitude + half_height <= Lz/2        ; tows fit inside the cell
+#     here: 0.078 <= 0.080                   ; just inside
+
+domain:
+  size: [1.0, 1.0, 0.16]
+  mesh_resolution: [40, 40, 14]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 70.0e9
+    e_t: 15.0e9
+    g_lt: 24.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.70    # realistic in-tow Vf; no longer inflated to compensate
+
+field:
+  type: plain_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.16]
+  n_warp: 2
+  n_weft: 2
+  yarn_half_width: 0.245          # in-plane gap 0.005 between adjacent tows
+  yarn_half_height: 0.038
+  amplitude: 0.040
+  power: 4.0                       # super-ellipse: fills corners that p=2 leaves as resin
+
+solver:
+  backend: dolfinx_periodic
+  stiffness_sampling: quadrature   # 'quadrature' (default) | 'centroid'
+  quadrature_degree: 2             # 'quadrature' rule degree; 2 = 4-point tet rule
