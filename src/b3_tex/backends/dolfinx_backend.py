@@ -15,20 +15,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 from b3_tex.problem import RVEProblem
+from b3_tex.quadrature import (
+    global_stiffness_at_points,
+    make_quadrature_stiffness_function,
+    populate_stiffness_at_quadrature_points,
+)
 from b3_tex.result import HomogenizationResult
 
 
 def _global_stiffness_at_cell_centroids(
     problem: RVEProblem, centroids: NDArray[np.float64]
 ) -> NDArray[np.float64]:
-    """Sample the phase field and return one rotated 6x6 stiffness per cell."""
-    samples = problem.field.sample(centroids)
-    n_cells = centroids.shape[0]
-    out = np.zeros((n_cells, 6, 6), dtype=float)
-    for i, sample in enumerate(samples):
-        material = problem.materials[sample.material]
-        out[i] = material.rotated(sample.rotation)
-    return out
+    """Sample the phase field at cell centroids; one rotated 6x6 stiffness per cell.
+
+    Thin wrapper around :func:`b3_tex.quadrature.global_stiffness_at_points`,
+    kept for backward-compatible imports from existing tests.
+    """
+    return global_stiffness_at_points(problem, centroids)
 
 
 def _cell_centroids(mesh) -> NDArray[np.float64]:
@@ -76,21 +79,32 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
-    T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
-    C_func = dolfinx.fem.Function(T)
+    sampling = str(problem.solver.get("stiffness_sampling", "quadrature"))
+    qdeg = int(problem.solver.get("quadrature_degree", 2))
 
-    centroids = _cell_centroids(mesh)
-    cell_C = _global_stiffness_at_cell_centroids(problem, centroids)
-    C_func.x.array[:] = cell_C.reshape(-1)
-    C_func.x.scatter_forward()
+    if sampling == "quadrature":
+        C_func, dx_q = make_quadrature_stiffness_function(mesh, degree=qdeg)
+        populate_stiffness_at_quadrature_points(C_func, problem, mesh=mesh, degree=qdeg)
+    elif sampling == "centroid":
+        T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
+        C_func = dolfinx.fem.Function(T)
+        centroids = _cell_centroids(mesh)
+        cell_C = _global_stiffness_at_cell_centroids(problem, centroids)
+        C_func.x.array[:] = cell_C.reshape(-1)
+        C_func.x.scatter_forward()
+        dx_q = ufl.dx
+    else:
+        raise ValueError(
+            f"unknown stiffness_sampling {sampling!r}; expected 'quadrature' or 'centroid'"
+        )
 
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
     eps_u = _voigt_strain(u, ufl)
     eps_v = _voigt_strain(v, ufl)
-    a_form = ufl.inner(ufl.dot(C_func, eps_u), eps_v) * ufl.dx
+    a_form = ufl.inner(ufl.dot(C_func, eps_u), eps_v) * dx_q
     zero_body_force = dolfinx.fem.Constant(mesh, np.zeros(3))
-    L_form = ufl.inner(zero_body_force, v) * ufl.dx
+    L_form = ufl.inner(zero_body_force, v) * dx_q
 
     def on_boundary(x):
         return (
@@ -102,7 +116,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     boundary_dofs = dolfinx.fem.locate_dofs_geometrical(V, on_boundary)
     bc_disp = dolfinx.fem.Function(V)
 
-    one_form = dolfinx.fem.form(1.0 * ufl.dx(domain=mesh))
+    one_form = dolfinx.fem.form(1.0 * dx_q)
     volume = mesh.comm.allreduce(dolfinx.fem.assemble_scalar(one_form), op=MPI.SUM)
 
     u_sol = dolfinx.fem.Function(V, name="u")
@@ -116,7 +130,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     eps_post = _voigt_strain(u_sol, ufl)
     sigma_post = ufl.dot(C_func, eps_post)
     sigma_component_forms = [
-        dolfinx.fem.form(sigma_post[k] * ufl.dx(domain=mesh)) for k in range(6)
+        dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)
     ]
 
     loadcase_strains = np.eye(6)
