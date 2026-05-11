@@ -72,6 +72,39 @@ def rotate_stiffness(c_voigt: ArrayLike, rotation: ArrayLike) -> NDArray[np.floa
     return stiffness_tensor_to_voigt(rotated)
 
 
+def stiffness_tensor_to_voigt_batch(c_tensor: ArrayLike) -> NDArray[np.float64]:
+    """Batched (N, 3, 3, 3, 3) -> (N, 6, 6) Voigt projection."""
+    c = np.asarray(c_tensor, dtype=float)
+    if c.ndim != 5 or c.shape[1:] != (3, 3, 3, 3):
+        raise ValueError(
+            f"stiffness tensor batch must have shape (N, 3, 3, 3, 3), got {c.shape}"
+        )
+    n = c.shape[0]
+    voigt = np.zeros((n, 6, 6), dtype=float)
+    for a, (i, j) in enumerate(VOIGT_PAIRS):
+        for b, (k, l) in enumerate(VOIGT_PAIRS):
+            voigt[:, a, b] = c[:, i, j, k, l]
+    return voigt
+
+
+def rotate_stiffness_batch(
+    c_voigt: ArrayLike, rotations: ArrayLike
+) -> NDArray[np.float64]:
+    """Apply N rotations to a single (6, 6) Voigt stiffness; return (N, 6, 6)."""
+    R = np.asarray(rotations, dtype=float)
+    if R.ndim != 3 or R.shape[1:] != (3, 3):
+        raise ValueError(f"rotations must have shape (N, 3, 3), got {R.shape}")
+    eye = np.eye(3)
+    RtR = np.einsum("nji,njk->nik", R, R)
+    if not np.allclose(RtR, eye, atol=1e-8):
+        raise ValueError("each rotation must be orthogonal (R^T R = I)")
+    c = stiffness_voigt_to_tensor(c_voigt)
+    rotated = np.einsum(
+        "nia,njb,nkc,nld,abcd->nijkl", R, R, R, R, c, optimize=True
+    )
+    return stiffness_tensor_to_voigt_batch(rotated)
+
+
 def isotropic_stiffness(youngs_modulus: float, poisson_ratio: float) -> NDArray[np.float64]:
     if youngs_modulus <= 0:
         raise ValueError("youngs_modulus must be positive")

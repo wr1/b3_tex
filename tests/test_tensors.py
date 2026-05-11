@@ -10,7 +10,9 @@ from b3_tex.tensors import (
     isotropic_stiffness,
     orthotropic_stiffness,
     rotate_stiffness,
+    rotate_stiffness_batch,
     stiffness_tensor_to_voigt,
+    stiffness_tensor_to_voigt_batch,
     stiffness_voigt_to_tensor,
     transverse_isotropic_stiffness,
     voigt_strain_to_tensor,
@@ -152,3 +154,51 @@ def test_orthotropic_rejects_negative_modulus():
         orthotropic_stiffness(
             e1=-1.0, e2=1.0, e3=1.0, nu12=0.3, nu13=0.3, nu23=0.3, g12=1.0, g13=1.0, g23=1.0
         )
+
+
+def _rot_z(theta: float) -> np.ndarray:
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def test_rotate_stiffness_batch_matches_loop_for_isotropic_stiffness():
+    c = isotropic_stiffness(youngs_modulus=70e9, poisson_ratio=0.3)
+    angles = np.linspace(-1.0, 1.0, 7)
+    R_batch = np.stack([_rot_z(a) for a in angles])
+    expected = np.stack([rotate_stiffness(c, R) for R in R_batch])
+    got = rotate_stiffness_batch(c, R_batch)
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-4)
+
+
+def test_rotate_stiffness_batch_matches_loop_for_transverse_isotropic():
+    c = transverse_isotropic_stiffness(e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40)
+    rng = np.random.default_rng(0)
+    R_batch = np.stack([np.linalg.qr(rng.standard_normal((3, 3)))[0] for _ in range(5)])
+    for i in range(R_batch.shape[0]):
+        if np.linalg.det(R_batch[i]) < 0:
+            R_batch[i, :, 0] = -R_batch[i, :, 0]
+    expected = np.stack([rotate_stiffness(c, R) for R in R_batch])
+    got = rotate_stiffness_batch(c, R_batch)
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-4)
+
+
+def test_rotate_stiffness_batch_rejects_non_orthogonal():
+    c = isotropic_stiffness(youngs_modulus=1.0, poisson_ratio=0.0)
+    R_bad = np.tile(np.eye(3) * 1.5, (3, 1, 1))
+    with pytest.raises(ValueError, match="orthogonal"):
+        rotate_stiffness_batch(c, R_bad)
+
+
+def test_rotate_stiffness_batch_rejects_wrong_shape():
+    c = isotropic_stiffness(youngs_modulus=1.0, poisson_ratio=0.0)
+    with pytest.raises(ValueError, match=r"shape \(N, 3, 3\)"):
+        rotate_stiffness_batch(c, np.eye(3))
+
+
+def test_stiffness_tensor_to_voigt_batch_matches_loop():
+    c = isotropic_stiffness(youngs_modulus=10.0, poisson_ratio=0.2)
+    t = stiffness_voigt_to_tensor(c)
+    t_batch = np.broadcast_to(t, (4, 3, 3, 3, 3)).copy()
+    expected = np.stack([stiffness_tensor_to_voigt(t_batch[i]) for i in range(4)])
+    got = stiffness_tensor_to_voigt_batch(t_batch)
+    np.testing.assert_allclose(got, expected, rtol=0.0, atol=0.0)
