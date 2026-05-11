@@ -92,7 +92,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         cell_C = _global_stiffness_at_cell_centroids(problem, centroids)
         C_func.x.array[:] = cell_C.reshape(-1)
         C_func.x.scatter_forward()
-        dx_q = ufl.dx
+        dx_q = ufl.dx(domain=mesh)
     else:
         raise ValueError(
             f"unknown stiffness_sampling {sampling!r}; expected 'quadrature' or 'centroid'"
