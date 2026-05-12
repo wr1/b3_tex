@@ -92,6 +92,25 @@ def test_quadrature_homogeneous_recovers_isotropic_stiffness_to_machine_precisio
     np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
 
 
+@pytest.mark.parametrize("qdeg", [3, 4, 6, 8])
+def test_quadrature_homogeneous_at_higher_degrees(qdeg):
+    """Higher-order quadrature schemes must still recover the homogeneous
+    stiffness to machine precision. Catches FFCx form-compile breakage or
+    basix scheme issues at high q."""
+    cfg = _ud_tow_config(mesh_n=4, radius=0.001, qdeg=qdeg)
+    cfg["materials"] = [
+        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+    ]
+    cfg["field"]["yarn_material"] = "matrix"
+    problem = RVEProblem.from_config(cfg)
+
+    from b3_tex.backends.dolfinx_periodic_backend import solve
+
+    result = solve(problem)
+    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
+    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+
+
 def test_quadrature_and_centroid_agree_on_homogeneous_problem():
     """When C(x) is constant, the integrand is identical regardless of where we
     sample C, so GP-lookup and centroid sampling must agree to machine precision."""
