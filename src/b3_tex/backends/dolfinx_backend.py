@@ -87,6 +87,22 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         cell_type=cell_type,
     )
 
+    if problem.solver.get("amr", {}).get("enabled", False):
+        if cell_type_name != "tetrahedron":
+            raise ValueError(
+                "AMR phase 1 currently requires cell_type='tetrahedron' "
+                f"(got {cell_type_name!r}); dolfinx.mesh.refine is tet-only in 0.10"
+            )
+        from b3_tex.amr import iteratively_refine
+        amr_cfg = problem.solver["amr"]
+        mesh = iteratively_refine(
+            mesh, problem,
+            threshold=float(amr_cfg.get("threshold", 0.15)),
+            max_iterations=int(amr_cfg.get("max_iterations", 4)),
+            dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
+            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", 8)),
+        )
+
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
     sampling = str(problem.solver.get("stiffness_sampling", "quadrature"))
