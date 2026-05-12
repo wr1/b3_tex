@@ -19,6 +19,17 @@ DOF budget is reached.
 DOLFINx 0.10 only exposes ``refine`` for tetrahedral meshes — hex AMR would
 need a separate driver, so the backend integration explicitly rejects
 ``cell_type="hexahedron"`` paired with ``amr.enabled=true``.
+
+Hex-AMR roadmap (deferred to upstream): the natural algorithm for hex AMR
+is octree subdivision (1 hex -> 8 children) with hanging-node constraints
+at coarse-fine interfaces. As of 2026, neither DOLFINx (0.10) nor Firedrake
+exposes this in Python — DOLFINx's ``refine`` is Plaza-only (simplex), and
+Firedrake's adaptive refinement path goes through Netgen/ngsPETSc which is
+also simplex-only. PETSc DMForest wraps p4est at the C level but neither
+framework consumes it. The phase-1 marker and iteration loop in this module
+are cell-type agnostic — only ``refine_flagged_cells`` depends on the
+tet-specific ``dolfinx.mesh.refine``. When upstream support arrives we
+swap one function, not the algorithm.
 """
 
 from __future__ import annotations
