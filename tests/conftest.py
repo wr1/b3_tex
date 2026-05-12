@@ -9,3 +9,8 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "fenicsx" in item.keywords:
                 item.add_marker(skip_marker)
+    if importlib.util.find_spec("mfem") is None:
+        skip_marker = pytest.mark.skip(reason="mfem not importable (optional pip extra)")
+        for item in items:
+            if "mfem" in item.keywords:
+                item.add_marker(skip_marker)
