@@ -5,7 +5,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from b3_tex.fields import CylinderYarnField, PhaseSample, orthonormal_frame_along
+from b3_tex.fields import (
+    CylinderYarnField,
+    MultiStraightYarnField,
+    PhaseSample,
+    SinusoidalYarn,
+    StraightYarn,
+    WeaveField,
+    orthonormal_frame_along,
+    orthonormal_frame_along_batch,
+    plain_weave_yarns,
+)
 
 
 def test_orthonormal_frame_first_column_matches_axis():
@@ -112,6 +122,94 @@ def test_cylinder_yarn_rejects_non_positive_radius():
             axis_direction=np.array([1.0, 0.0, 0.0]),
             radius=0.0,
         )
+
+
+def test_orthonormal_frame_along_batch_matches_scalar():
+    rng = np.random.default_rng(0)
+    axes = rng.standard_normal((10, 3))
+    expected = np.stack([orthonormal_frame_along(a) for a in axes])
+    got = orthonormal_frame_along_batch(axes)
+    np.testing.assert_allclose(got, expected, atol=1e-12)
+
+
+def test_orthonormal_frame_along_batch_handles_z_dominant_axes():
+    """The helper-axis selection switches when |e1.z| >= 0.9 — make sure both
+    branches are exercised inside one batch."""
+    axes = np.array([
+        [1.0, 0.0, 0.0],   # x-dominant -> helper = z
+        [0.0, 1.0, 0.0],   # y-dominant -> helper = z
+        [0.0, 0.0, 1.0],   # z-dominant -> helper = y
+        [0.1, 0.1, 1.0],   # nearly z   -> helper = y
+    ])
+    expected = np.stack([orthonormal_frame_along(a) for a in axes])
+    got = orthonormal_frame_along_batch(axes)
+    np.testing.assert_allclose(got, expected, atol=1e-12)
+
+
+def test_orthonormal_frame_along_batch_rejects_zero_axis():
+    axes = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    with pytest.raises(ValueError):
+        orthonormal_frame_along_batch(axes)
+
+
+def _assert_sample_matches_arrays(field, points):
+    names = field.material_names()
+    ids, rotations = field.sample_arrays(points)
+    samples = field.sample(points)
+    assert len(samples) == points.shape[0]
+    for i, s in enumerate(samples):
+        assert s.material == names[ids[i]]
+        np.testing.assert_allclose(s.rotation, rotations[i])
+
+
+def test_cylinder_yarn_sample_arrays_matches_sample():
+    field = CylinderYarnField(
+        matrix_material="matrix", yarn_material="yarn",
+        axis_point=np.array([0.5, 0.5, 0.5]),
+        axis_direction=np.array([1.0, 0.0, 0.0]),
+        radius=0.3,
+    )
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(0.0, 1.0, size=(50, 3))
+    _assert_sample_matches_arrays(field, pts)
+
+
+def test_multi_straight_yarn_sample_arrays_matches_sample():
+    field = MultiStraightYarnField(
+        matrix_material="matrix", yarn_material="yarn",
+        yarns=(
+            StraightYarn(
+                axis_point=np.array([0.25, 0.5, 0.5]),
+                axis_direction=np.array([1.0, 0.0, 0.0]),
+                radius=0.15,
+            ),
+            StraightYarn(
+                axis_point=np.array([0.5, 0.25, 0.5]),
+                axis_direction=np.array([0.0, 1.0, 0.0]),
+                radius=0.15,
+            ),
+        ),
+    )
+    rng = np.random.default_rng(1)
+    pts = rng.uniform(0.0, 1.0, size=(40, 3))
+    _assert_sample_matches_arrays(field, pts)
+
+
+def test_weave_field_sample_arrays_matches_sample():
+    field = WeaveField(
+        matrix_material="matrix", yarn_material="yarn",
+        yarns=plain_weave_yarns(
+            domain_size=(1.0, 1.0, 0.16),
+            n_warp=2, n_weft=2,
+            yarn_half_width=0.2,
+            yarn_half_height=0.035,
+            amplitude=0.04,
+            power=2.0,
+        ),
+    )
+    rng = np.random.default_rng(2)
+    pts = rng.uniform(low=[0.0, 0.0, 0.0], high=[1.0, 1.0, 0.16], size=(60, 3))
+    _assert_sample_matches_arrays(field, pts)
 
 
 def test_cylinder_yarn_volume_fraction_axis_aligned():

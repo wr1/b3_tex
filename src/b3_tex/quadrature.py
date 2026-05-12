@@ -66,21 +66,18 @@ def global_stiffness_at_points(
     problem: "RVEProblem", points: NDArray[np.float64]
 ) -> NDArray[np.float64]:
     """Sample ``problem.field`` at the given physical points and return the
-    rotated (Npts, 6, 6) stiffness, batched per material."""
-    samples = problem.field.sample(points)
+    rotated (Npts, 6, 6) stiffness, batched per material via the vectorised
+    ``PhaseField.sample_arrays`` API."""
+    names = problem.field.material_names()
+    ids, rotations = problem.field.sample_arrays(points)
     n = points.shape[0]
     out = np.zeros((n, 6, 6), dtype=float)
-
-    materials_used: dict[str, list[int]] = {}
-    rotations = np.empty((n, 3, 3), dtype=float)
-    for idx, sample in enumerate(samples):
-        materials_used.setdefault(sample.material, []).append(idx)
-        rotations[idx] = sample.rotation
-
-    for material_name, indices in materials_used.items():
-        idx_arr = np.asarray(indices, dtype=np.intp)
-        c_local = problem.materials[material_name].stiffness
-        out[idx_arr] = rotate_stiffness_batch(c_local, rotations[idx_arr])
+    for k, name in enumerate(names):
+        mask = ids == k
+        if not mask.any():
+            continue
+        c_local = problem.materials[name].stiffness
+        out[mask] = rotate_stiffness_batch(c_local, rotations[mask])
     return out
 
 

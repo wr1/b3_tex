@@ -16,7 +16,26 @@ class PhaseSample:
 
 
 class PhaseField(Protocol):
-    """Map physical 3D points to ``(material_name, local-frame-rotation)``."""
+    """Map physical 3D points to ``(material_name, local-frame-rotation)``.
+
+    Two parallel APIs exist: ``sample_arrays`` is the vectorised hot path used
+    by the FE assembly, returning numpy arrays directly. ``sample`` is the
+    convenience wrapper that packs the arrays into ``PhaseSample`` instances —
+    fine for unit tests, but constructs one Python object per point.
+    """
+
+    def material_names(self) -> tuple[str, ...]:
+        """Deterministic list of material names this field can return.
+
+        The integer ID returned by ``sample_arrays`` is an index into this
+        tuple."""
+        ...
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+        """Hot-path API: ``(ids: (N,), rotations: (N, 3, 3))``."""
+        ...
 
     def sample(self, points: ArrayLike) -> list[PhaseSample]: ...
 
@@ -35,6 +54,27 @@ def orthonormal_frame_along(axis: ArrayLike) -> NDArray[np.float64]:
     e2 /= np.linalg.norm(e2)
     e3 = np.cross(e1, e2)
     return np.column_stack([e1, e2, e3])
+
+
+def orthonormal_frame_along_batch(axes: ArrayLike) -> NDArray[np.float64]:
+    """Batched orthonormal frame: ``(N, 3) -> (N, 3, 3)``, columns ``(e1, e2, e3)``."""
+    a = np.asarray(axes, dtype=float)
+    if a.ndim != 2 or a.shape[1] != 3:
+        raise ValueError(f"axes must have shape (N, 3), got {a.shape}")
+    norms = np.linalg.norm(a, axis=1, keepdims=True)
+    if np.any(norms == 0):
+        raise ValueError("each axis must be non-zero")
+    e1 = a / norms
+    z_dominant = np.abs(e1[:, 2]) >= 0.9
+    helper = np.where(
+        z_dominant[:, None],
+        np.array([0.0, 1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+    )
+    e2 = np.cross(helper, e1)
+    e2 /= np.linalg.norm(e2, axis=1, keepdims=True)
+    e3 = np.cross(e1, e2)
+    return np.stack([e1, e2, e3], axis=-1)  # columns = (e1, e2, e3)
 
 
 def _as_points_2d(points: ArrayLike) -> NDArray[np.float64]:
@@ -126,18 +166,25 @@ class CylinderYarnField:
         perp = rel - np.outer(axial, self.axis_direction)
         return np.linalg.norm(perp, axis=1)
 
+    def material_names(self) -> tuple[str, ...]:
+        return (self.matrix_material, self.yarn_material)
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+        pts = _as_points_2d(points)
+        is_yarn = self._radial_distance(pts) <= self.radius
+        ids = is_yarn.astype(np.intp)  # 0 = matrix, 1 = yarn
+        rotations = np.broadcast_to(np.eye(3), (pts.shape[0], 3, 3)).copy()
+        if np.any(is_yarn):
+            rotations[is_yarn] = self.yarn_rotation
+        return ids, rotations
+
     def sample(self, points: ArrayLike) -> list[PhaseSample]:
         pts = _as_points_2d(points)
-        radial = self._radial_distance(pts)
-        yarn_rot = self.yarn_rotation
-        identity = np.eye(3)
-        result: list[PhaseSample] = []
-        for is_yarn in radial <= self.radius:
-            if is_yarn:
-                result.append(PhaseSample(self.yarn_material, yarn_rot))
-            else:
-                result.append(PhaseSample(self.matrix_material, identity))
-        return result
+        names = self.material_names()
+        ids, rotations = self.sample_arrays(pts)
+        return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
 
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
@@ -145,18 +192,24 @@ _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 @dataclass(frozen=True)
 class SinusoidalYarn:
-    """A yarn with a sinusoidal centerline and an elliptical cross-section.
+    """A yarn with a sinusoidal centerline and a super-elliptical cross-section.
 
     A warp yarn running along ``x`` at fixed ``y_pos`` undulates in ``z``:
 
         centerline(s) = (s, y_pos, z_mid + amplitude * sin(2*pi*s/period + phase))
 
-    The cross-section perpendicular to the centerline tangent is an ellipse
-    with in-plane semi-axis ``half_width`` (along the perpendicular in-plane
-    axis) and out-of-plane semi-axis ``half_height`` (along the tangent's
-    normal in the (running-axis, z) plane). For typical woven yarns
-    ``half_width > half_height`` (flat ribbon). For ``half_width ==
-    half_height`` the cross-section is circular.
+    The cross-section perpendicular to the centerline tangent is a super-ellipse
+    (Lame curve) with in-plane semi-axis ``half_width``, out-of-plane semi-axis
+    ``half_height``, and exponent ``power``:
+
+        (|dy|/half_width)**power + (|perp_z|/half_height)**power <= 1
+
+    ``power = 2`` is a plain ellipse (default; preserves existing behaviour).
+    ``power = 4`` "fills the corners" giving +18% cross-sectional area for the
+    same envelope — useful for matching realistic bundle volume fractions
+    without explicit contact meshing. ``power -> infinity`` approaches a
+    rectangle (+27% area at the limit). Cross-sectional area is
+    ``A(p) = 4 * half_width * half_height * Gamma(1+1/p)**2 / Gamma(1+2/p)``.
     """
 
     axis: str  # "x" or "y" — the direction along which the yarn runs
@@ -167,6 +220,7 @@ class SinusoidalYarn:
     phase: float
     half_width: float    # in-plane semi-axis (perpendicular to running axis, in plane)
     half_height: float   # out-of-plane semi-axis (perpendicular to centerline tangent)
+    power: float = 2.0   # super-ellipse exponent; 2 = ellipse, larger = more rectangular
 
     def __post_init__(self) -> None:
         if self.axis not in ("x", "y"):
@@ -175,6 +229,8 @@ class SinusoidalYarn:
             raise ValueError("half_width and half_height must be positive")
         if self.period <= 0:
             raise ValueError("period must be positive")
+        if self.power < 1.0:
+            raise ValueError("power must be >= 1 (sub-1 exponents make a non-convex astroid)")
 
     @property
     def _running_axis(self) -> int:
@@ -193,7 +249,8 @@ class SinusoidalYarn:
             * np.cos(2 * np.pi * s / self.period + self.phase)
         )
 
-    def contains(self, points: NDArray[np.float64]) -> NDArray[np.bool_]:
+    def ellipse_value(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Generalised (super-)elliptical distance from centerline: <= 1 inside the yarn."""
         ra = self._running_axis
         ip = self._inplane_axis
         s = points[:, ra]
@@ -201,11 +258,12 @@ class SinusoidalYarn:
         dz = points[:, 2] - self._z_at(s)
         slope = self._dz_ds_at(s)
         denom = np.sqrt(1.0 + slope * slope)
-        # Distance perpendicular to tangent, in the (running-axis, z) plane:
         perp_z = np.abs(dz) / denom
-        # In-plane deviation is already perpendicular to the tangent.
-        # Elliptical containment: (dy / half_width)^2 + (dz_perp / half_height)^2 <= 1.
-        return (dy / self.half_width) ** 2 + (perp_z / self.half_height) ** 2 <= 1.0
+        p = self.power
+        return (np.abs(dy) / self.half_width) ** p + (perp_z / self.half_height) ** p
+
+    def contains(self, points: NDArray[np.float64]) -> NDArray[np.bool_]:
+        return self.ellipse_value(points) <= 1.0
 
     def rotation_at(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return one rotation matrix per point, with first column = unit tangent."""
@@ -213,14 +271,10 @@ class SinusoidalYarn:
         s = points[:, ra]
         slope = self._dz_ds_at(s)
         n = points.shape[0]
-        rotations = np.zeros((n, 3, 3))
-        for i in range(n):
-            tangent = np.zeros(3)
-            tangent[ra] = 1.0
-            tangent[2] = slope[i]
-            tangent /= np.linalg.norm(tangent)
-            rotations[i] = orthonormal_frame_along(tangent)
-        return rotations
+        tangents = np.zeros((n, 3))
+        tangents[:, ra] = 1.0
+        tangents[:, 2] = slope
+        return orthonormal_frame_along_batch(tangents)
 
 
 @dataclass(frozen=True)
@@ -242,32 +296,42 @@ class WeaveField:
         if not self.yarns:
             raise ValueError("WeaveField requires at least one yarn")
 
-    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+    def material_names(self) -> tuple[str, ...]:
+        return (self.matrix_material, self.yarn_material)
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
         pts = _as_points_2d(points)
         n = pts.shape[0]
-        yarn_idx = -np.ones(n, dtype=int)
-        rotations = np.zeros((n, 3, 3))
+        # Symmetric overlap resolution: at each point, pick the yarn whose ellipse
+        # value is smallest, i.e. the one closest to its own centerline. A point is
+        # in the matrix iff every yarn's ellipse value exceeds 1.
+        #
+        # Index-ordered "first contains wins" is NOT used because it biases volume
+        # toward whichever yarn group appears first in the list (warps before
+        # wefts), breaking x<->y symmetry whenever the in-plane cross-sections of
+        # warps and wefts overlap (common when half_width approaches the yarn
+        # spacing in dense weaves).
+        values = np.full((len(self.yarns), n), np.inf)
         for k, yarn in enumerate(self.yarns):
-            unassigned = yarn_idx < 0
-            if not np.any(unassigned):
-                break
-            sub_pts = pts[unassigned]
-            mask = yarn.contains(sub_pts)
+            values[k] = yarn.ellipse_value(pts)
+        best_k = np.argmin(values, axis=0)
+        inside = values[best_k, np.arange(n)] <= 1.0
+        rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
+        for k, yarn in enumerate(self.yarns):
+            mask = inside & (best_k == k)
             if not np.any(mask):
                 continue
-            sub_rot = yarn.rotation_at(sub_pts[mask])
-            unassigned_indices = np.where(unassigned)[0]
-            hits = unassigned_indices[mask]
-            yarn_idx[hits] = k
-            rotations[hits] = sub_rot
-        identity = np.eye(3)
-        result: list[PhaseSample] = []
-        for i, ki in enumerate(yarn_idx):
-            if ki < 0:
-                result.append(PhaseSample(self.matrix_material, identity))
-            else:
-                result.append(PhaseSample(self.yarn_material, rotations[i]))
-        return result
+            rotations[mask] = yarn.rotation_at(pts[mask])
+        ids = inside.astype(np.intp)  # 0 = matrix, 1 = yarn
+        return ids, rotations
+
+    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+        pts = _as_points_2d(points)
+        names = self.material_names()
+        ids, rotations = self.sample_arrays(pts)
+        return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
 
 
 def plain_weave_yarns(
@@ -278,6 +342,7 @@ def plain_weave_yarns(
     yarn_half_width: float,
     yarn_half_height: float,
     amplitude: float,
+    power: float = 2.0,
 ) -> tuple[SinusoidalYarn, ...]:
     """Build a tuple of SinusoidalYarn matching a plain-weave (1x1) pattern.
 
@@ -290,11 +355,21 @@ def plain_weave_yarns(
     and out-of-plane semi-axis ``yarn_half_height`` (typically half_width >
     half_height for woven textiles).
     """
+    if n_warp < 2 or n_weft < 2 or n_warp % 2 or n_weft % 2:
+        # Half-sine between adjacent crossings is only single-cell periodic when the
+        # number of crossings per axis is even; otherwise the warp z at x=0 and x=Lx
+        # differ by sign and the RVE is not periodic.
+        raise ValueError("n_warp and n_weft must both be even and >= 2")
     Lx, Ly, Lz = domain_size
     z_mid = 0.5 * Lz
 
-    period_x = Lx / max(1, n_weft)
-    period_y = Ly / max(1, n_warp)
+    # Period = 2 * (crossing spacing) so the warp goes from +amp at one weft to
+    # -amp at the next adjacent weft (one half-sine per crossing-to-crossing
+    # span). With period = Lx/n_weft the warp would instead complete a full
+    # sine between adjacent wefts and pass through z_mid at every crossing,
+    # making warps and wefts coincide on the median plane.
+    period_x = 2.0 * Lx / n_weft
+    period_y = 2.0 * Ly / n_warp
 
     yarns: list[SinusoidalYarn] = []
     for j in range(n_warp):
@@ -304,6 +379,7 @@ def plain_weave_yarns(
             axis="x", inplane_position=y_pos, z_mid=z_mid,
             amplitude=amplitude, period=period_x, phase=phase,
             half_width=yarn_half_width, half_height=yarn_half_height,
+            power=power,
         ))
     for i in range(n_weft):
         x_pos = (i + 0.5) * Lx / n_weft
@@ -312,6 +388,7 @@ def plain_weave_yarns(
             axis="y", inplane_position=x_pos, z_mid=z_mid,
             amplitude=amplitude, period=period_y, phase=phase,
             half_width=yarn_half_width, half_height=yarn_half_height,
+            power=power,
         ))
     return tuple(yarns)
 
@@ -334,7 +411,12 @@ class MultiStraightYarnField:
         if not self.yarns:
             raise ValueError("MultiStraightYarnField requires at least one yarn")
 
-    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+    def material_names(self) -> tuple[str, ...]:
+        return (self.matrix_material, self.yarn_material)
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
         pts = _as_points_2d(points)
         n = pts.shape[0]
         yarn_idx = -np.ones(n, dtype=int)
@@ -345,11 +427,17 @@ class MultiStraightYarnField:
             mask = yarn.contains(pts[unassigned])
             unassigned_indices = np.where(unassigned)[0]
             yarn_idx[unassigned_indices[mask]] = k
-        identity = np.eye(3)
-        result: list[PhaseSample] = []
-        for ki in yarn_idx:
-            if ki < 0:
-                result.append(PhaseSample(self.matrix_material, identity))
-            else:
-                result.append(PhaseSample(self.yarn_material, self.yarns[ki].rotation))
-        return result
+        rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
+        for k, yarn in enumerate(self.yarns):
+            mask = yarn_idx == k
+            if not np.any(mask):
+                continue
+            rotations[mask] = yarn.rotation
+        ids = (yarn_idx >= 0).astype(np.intp)  # 0 = matrix, 1 = yarn
+        return ids, rotations
+
+    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+        pts = _as_points_2d(points)
+        names = self.material_names()
+        ids, rotations = self.sample_arrays(pts)
+        return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
