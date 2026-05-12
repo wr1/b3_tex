@@ -1,35 +1,41 @@
-"""MFEM backend (serial, KUBC). Provided primarily so the hex-AMR experiment
-has a working framework alongside the DOLFINx default.
+"""MFEM backend (serial, KUBC) with full anisotropic per-GP stiffness.
 
-**Scope (intentional limit):** isotropic, homogeneous problems only. The
-anisotropic per-GP stiffness lookup that the rest of `b3_tex` is built around
-needs a custom MFEM `BilinearFormIntegrator` that consumes a 6x6
-`MatrixCoefficient` -- MFEM ships only `ElasticityIntegrator(lam, mu)` for
-scalar Lame coefficients. Implementing the anisotropic integrator in PyMFEM
-is feasible (subclass `BilinearFormIntegrator`, override
-`AssembleElementMatrix`, evaluate `field.sample_arrays` at GPs) but is a
-multi-day project. See `notes/mind/mfem_backend_design.md` for the path
-forward.
+The dolfinx_periodic_backend remains the canonical b3_tex backend (periodic
+BCs, dolfinx_mpc, the full validation suite). The MFEM backend exists to
+give the hex-AMR experiment a working framework alongside it: MFEM's NCMesh
+supports hex AMR with hanging nodes natively, which DOLFINx 0.10 does not.
 
-Use `dolfinx_periodic_backend` for production runs. This module exists so:
+Code reuse with the DOLFINx backend. The two backends share the per-GP
+stiffness lookup (b3_tex.quadrature.global_stiffness_at_points) and the
+Voigt B-matrix construction (b3_tex.tensors.voigt_b_matrix). Both
+abstractions are framework-agnostic: they take physical coordinates and
+shape-function derivatives and return numpy arrays. Any "implementation
+drift" between how DOLFINx samples C and how MFEM samples C is impossible
+because both call the same function.
 
-1. The MFEM toolchain is wired up and tested in CI.
-2. Hex AMR (`solver.amr.enabled = True`) is available for cases where the
-   anisotropy doesn't bite (uniform isotropic + interface-driven AMR).
-3. Future work — extending to the anisotropic per-GP path — has a concrete
-   skeleton and tests to extend rather than build from scratch.
+What this backend supports:
 
-What this backend supports today:
-
-- Cartesian 3D box meshes, hex or tet (`solver.cell_type`).
+- Cartesian 3D box meshes, hex or tet (solver.cell_type).
 - KUBC: u = E @ x on the boundary.
-- Optional uniform refinement before solve (`solver.amr.n_uniform_refines`).
-- Optional AMR via MFEM's per-element heterogeneity flagging (placeholder —
-  currently delegates to uniform refinement; the b3_tex.amr marker is
-  cell-type agnostic but the refinement call needs to be ported separately
-  for hex meshes).
-- Six unit-Voigt loadcases → effective 6x6 stiffness via volume-averaged
+- Anisotropic per-GP stiffness via a custom Python-side
+  _AnisotropicElasticityIntegrator (mfem.PyBilinearFormIntegrator subclass).
+  The integrator evaluates problem.field.sample_arrays at every quadrature
+  point of every element, builds the Voigt B from the physical-space shape
+  derivatives, and accumulates B^T C(x_q) B w_q into the local element matrix.
+- Multi-material problems (anything b3_tex.fields.PhaseField can express).
+- Optional uniform refinement before solve (solver.amr.n_uniform_refines).
+- Six unit-Voigt loadcases -> effective 6x6 stiffness via volume-averaged
   stress.
+
+Not yet supported (deferred to follow-ups):
+
+- Periodic BCs (KUBC only). MFEM has the mesh helpers for it
+  (Mesh.MakePeriodic + CreatePeriodicVertexMapping) but the
+  fluctuation-split formulation is not wired in.
+- Marker-based hex AMR. b3_tex.amr.cell_heterogeneity_metric is
+  cell-type-agnostic; refine_flagged_cells is the only piece that needs an
+  MFEM variant calling Mesh.GeneralRefinement -- see
+  notes/mind/mfem_backend_design.md.
 """
 
 from __future__ import annotations
@@ -38,47 +44,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from b3_tex.problem import RVEProblem
+from b3_tex.quadrature import global_stiffness_at_points
 from b3_tex.result import HomogenizationResult
-
-
-def _lame_from_isotropic(c_voigt: NDArray[np.float64]) -> tuple[float, float]:
-    """Extract (lam, mu) from a 6x6 Voigt isotropic stiffness, with engineering shear."""
-    c = np.asarray(c_voigt, dtype=float)
-    if c.shape != (6, 6):
-        raise ValueError(f"stiffness must be (6, 6), got {c.shape}")
-    lam_plus_2mu = c[0, 0]
-    lam = c[0, 1]
-    mu = 0.5 * (lam_plus_2mu - lam)
-    # Sanity: shear diagonal entries must equal mu for isotropic Voigt.
-    for k in (3, 4, 5):
-        if not np.isclose(c[k, k], mu, rtol=1e-6):
-            raise ValueError(
-                f"stiffness is not isotropic: c[{k},{k}]={c[k,k]:.3e}, mu={mu:.3e}"
-            )
-    # Off-diagonal coupling pattern check
-    for i in range(3):
-        for j in range(3):
-            expected = (lam + 2 * mu) if i == j else lam
-            if not np.isclose(c[i, j], expected, rtol=1e-6):
-                raise ValueError(
-                    f"stiffness is not isotropic: c[{i},{j}]={c[i,j]:.3e}, expected {expected:.3e}"
-                )
-    return float(lam), float(mu)
-
-
-def _is_isotropic_homogeneous(problem: RVEProblem) -> tuple[bool, str]:
-    """Return (True, "") if the problem is the supported limited-scope case;
-    otherwise (False, reason)."""
-    if len(problem.materials) > 1:
-        # Multi-material: the FE solve would need spatially varying C,
-        # which the MFEM backend does not yet handle.
-        return False, f"multi-material problems ({len(problem.materials)} materials)"
-    name, mat = next(iter(problem.materials.items()))
-    try:
-        _lame_from_isotropic(mat.stiffness)
-    except ValueError as exc:
-        return False, f"non-isotropic material {name!r}: {exc}"
-    return True, ""
+from b3_tex.tensors import voigt_b_matrix
 
 
 def _voigt_strain_to_tensor(eps_voigt: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -99,8 +67,8 @@ def _tensor_strain_to_voigt(eps_tensor: NDArray[np.float64]) -> NDArray[np.float
 
 
 def _build_mesh(problem: RVEProblem):
-    """Create the MFEM mesh (hex by default; honours solver.cell_type), apply
-    optional uniform refinement, and return it."""
+    """Create the MFEM mesh (hex by default; honours solver.cell_type) plus
+    optional uniform refinement passes."""
     import mfem.ser as mfem
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
@@ -118,9 +86,6 @@ def _build_mesh(problem: RVEProblem):
 
     mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem_cell, Lx, Ly, Lz)
 
-    # Optional uniform refinement (placeholder for AMR; full marker-based
-    # refinement on hex needs MFEM's NCMesh path which differs from
-    # b3_tex.amr's tet-only flow).
     n_uniform = int(problem.solver.get("amr", {}).get("n_uniform_refines", 0))
     for _ in range(n_uniform):
         mesh.UniformRefinement()
@@ -128,27 +93,90 @@ def _build_mesh(problem: RVEProblem):
     return mesh
 
 
-def _assemble_volume_averaged_strain(u, fespace, mesh) -> NDArray[np.float64]:
-    """Volume-averaged symmetric gradient of u, returned in Voigt (engineering
-    shear). Integrates the displacement gradient over each element via the
-    element's natural integration rule."""
+def _make_anisotropic_integrator(problem: RVEProblem):
+    """Build a PyBilinearFormIntegrator that pulls per-GP stiffness from
+    problem.field via b3_tex.quadrature.global_stiffness_at_points and
+    assembles B^T C(x_q) B w_q via b3_tex.tensors.voigt_b_matrix.
+
+    Defined inside a factory so that the dependency on mfem.ser stays inside
+    the function body (the backend module must remain importable in non-MFEM
+    environments)."""
+    import mfem.ser as mfem
+
+    class _AnisotropicElasticityIntegrator(mfem.PyBilinearFormIntegrator):
+        def __init__(self, prob: RVEProblem):
+            super().__init__()
+            self._problem = prob
+
+        def AssembleElementMatrix(self, fe, T, elmat):
+            nd = fe.GetDof()
+            dim = fe.GetDim()
+            elmat.SetSize(nd * dim)
+            elmat.Assign(0.0)
+
+            order = 2 * fe.GetOrder()
+            ir = mfem.IntRules.Get(fe.GetGeomType(), order)
+            nq = ir.GetNPoints()
+
+            # Buffers reused across GPs (one DenseMatrix instance, contents
+            # rewritten each time).
+            dshape_ref = mfem.DenseMatrix(nd, dim)
+            J_inv = mfem.DenseMatrix(dim, dim)
+            dshape_phys = mfem.DenseMatrix(nd, dim)
+
+            # Collect per-GP physical coords + dshapes + weights.
+            gp_coords = np.empty((nq, 3))
+            gp_dshapes = np.empty((nq, nd, 3))
+            gp_w = np.empty(nq)
+
+            for q in range(nq):
+                ip = ir.IntPoint(q)
+                T.SetIntPoint(ip)
+                gp_coords[q] = np.asarray(T.Transform(ip))
+                fe.CalcDShape(ip, dshape_ref)
+                mfem.CalcInverse(T.Jacobian(), J_inv)
+                mfem.Mult(dshape_ref, J_inv, dshape_phys)
+                # GetDataArray on a DenseMatrix is a column-major view, but
+                # logically the matrix is (nd, dim). Copy into a row-major
+                # numpy buffer so downstream voigt_b_matrix sees the right
+                # shape semantics regardless of memory layout.
+                gp_dshapes[q] = np.asarray(dshape_phys.GetDataArray())
+                gp_w[q] = ip.weight * T.Weight()
+
+            # Per-GP rotated stiffness via the SAME helper the DOLFINx
+            # backend uses to populate its Quadrature Function. This is the
+            # core code-reuse point.
+            c_per_gp = global_stiffness_at_points(self._problem, gp_coords)
+
+            # Local element matrix in numpy, then write to elmat buffer.
+            elmat_local = np.zeros((nd * dim, nd * dim), dtype=float)
+            for q in range(nq):
+                B = voigt_b_matrix(gp_dshapes[q], ordering="byNODES")
+                elmat_local += B.T @ c_per_gp[q] @ B * gp_w[q]
+
+            elmat.GetDataArray()[:] = elmat_local
+
+    return _AnisotropicElasticityIntegrator(problem)
+
+
+def _assemble_volume_averaged_strain(u, fespace, mesh) -> tuple[NDArray[np.float64], float]:
+    """Volume-averaged symmetric gradient of u, returned as Voigt strain
+    (engineering shear) plus the integrated volume."""
     import mfem.ser as mfem
 
     eps_avg_tensor = np.zeros((3, 3))
     total_vol = 0.0
-
     grad_u = mfem.DenseMatrix(3, 3)
 
     for e in range(mesh.GetNE()):
         T = mesh.GetElementTransformation(e)
         fe = fespace.GetFE(e)
-        # Integration rule of order 2*p (sufficient for Lagrange-1 strain integrals).
         ir = mfem.IntRules.Get(fe.GetGeomType(), 2 * fe.GetOrder())
         for i in range(ir.GetNPoints()):
             ip = ir.IntPoint(i)
             T.SetIntPoint(ip)
             u.GetVectorGradient(T, grad_u)
-            grad_arr = np.array([[grad_u[r, c] for c in range(3)] for r in range(3)])
+            grad_arr = np.asarray(grad_u.GetDataArray())
             eps_arr = 0.5 * (grad_arr + grad_arr.T)
             w = ip.weight * T.Weight()
             eps_avg_tensor += w * eps_arr
@@ -158,49 +186,71 @@ def _assemble_volume_averaged_strain(u, fespace, mesh) -> NDArray[np.float64]:
     return _tensor_strain_to_voigt(eps_avg_tensor), float(total_vol)
 
 
-def solve(problem: RVEProblem) -> HomogenizationResult:
-    ok, reason = _is_isotropic_homogeneous(problem)
-    if not ok:
-        raise NotImplementedError(
-            "MFEM backend currently supports only isotropic homogeneous "
-            f"problems; cannot solve: {reason}. The anisotropic per-GP "
-            "stiffness path needs a custom MFEM integrator — see "
-            "notes/mind/mfem_backend_design.md for the design sketch. Use "
-            "the dolfinx_periodic backend for the full b3_tex feature set."
-        )
+def _assemble_volume_averaged_stress(u, fespace, mesh, problem) -> NDArray[np.float64]:
+    """Volume-averaged Cauchy stress in Voigt, integrated over the domain.
+    Computes sigma(x_q) = C(x_q) @ eps(x_q) at each GP using the same
+    per-GP stiffness lookup as the assembly path. Equivalent to the
+    DOLFINx backend's post-solve sigma_post = ufl.dot(C_func, eps_post)
+    averaged via component_forms."""
+    import mfem.ser as mfem
 
+    sigma_avg_voigt = np.zeros(6)
+    total_vol = 0.0
+
+    grad_u = mfem.DenseMatrix(3, 3)
+
+    for e in range(mesh.GetNE()):
+        T = mesh.GetElementTransformation(e)
+        fe = fespace.GetFE(e)
+        ir = mfem.IntRules.Get(fe.GetGeomType(), 2 * fe.GetOrder())
+        nq = ir.GetNPoints()
+
+        gp_coords = np.empty((nq, 3))
+        gp_eps_voigt = np.empty((nq, 6))
+        gp_w = np.empty(nq)
+        for q in range(nq):
+            ip = ir.IntPoint(q)
+            T.SetIntPoint(ip)
+            gp_coords[q] = np.asarray(T.Transform(ip))
+            u.GetVectorGradient(T, grad_u)
+            grad_arr = np.asarray(grad_u.GetDataArray())
+            eps_arr = 0.5 * (grad_arr + grad_arr.T)
+            gp_eps_voigt[q] = _tensor_strain_to_voigt(eps_arr)
+            gp_w[q] = ip.weight * T.Weight()
+
+        c_per_gp = global_stiffness_at_points(problem, gp_coords)
+        # sigma_q = C_q @ eps_q (per-GP), then volume-weighted sum
+        sigma_per_gp = np.einsum("qij,qj->qi", c_per_gp, gp_eps_voigt)
+        sigma_avg_voigt += np.einsum("q,qi->i", gp_w, sigma_per_gp)
+        total_vol += gp_w.sum()
+
+    sigma_avg_voigt /= total_vol
+    return sigma_avg_voigt
+
+
+def solve(problem: RVEProblem) -> HomogenizationResult:
     import mfem.ser as mfem
 
     mesh = _build_mesh(problem)
 
-    # Lagrange-1 vector space on the mesh.
     fec = mfem.H1_FECollection(1, mesh.Dimension())
     fespace = mfem.FiniteElementSpace(mesh, fec, 3)
 
-    # Lame parameters from the (unique, isotropic) material's Voigt stiffness.
-    _name, mat = next(iter(problem.materials.items()))
-    lam, mu = _lame_from_isotropic(mat.stiffness)
-    lam_coef = mfem.ConstantCoefficient(lam)
-    mu_coef = mfem.ConstantCoefficient(mu)
-
-    # Bilinear form (standard isotropic elasticity).
     a = mfem.BilinearForm(fespace)
-    a.AddDomainIntegrator(mfem.ElasticityIntegrator(lam_coef, mu_coef))
+    integrator = _make_anisotropic_integrator(problem)
+    a.AddDomainIntegrator(integrator)
     a.Assemble()
 
-    # All boundary attributes are Dirichlet (KUBC).
     bdr_max = mesh.bdr_attributes.Max() if mesh.bdr_attributes.Size() else 1
     ess_bdr = mfem.intArray([1] * bdr_max)
     ess_tdof_list = mfem.intArray()
     fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list)
 
-    loadcase_stresses = np.zeros((6, 6))
     loadcase_strains = np.eye(6)
+    loadcase_stresses = np.zeros((6, 6))
     volume = 0.0
 
     class _AffineBC(mfem.VectorPyCoefficient):
-        """Vector boundary coefficient for u = E_tensor @ x."""
-
         def __init__(self, e_tensor):
             super().__init__(3)
             self._e = np.asarray(e_tensor, dtype=float)
@@ -216,36 +266,29 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         u = mfem.GridFunction(fespace)
         u.ProjectCoefficient(bc_coef)
 
-        # Linear form (zero body force).
         b = mfem.LinearForm(fespace)
         b.Assemble()
 
-        # Eliminate Dirichlet, solve.
         X = mfem.Vector()
         B = mfem.Vector()
         A_mat = mfem.SparseMatrix()
         a.FormLinearSystem(ess_tdof_list, u, b, A_mat, X, B)
 
-        # Serial PyMFEM does not ship with UMFPACK by default; use CG + GS
-        # preconditioner. The matrix is SPD for linear elasticity.
         precond = mfem.GSSmoother(A_mat)
         solver = mfem.CGSolver()
         solver.SetRelTol(1e-12)
         solver.SetAbsTol(0.0)
-        solver.SetMaxIter(2000)
+        solver.SetMaxIter(5000)
         solver.SetPrintLevel(0)
         solver.SetPreconditioner(precond)
         solver.SetOperator(A_mat)
         solver.Mult(B, X)
         a.RecoverFEMSolution(X, b, u)
 
-        # Volume-averaged strain (eps_avg) from the FE solution u.
-        eps_avg_voigt, vol_k = _assemble_volume_averaged_strain(u, fespace, mesh)
+        sigma_avg_voigt = _assemble_volume_averaged_stress(u, fespace, mesh, problem)
         if k == 0:
-            volume = vol_k
-
-        # Volume-averaged stress sigma_avg = C @ eps_avg (constant C: homogeneous).
-        sigma_avg_voigt = mat.stiffness @ eps_avg_voigt
+            _, vol = _assemble_volume_averaged_strain(u, fespace, mesh)
+            volume = vol
         loadcase_stresses[:, k] = sigma_avg_voigt
 
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
@@ -261,6 +304,5 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
             "volume": float(volume),
             "n_cells": int(mesh.GetNE()),
             "n_dofs": int(fespace.GetTrueVSize()),
-            "scope": "isotropic-homogeneous-only",
         },
     )

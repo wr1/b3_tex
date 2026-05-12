@@ -2,58 +2,70 @@
 
 ## why this backend exists
 
-Two-line summary: `dolfinx_periodic_backend` is the canonical, full-feature
-backend for `b3_tex`. The MFEM backend exists so the hex-AMR experiment has a
-working framework to drive — DOLFINx 0.10's `mesh.refine` is simplex-only,
-MFEM's `NCMesh` supports hex AMR with hanging nodes natively (see
-`notes/mind/further-work.md` "hex AMR — deferred, blocked upstream").
+`dolfinx_periodic_backend` is the canonical, full-feature backend for `b3_tex`.
+The MFEM backend exists so the hex-AMR experiment has a working framework to
+drive — DOLFINx 0.10's `mesh.refine` is simplex-only, MFEM's `NCMesh` supports
+hex AMR with hanging nodes natively (see `notes/mind/further-work.md`
+"hex AMR — deferred, blocked upstream").
 
-Status today: KUBC, isotropic, homogeneous problems on hex/tet box meshes.
-The full anisotropic per-GP stiffness path that the rest of `b3_tex` is built
-around is **not** implemented yet because MFEM ships only
-`ElasticityIntegrator(lam, mu)` for scalar Lame coefficients; there is no
-built-in integrator that consumes a 6x6 `MatrixCoefficient` for anisotropic
-elasticity.
+## what's implemented (post-anisotropic-integrator)
 
-## what would the anisotropic path look like
+- Cartesian 3D box meshes, hex or tet (`solver.cell_type`).
+- KUBC: u = E @ x on the boundary.
+- Anisotropic per-GP stiffness via a custom Python-side
+  `_AnisotropicElasticityIntegrator` (`mfem.PyBilinearFormIntegrator`
+  subclass).
+- Multi-material problems (anything `b3_tex.fields.PhaseField` can express).
+- Volume-averaged stress recovery using the same per-GP stiffness lookup as
+  the assembly path — no risk of "stress recovery sees a different C than
+  assembly" drift.
 
-The integrand for anisotropic elasticity is `inner(C : eps(u), eps(v))` with
-`C(x)` a 4th-order tensor (or 6x6 in Voigt). The MFEM-native ways to express
-this are:
+## code-reuse principle (this is the load-bearing design)
 
-1. **Custom Python `BilinearFormIntegrator`.** Subclass `mfem.BilinearFormIntegrator`,
-   override `AssembleElementMatrix(self, fe, T, elmat)`, and inside that:
-   - Pull the cell's quadrature rule via `mfem.IntRules.Get(fe.GetGeomType(), q)`.
-   - At each GP, evaluate the physical coordinate `x = T.Transform(ip)`.
-   - Call `problem.field.sample_arrays(np.array([x]))` -> per-GP (id, rotation).
-   - Look up the per-GP rotated 6x6 stiffness via `b3_tex.quadrature.global_stiffness_at_points`.
-   - Assemble the 8N x 8N (hex) or 4N x 4N (tet) element matrix from the
-     standard B^T C B contraction at each GP, weighted by `ip.weight * T.Weight()`.
-   - Write into `elmat` (an `mfem.DenseMatrix`).
-   This is ~150 lines of careful Python code. Performance will be limited by
-   the per-GP `field.sample_arrays` call out of the C++ assembly loop.
+The two backends share two framework-agnostic primitives:
 
-2. **Pre-assembled stiffness matrix in numpy.** Build the global stiffness
-   matrix entirely in Python using `scipy.sparse` and the local-to-global DOF
-   maps from MFEM. Solve with `scipy.sparse.linalg.spsolve` or pass the matrix
-   into MFEM via `mfem.SparseMatrix.OwnsGraph(False).OwnsData(False)`.
-   Less native but simpler to debug and reuses our existing
-   `b3_tex.quadrature.global_stiffness_at_points` code.
+1. **`b3_tex.quadrature.global_stiffness_at_points(problem, points)`**
+   — given any (N, 3) array of physical points, returns the rotated
+   (N, 6, 6) Voigt stiffness via `field.sample_arrays` + `material_names` +
+   `rotate_stiffness_batch`. This is the *single* place where the b3_tex
+   constitutive lookup happens.
 
-3. **C++ integrator in MFEM proper.** Submit upstream patch adding
-   `AnisotropicElasticityIntegrator` that takes a `MatrixCoefficient`. Cleanest
-   long-term but slow turnaround.
+2. **`b3_tex.tensors.voigt_b_matrix(dshape, ordering)`** — given
+   physical-space shape-function derivatives, returns the (6, nd*3) Voigt
+   strain-displacement matrix with engineering shear. The `ordering` kwarg
+   handles the DOF-layout difference between MFEM (`byNODES`) and DOLFINx
+   (`byVDIM`); a future custom DOLFINx integrator would consume the same
+   function with the other ordering.
 
-For a first cut, option (1) is the right tradeoff: keeps the stiffness
-assembly in MFEM's C++ assembler, writes the per-GP work in Python where the
-b3_tex field code lives. The hot path is `problem.field.sample_arrays(pts)`
-which Phase 2 already vectorised, so the cost is the matrix-vector
-contraction at each GP — modest for our typical mesh sizes.
+Both backends call these helpers. The MFEM custom integrator's
+`AssembleElementMatrix` does:
 
-## periodic BCs
+```python
+gp_coords = [T.Transform(ip) for ip in ir]
+c_per_gp = global_stiffness_at_points(problem, gp_coords)   # (Nq, 6, 6)
+for q in range(Nq):
+    B = voigt_b_matrix(gp_dshapes[q], ordering="byNODES")   # (6, nd*3)
+    elmat_local += B.T @ c_per_gp[q] @ B * w_q
+```
+
+The DOLFINx backend populates a `Quadrature` Function with the same
+`global_stiffness_at_points` output via
+`populate_stiffness_at_quadrature_points`. Form assembly is then done by
+FFCx using the form `inner(C_func * eps(u), eps(v)) * dx_q`, which is
+mathematically equivalent to the explicit `B^T C B` loop the MFEM
+integrator runs.
+
+**Implementation drift is therefore impossible** for the constitutive
+lookup — both backends evaluate `problem.field.sample_arrays` at their GPs
+and pass the result through `rotate_stiffness_batch`. The cross-backend
+agreement test (`tests/test_mfem.py::test_mfem_and_dolfinx_kubc_agree_on_ud_tow`)
+pins this: same UD-tow problem, same mesh, same q=2 GPs/tet, both backends
+produce `C_eff` agreeing to <1%.
+
+## periodic BCs (not yet wired)
 
 MFEM has first-class support: `Mesh.MakePeriodic(mesh, v2v)` after
-`Mesh.CreatePeriodicVertexMapping(translations)`. **Caveat:** the smallest
+`Mesh.CreatePeriodicVertexMapping(translations)`. Caveat: the smallest
 working mesh is n=3 per axis (n=2 hits a "interior face shared by three
 elements" topology check because each face has only one element).
 
@@ -63,15 +75,16 @@ periodic) maps directly onto an MFEM linear form built from `-A * u_E` where
 space. One DOF triple at the origin is pinned to remove the rigid-body
 translation.
 
-## hex AMR
+## hex AMR (not yet wired)
 
 MFEM supports both conforming refinement (`UniformRefinement`) and
 non-conforming AMR with hanging nodes (`mesh.GeneralRefinement(refinement_list)`).
-The `b3_tex.amr.cell_heterogeneity_metric` already works on any mesh via
+`b3_tex.amr.cell_heterogeneity_metric` already works on any mesh via
 `field.sample_arrays`; the only piece that needs porting from
-`refine_flagged_cells` is replacing `dolfinx.mesh.refine(mesh, edge_indices)`
-with `mfem.Mesh.GeneralRefinement(refinement_list)` where `refinement_list`
-is the list of cell indices to refine (1->8 children for hex). Hanging-node
+`refine_flagged_cells` is replacing
+`dolfinx.mesh.refine(mesh, edge_indices)` with
+`mfem.Mesh.GeneralRefinement(refinement_list)` where `refinement_list` is the
+list of cell indices to refine (1→8 children for hex). Hanging-node
 constraints on the resulting mesh are handled automatically by MFEM's
 `NCMesh` when the `FiniteElementSpace` is built on top.
 
@@ -88,8 +101,17 @@ def refine_flagged_cells_mfem(mesh, flagged):
 
 Combined with the existing cell-type-agnostic `cell_heterogeneity_metric`
 and `iteratively_refine`, this gives hex AMR for the price of one function.
-The blocker is the anisotropic integrator above — without it, the AMR refines
-a mesh we cannot solve on for the b3_tex's actual yarn-in-matrix problems.
+
+## performance notes
+
+The MFEM custom integrator is Python-side: each element makes one call to
+`global_stiffness_at_points` with `Nq` points (4 for tet q=2, 8 for hex q=2).
+At n=8 hex (512 elements) and q=2 (8 GPs/cell), that's 512 small calls
+totalling 4096 GP samples — fast enough for testing but a global per-mesh
+call would be faster. For the current scope (correctness + a hex-AMR
+foothold) this is acceptable; if perf becomes a concern, the integrator can
+be flipped to a two-pass mode that collects all GPs first and dispatches a
+single `global_stiffness_at_points` call.
 
 ## test gating
 

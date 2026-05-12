@@ -195,6 +195,45 @@ def test_rotate_stiffness_batch_rejects_wrong_shape():
         rotate_stiffness_batch(c, np.eye(3))
 
 
+def test_voigt_b_matrix_recovers_identity_strain_for_affine_displacement():
+    """For a linear element with affine displacement u = E @ x, the strain
+    should be E (Voigt). Build B from the linear basis derivatives, multiply
+    by the nodal u_local from u(node) = E @ node, recover eps_voigt."""
+    from b3_tex.tensors import voigt_b_matrix, tensor_strain_to_voigt
+
+    # 4-node linear tet with the standard reference shape function derivatives
+    # at any point: dN/dxi = [-1,-1,-1; 1,0,0; 0,1,0; 0,0,1] for unit tet.
+    # Use unit tet vertices in physical space so the Jacobian is identity.
+    nodes = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+                      [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    dshape = np.array([[-1.0, -1.0, -1.0],
+                       [1.0, 0.0, 0.0],
+                       [0.0, 1.0, 0.0],
+                       [0.0, 0.0, 1.0]])
+    rng = np.random.default_rng(0)
+    E = rng.standard_normal((3, 3))
+    E_sym = 0.5 * (E + E.T)
+    u_per_node = nodes @ E.T  # (4, 3)
+
+    for ordering in ("byNODES", "byVDIM"):
+        B = voigt_b_matrix(dshape, ordering=ordering)
+        if ordering == "byNODES":
+            u_local = np.concatenate([u_per_node[:, d] for d in range(3)])
+        else:
+            u_local = u_per_node.reshape(-1)
+        eps_recovered = B @ u_local
+        eps_expected = tensor_strain_to_voigt(E_sym)
+        np.testing.assert_allclose(eps_recovered, eps_expected, atol=1e-12)
+
+
+def test_voigt_b_matrix_rejects_wrong_shape_or_ordering():
+    from b3_tex.tensors import voigt_b_matrix
+    with pytest.raises(ValueError, match="shape"):
+        voigt_b_matrix(np.zeros(3))
+    with pytest.raises(ValueError, match="ordering"):
+        voigt_b_matrix(np.zeros((4, 3)), ordering="wat")
+
+
 def test_stiffness_tensor_to_voigt_batch_matches_loop():
     c = isotropic_stiffness(youngs_modulus=10.0, poisson_ratio=0.2)
     t = stiffness_voigt_to_tensor(c)

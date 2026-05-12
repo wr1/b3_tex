@@ -1,9 +1,10 @@
 """MFEM backend smoke + invariant tests.
 
-Scope is limited to the backend's current capability: KUBC + isotropic
-homogeneous problems on Cartesian hex/tet box meshes. The backend rejects
-multi-material or anisotropic configurations with a clear NotImplementedError;
-those tests pin that behaviour.
+The MFEM backend implements KUBC with full anisotropic per-GP stiffness
+(via a custom PyBilinearFormIntegrator that reuses
+b3_tex.quadrature.global_stiffness_at_points and b3_tex.tensors.voigt_b_matrix
+with the DOLFINx backend). Tests pin both the homogeneous-recovery case
+and the UD-tow agreement with the DOLFINx KUBC backend.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ def _homogeneous_isotropic_config(
             "type": "cylinder_yarn",
             "matrix_material": "matrix",
             "yarn_material": "matrix",  # degenerate: yarn = matrix
-            "axis_point": [-10.0, -10.0, -10.0],  # cylinder fully outside box
+            "axis_point": [-10.0, -10.0, -10.0],
             "axis_direction": [1.0, 0.0, 0.0],
             "radius": 0.001,
         },
@@ -44,12 +45,28 @@ def _homogeneous_isotropic_config(
     }
 
 
-def test_mfem_periodic_mesh_smoke():
-    """PyMFEM is importable and its periodic-mesh helper works on a hex box.
+def _ud_tow_config(mesh_n: int = 6, radius: float = 0.4, cell_type: str = "tetrahedron") -> dict:
+    """The same UD-tow config used by the DOLFINx KUBC tests."""
+    return {
+        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "materials": [
+            {"name": "matrix", "type": "isotropic",
+             "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+            {"name": "yarn", "type": "transverse_isotropic",
+             "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+        ],
+        "field": {
+            "type": "cylinder_yarn",
+            "matrix_material": "matrix", "yarn_material": "yarn",
+            "axis_point": [0.5, 0.5, 0.5], "axis_direction": [1.0, 0.0, 0.0],
+            "radius": radius,
+        },
+        "solver": {"backend": "mfem", "cell_type": cell_type},
+    }
 
-    n=3 is the smallest mesh that survives triple periodicity without hitting
-    the 'interior face shared between three elements' topology check (n=2 is
-    degenerate because each face has only one element)."""
+
+def test_mfem_periodic_mesh_smoke():
+    """PyMFEM is importable and its periodic-mesh helper works on a hex box."""
     import mfem.ser as mfem
 
     n = 3
@@ -61,17 +78,15 @@ def test_mfem_periodic_mesh_smoke():
     ]
     v2v = base.CreatePeriodicVertexMapping(translations)
     periodic = mfem.Mesh.MakePeriodic(base, v2v)
-    # n^3 box vertices collapse to (n)^3 under triple periodicity (one
-    # vertex per cell since opposite faces merge).
     assert periodic.GetNV() == n ** 3
     assert periodic.GetNE() == n ** 3
 
 
 @pytest.mark.parametrize("cell_type", ["hexahedron", "tetrahedron"])
 def test_mfem_homogeneous_recovers_isotropic_stiffness(cell_type):
-    """MFEM KUBC backend recovers the homogeneous isotropic stiffness to
-    machine precision on both cell types."""
-    cfg = _homogeneous_isotropic_config(mesh_n=4, cell_type=cell_type)
+    """MFEM KUBC + anisotropic integrator must recover the homogeneous
+    isotropic stiffness to machine precision on both cell types."""
+    cfg = _homogeneous_isotropic_config(mesh_n=3, cell_type=cell_type)
     problem = RVEProblem.from_config(cfg)
 
     from b3_tex.backends.mfem_backend import solve
@@ -83,11 +98,82 @@ def test_mfem_homogeneous_recovers_isotropic_stiffness(cell_type):
     np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
 
 
-def test_mfem_uniform_refinement_does_not_change_homogeneous_result():
-    """One uniform-refinement pass should leave the homogeneous-isotropic
-    answer unchanged (same machine-precision recovery, just more DOFs)."""
-    cfg_base = _homogeneous_isotropic_config(mesh_n=2, n_uniform_refines=0)
-    cfg_refined = _homogeneous_isotropic_config(mesh_n=2, n_uniform_refines=1)
+def test_mfem_homogeneous_transverse_isotropic_recovers_input_stiffness():
+    """A homogeneous transverse-isotropic problem (yarn material filling the
+    whole box) must recover the input stiffness exactly. This is the test
+    that the anisotropic integrator is actually plumbed correctly."""
+    cfg = _homogeneous_isotropic_config(mesh_n=3)
+    cfg["materials"] = [
+        {"name": "yarn", "type": "transverse_isotropic",
+         "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+    ]
+    cfg["field"]["matrix_material"] = "yarn"
+    cfg["field"]["yarn_material"] = "yarn"
+    problem = RVEProblem.from_config(cfg)
+
+    from b3_tex.backends.mfem_backend import solve
+
+    result = solve(problem)
+    expected = Material.transverse_isotropic(
+        "yarn", e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40,
+    ).stiffness
+    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+
+
+def test_mfem_ud_tow_is_symmetric_and_positive_definite():
+    """A UD-tow problem (heterogeneous two-phase) must produce a symmetric,
+    positive-definite C_eff. This exercises the full anisotropic per-GP
+    path on a non-trivial mesh."""
+    problem = RVEProblem.from_config(_ud_tow_config(mesh_n=6, radius=0.4))
+
+    from b3_tex.backends.mfem_backend import solve
+
+    result = solve(problem)
+    np.testing.assert_allclose(
+        result.effective_stiffness, result.effective_stiffness.T,
+        atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
+    )
+    eigs = np.linalg.eigvalsh(result.effective_stiffness)
+    assert np.all(eigs > 0)
+
+
+@pytest.mark.fenicsx
+def test_mfem_and_dolfinx_kubc_agree_on_ud_tow():
+    """The two KUBC backends share the per-GP stiffness primitive
+    (b3_tex.quadrature.global_stiffness_at_points). On the same UD-tow
+    problem they must produce the same effective stiffness to within FE
+    discretisation noise."""
+    cfg = _ud_tow_config(mesh_n=8, radius=0.4, cell_type="tetrahedron")
+
+    from b3_tex.backends.mfem_backend import solve as solve_mfem
+    from b3_tex.backends.dolfinx_backend import solve as solve_dolfinx
+
+    cfg_mfem = {**cfg, "solver": {**cfg["solver"], "backend": "mfem"}}
+    cfg_dolfinx = {**cfg, "solver": {
+        "backend": "dolfinx_kubc",
+        "stiffness_sampling": "quadrature",
+        "quadrature_degree": 2,
+        "cell_type": "tetrahedron",
+    }}
+
+    C_mfem = solve_mfem(RVEProblem.from_config(cfg_mfem)).effective_stiffness
+    C_dolfinx = solve_dolfinx(RVEProblem.from_config(cfg_dolfinx)).effective_stiffness
+
+    # Both backends use the same per-GP stiffness lookup at q=2 GPs per tet.
+    # KUBC, same mesh resolution, same BCs -> the difference should be at the
+    # level of solver/numerical noise (CG vs MUMPS), well under 1%.
+    rel_err = (
+        np.linalg.norm(C_mfem - C_dolfinx)
+        / np.linalg.norm(C_dolfinx)
+    )
+    assert rel_err < 1e-2, f"MFEM vs DOLFINx KUBC disagreement: rel_err = {rel_err:.3e}"
+
+
+def test_mfem_uniform_refinement_keeps_homogeneous_result():
+    """One uniform-refinement pass leaves the homogeneous answer unchanged
+    (same machine-precision recovery, just more DOFs)."""
+    cfg_base = _homogeneous_isotropic_config(mesh_n=3, n_uniform_refines=0)
+    cfg_refined = _homogeneous_isotropic_config(mesh_n=3, n_uniform_refines=1)
 
     from b3_tex.backends.mfem_backend import solve
 
@@ -101,45 +187,7 @@ def test_mfem_uniform_refinement_does_not_change_homogeneous_result():
     np.testing.assert_allclose(r_refined.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
 
 
-def test_mfem_rejects_multi_material_with_clear_error():
-    """Multi-material configs must raise NotImplementedError naming the gap."""
-    cfg = _homogeneous_isotropic_config()
-    cfg["materials"].append({
-        "name": "yarn", "type": "transverse_isotropic",
-        "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
-    })
-    cfg["field"]["yarn_material"] = "yarn"
-    cfg["field"]["axis_point"] = [0.5, 0.5, 0.5]
-    cfg["field"]["radius"] = 0.4
-    problem = RVEProblem.from_config(cfg)
-
-    from b3_tex.backends.mfem_backend import solve
-
-    with pytest.raises(NotImplementedError, match="multi-material"):
-        solve(problem)
-
-
-def test_mfem_rejects_anisotropic_material_with_clear_error():
-    """A single-material problem with an anisotropic stiffness must raise
-    NotImplementedError naming the integrator gap."""
-    cfg = _homogeneous_isotropic_config()
-    cfg["materials"] = [{
-        "name": "yarn", "type": "transverse_isotropic",
-        "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
-    }]
-    cfg["field"]["matrix_material"] = "yarn"
-    cfg["field"]["yarn_material"] = "yarn"
-    problem = RVEProblem.from_config(cfg)
-
-    from b3_tex.backends.mfem_backend import solve
-
-    with pytest.raises(NotImplementedError, match="non-isotropic"):
-        solve(problem)
-
-
-def test_mfem_metadata_records_scope_and_backend_name():
-    """Result metadata must name the backend and acknowledge the scope limit
-    so callers can detect they are on the limited path."""
+def test_mfem_metadata_records_backend_and_cell_type():
     cfg = _homogeneous_isotropic_config()
     problem = RVEProblem.from_config(cfg)
 
@@ -147,5 +195,5 @@ def test_mfem_metadata_records_scope_and_backend_name():
 
     result = solve(problem)
     assert result.metadata["backend"] == "mfem_kubc"
-    assert result.metadata["scope"] == "isotropic-homogeneous-only"
     assert result.metadata["cell_type"] in ("hexahedron", "tetrahedron")
+    assert result.metadata["n_dofs"] > 0

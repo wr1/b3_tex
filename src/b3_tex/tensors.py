@@ -105,6 +105,59 @@ def rotate_stiffness_batch(
     return stiffness_tensor_to_voigt_batch(rotated)
 
 
+def voigt_b_matrix(
+    dshape: ArrayLike, *, ordering: str = "byNODES"
+) -> NDArray[np.float64]:
+    """Voigt strain-displacement matrix B for vector elasticity.
+
+    Given physical-space shape-function derivatives ``dshape`` of shape
+    ``(nd, 3)`` (nd = nodes per element), returns a ``(6, nd*3)`` matrix
+    that maps element nodal displacements to the Voigt strain at the
+    evaluation point: ``eps_voigt = B @ u_local``. Engineering shear
+    convention (matches the rest of b3_tex Voigt: rows are
+    11, 22, 33, 23, 13, 12 with shear rows already containing the factor
+    of 2 from the strain identification).
+
+    The DOF ordering convention controls how the columns of B are laid
+    out. Both DOLFINx and MFEM expose this choice for vector spaces:
+
+    - ``"byNODES"`` (MFEM default): column index for variable d at node n
+      is ``d*nd + n``, i.e. ``[ux_0, ux_1, ..., uy_0, uy_1, ..., uz_0, ...]``.
+    - ``"byVDIM"`` (DOLFINx default): column index for variable d at node
+      n is ``n*3 + d``, i.e. ``[ux_0, uy_0, uz_0, ux_1, uy_1, uz_1, ...]``.
+    """
+    d = np.asarray(dshape, dtype=float)
+    if d.ndim != 2 or d.shape[1] != 3:
+        raise ValueError(f"dshape must have shape (nd, 3), got {d.shape}")
+    nd = d.shape[0]
+
+    if ordering == "byNODES":
+        cx = np.arange(nd, dtype=np.intp)
+        cy = cx + nd
+        cz = cx + 2 * nd
+    elif ordering == "byVDIM":
+        cx = np.arange(nd, dtype=np.intp) * 3
+        cy = cx + 1
+        cz = cx + 2
+    else:
+        raise ValueError(f"unknown ordering {ordering!r}; expected 'byNODES' or 'byVDIM'")
+
+    B = np.zeros((6, nd * 3), dtype=float)
+    dx = d[:, 0]
+    dy = d[:, 1]
+    dz = d[:, 2]
+    B[0, cx] = dx           # eps_xx = du_x/dx
+    B[1, cy] = dy           # eps_yy = du_y/dy
+    B[2, cz] = dz           # eps_zz = du_z/dz
+    B[3, cy] = dz           # 2*eps_yz part 1
+    B[3, cz] = dy           # 2*eps_yz part 2
+    B[4, cx] = dz           # 2*eps_xz part 1
+    B[4, cz] = dx           # 2*eps_xz part 2
+    B[5, cx] = dy           # 2*eps_xy part 1
+    B[5, cy] = dx           # 2*eps_xy part 2
+    return B
+
+
 def isotropic_stiffness(youngs_modulus: float, poisson_ratio: float) -> NDArray[np.float64]:
     if youngs_modulus <= 0:
         raise ValueError("youngs_modulus must be positive")
