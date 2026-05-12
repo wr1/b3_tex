@@ -62,18 +62,37 @@ agreement test (`tests/test_mfem.py::test_mfem_and_dolfinx_kubc_agree_on_ud_tow`
 pins this: same UD-tow problem, same mesh, same q=2 GPs/tet, both backends
 produce `C_eff` agreeing to <1%.
 
-## periodic BCs (not yet wired)
+## periodic BCs (shipped)
 
-MFEM has first-class support: `Mesh.MakePeriodic(mesh, v2v)` after
-`Mesh.CreatePeriodicVertexMapping(translations)`. Caveat: the smallest
-working mesh is n=3 per axis (n=2 hits a "interior face shared by three
-elements" topology check because each face has only one element).
+`solve_periodic(problem)` implements the fluctuation split `u = E·x + u_tilde`
+with `u_tilde` periodic. Mesh-level periodicity via
+`Mesh.MakePeriodic(mesh, v2v)` after
+`Mesh.CreatePeriodicVertexMapping(translations)` eliminates the
+cascading-MPC pattern the DOLFINx backend uses (no master / slave
+bookkeeping, no corner-pin trickery).
 
-The fluctuation-split formulation (`u = E·x + u_tilde`, with `u_tilde`
-periodic) maps directly onto an MFEM linear form built from `-A * u_E` where
-`u_E` is the affine displacement projected onto the periodic mesh's vector
-space. One DOF triple at the origin is pinned to remove the rigid-body
-translation.
+Pinning: a single 3-DOF pin at the origin vertex (which is geometrically
+the periodic-image of all 8 box corners on the resulting mesh) removes the
+rigid-body translation in `u_tilde`. Rotation modes don't need separate
+pinning because the symmetric-macro-strain source term breaks any
+admissible rotational symmetry of `u_tilde`.
+
+RHS: a custom `mfem.PyLinearFormIntegrator` (`_MacroStressRHS`) computes the
+per-element vector `L_e = -int_e B^T (C(x_q) E_voigt) w_q` directly via the
+shared `voigt_b_matrix` + `global_stiffness_at_points` helpers. The
+macro-stress `C(x_q) @ E_voigt` is built from the *same* per-GP stiffness
+that the bilinear form uses, so assembly and RHS see one consistent C(x_q).
+
+Caveat: the smallest working mesh is n=3 per axis (n=2 hits a
+"interior face shared by three elements" topology check because each face
+has only one element).
+
+The cross-backend agreement test
+(`tests/test_mfem.py::test_mfem_and_dolfinx_periodic_agree_on_ud_tow`)
+pins this: a UD tow on the same mesh under both backends agrees to <2%
+relative Frobenius error, despite using different periodic-BC machineries.
+The `mfem_periodic <= mfem_kubc` invariant is also pinned (same psd
+ordering test as the DOLFINx side).
 
 ## hex AMR (not yet wired)
 

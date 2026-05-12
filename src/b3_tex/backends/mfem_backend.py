@@ -13,29 +13,24 @@ shape-function derivatives and return numpy arrays. Any "implementation
 drift" between how DOLFINx samples C and how MFEM samples C is impossible
 because both call the same function.
 
-What this backend supports:
+Public entry points:
 
-- Cartesian 3D box meshes, hex or tet (solver.cell_type).
-- KUBC: u = E @ x on the boundary.
-- Anisotropic per-GP stiffness via a custom Python-side
-  _AnisotropicElasticityIntegrator (mfem.PyBilinearFormIntegrator subclass).
-  The integrator evaluates problem.field.sample_arrays at every quadrature
-  point of every element, builds the Voigt B from the physical-space shape
-  derivatives, and accumulates B^T C(x_q) B w_q into the local element matrix.
-- Multi-material problems (anything b3_tex.fields.PhaseField can express).
-- Optional uniform refinement before solve (solver.amr.n_uniform_refines).
-- Six unit-Voigt loadcases -> effective 6x6 stiffness via volume-averaged
-  stress.
+- ``solve(problem)``           -- KUBC, u = E @ x on the boundary.
+- ``solve_periodic(problem)``  -- fluctuation split u = E @ x + u_tilde with
+                                  u_tilde periodic; mesh-level periodicity
+                                  via ``mfem.Mesh.MakePeriodic`` plus a
+                                  3-DOF pin at the origin vertex to remove
+                                  rigid-body translation.
 
-Not yet supported (deferred to follow-ups):
+Both functions support hex or tet box meshes (``solver.cell_type``),
+anisotropic per-GP stiffness via the shared
+``b3_tex.quadrature.global_stiffness_at_points`` helper, and any multi-
+material configuration the ``PhaseField`` machinery can express.
 
-- Periodic BCs (KUBC only). MFEM has the mesh helpers for it
-  (Mesh.MakePeriodic + CreatePeriodicVertexMapping) but the
-  fluctuation-split formulation is not wired in.
-- Marker-based hex AMR. b3_tex.amr.cell_heterogeneity_metric is
-  cell-type-agnostic; refine_flagged_cells is the only piece that needs an
-  MFEM variant calling Mesh.GeneralRefinement -- see
-  notes/mind/mfem_backend_design.md.
+Not yet wired: marker-based hex AMR. ``b3_tex.amr.cell_heterogeneity_metric``
+is cell-type-agnostic; ``refine_flagged_cells`` is the only piece that
+needs an MFEM variant calling ``Mesh.GeneralRefinement`` -- see
+``notes/mind/mfem_backend_design.md``.
 """
 
 from __future__ import annotations
@@ -302,6 +297,232 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
             "mesh_resolution": list(problem.mesh_resolution),
             "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
             "volume": float(volume),
+            "n_cells": int(mesh.GetNE()),
+            "n_dofs": int(fespace.GetTrueVSize()),
+        },
+    )
+
+
+def _build_periodic_mesh(problem: RVEProblem):
+    """Cartesian 3D box mesh with full triple-axis periodicity at the mesh
+    level. Returns the periodic Mesh; the FE space built on top of it has
+    matched DOFs on opposite faces with no MPC machinery needed."""
+    import mfem.ser as mfem
+
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    nx, ny, nz = problem.mesh_resolution
+
+    cell_type_name = str(problem.solver.get("cell_type", "hexahedron"))
+    if cell_type_name == "hexahedron":
+        mfem_cell = mfem.Element.HEXAHEDRON
+    elif cell_type_name == "tetrahedron":
+        mfem_cell = mfem.Element.TETRAHEDRON
+    else:
+        raise ValueError(
+            f"unknown cell_type {cell_type_name!r}; expected 'hexahedron' or 'tetrahedron'"
+        )
+
+    base = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem_cell, Lx, Ly, Lz)
+    translations = [
+        mfem.Vector([Lx, 0.0, 0.0]),
+        mfem.Vector([0.0, Ly, 0.0]),
+        mfem.Vector([0.0, 0.0, Lz]),
+    ]
+    v2v = base.CreatePeriodicVertexMapping(translations)
+    mesh = mfem.Mesh.MakePeriodic(base, v2v)
+
+    n_uniform = int(problem.solver.get("amr", {}).get("n_uniform_refines", 0))
+    for _ in range(n_uniform):
+        mesh.UniformRefinement()
+
+    return mesh
+
+
+def _find_origin_pin_tdofs(fespace, mesh, tol: float = 1e-9) -> list[int]:
+    """Three true DOF indices (one per displacement component) at the origin
+    vertex. On the triple-periodic mesh, all 8 box corners collapse onto a
+    single vertex at (0, 0, 0) which is geometrically the most convenient
+    pin point. Returned DOFs are in the byNODES ordering used by
+    ``FiniteElementSpace`` for ``vdim=3`` Lagrange-1 spaces:
+    ``(vert, vert + N, vert + 2 N)`` where N is the scalar DOF count."""
+    nv = mesh.GetNV()
+    origin = -1
+    for i in range(nv):
+        v = mesh.GetVertexArray(i)
+        if all(abs(v[d]) < tol for d in range(3)):
+            origin = i
+            break
+    if origin == -1:
+        raise RuntimeError("could not locate origin vertex on periodic mesh")
+    n_scalar = fespace.GetNDofs()
+    return [origin, origin + n_scalar, origin + 2 * n_scalar]
+
+
+def _make_macro_stress_rhs_integrator(problem: RVEProblem, E_voigt: NDArray[np.float64]):
+    """Custom LinearFormIntegrator for the periodic-RVE fluctuation problem.
+
+    Computes ``L(v) = - int_Omega (C(x) E_voigt)^T B(x) v_local dx`` per
+    element. Reuses ``global_stiffness_at_points`` and ``voigt_b_matrix`` --
+    the same helpers the bilinear-form integrator consumes -- so the
+    macro-stress and the assembled C are guaranteed to use the same
+    constitutive lookup at the same physical points."""
+    import mfem.ser as mfem
+
+    E_voigt_arr = np.asarray(E_voigt, dtype=float)
+
+    class _MacroStressRHS(mfem.PyLinearFormIntegrator):
+        def __init__(self, prob: RVEProblem):
+            super().__init__()
+            self._problem = prob
+
+        def AssembleRHSElementVect(self, el, Tr, elvect):
+            nd = el.GetDof()
+            dim = el.GetDim()
+            elvect.SetSize(nd * dim)
+            elvect.Assign(0.0)
+
+            order = 2 * el.GetOrder()
+            ir = mfem.IntRules.Get(el.GetGeomType(), order)
+            nq = ir.GetNPoints()
+
+            dshape_ref = mfem.DenseMatrix(nd, dim)
+            J_inv = mfem.DenseMatrix(dim, dim)
+            dshape_phys = mfem.DenseMatrix(nd, dim)
+
+            gp_coords = np.empty((nq, 3))
+            gp_dshapes = np.empty((nq, nd, 3))
+            gp_w = np.empty(nq)
+            for q in range(nq):
+                ip = ir.IntPoint(q)
+                Tr.SetIntPoint(ip)
+                gp_coords[q] = np.asarray(Tr.Transform(ip))
+                el.CalcDShape(ip, dshape_ref)
+                mfem.CalcInverse(Tr.Jacobian(), J_inv)
+                mfem.Mult(dshape_ref, J_inv, dshape_phys)
+                gp_dshapes[q] = np.asarray(dshape_phys.GetDataArray())
+                gp_w[q] = ip.weight * Tr.Weight()
+
+            c_per_gp = global_stiffness_at_points(self._problem, gp_coords)
+            # sigma_macro(x_q) = C(x_q) @ E_voigt
+            sigma_macro = np.einsum("qij,j->qi", c_per_gp, E_voigt_arr)
+
+            elvect_local = np.zeros(nd * dim, dtype=float)
+            for q in range(nq):
+                B = voigt_b_matrix(gp_dshapes[q], ordering="byNODES")
+                # L(v) = - int sigma_macro . B v dx -> elvect -= B^T sigma_macro w
+                elvect_local -= B.T @ sigma_macro[q] * gp_w[q]
+
+            elvect.GetDataArray()[:] = elvect_local
+
+    return _MacroStressRHS(problem)
+
+
+def _assemble_volume_averaged_total_stress(
+    u_tilde, fespace, mesh, problem: RVEProblem, E_voigt: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Volume-averaged Cauchy stress in Voigt for the periodic problem:
+    sigma_avg = <C(x) @ (E_voigt + eps(u_tilde)(x))>. Uses the same per-GP
+    stiffness lookup as assembly."""
+    import mfem.ser as mfem
+
+    sigma_avg = np.zeros(6, dtype=float)
+    total_vol = 0.0
+    grad_u = mfem.DenseMatrix(3, 3)
+
+    for e in range(mesh.GetNE()):
+        T = mesh.GetElementTransformation(e)
+        fe = fespace.GetFE(e)
+        ir = mfem.IntRules.Get(fe.GetGeomType(), 2 * fe.GetOrder())
+        nq = ir.GetNPoints()
+
+        gp_coords = np.empty((nq, 3))
+        gp_eps_voigt = np.empty((nq, 6))
+        gp_w = np.empty(nq)
+        for q in range(nq):
+            ip = ir.IntPoint(q)
+            T.SetIntPoint(ip)
+            gp_coords[q] = np.asarray(T.Transform(ip))
+            u_tilde.GetVectorGradient(T, grad_u)
+            grad_arr = np.asarray(grad_u.GetDataArray())
+            eps_arr = 0.5 * (grad_arr + grad_arr.T)
+            gp_eps_voigt[q] = _tensor_strain_to_voigt(eps_arr)
+            gp_w[q] = ip.weight * T.Weight()
+
+        c_per_gp = global_stiffness_at_points(problem, gp_coords)
+        eps_total = gp_eps_voigt + E_voigt  # broadcast (nq, 6) + (6,)
+        sigma_q = np.einsum("qij,qj->qi", c_per_gp, eps_total)
+        sigma_avg += np.einsum("q,qi->i", gp_w, sigma_q)
+        total_vol += gp_w.sum()
+
+    return sigma_avg / total_vol
+
+
+def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
+    """Periodic-RVE homogenization via the fluctuation split u = E @ x + u_tilde
+    with u_tilde periodic. Mesh-level periodicity (mfem.Mesh.MakePeriodic)
+    eliminates the need for the cascading-MPC pattern the DOLFINx backend
+    uses. A single 3-DOF pin at the origin vertex removes the rigid-body
+    translation in u_tilde."""
+    import mfem.ser as mfem
+
+    mesh = _build_periodic_mesh(problem)
+
+    fec = mfem.H1_FECollection(1, mesh.Dimension())
+    fespace = mfem.FiniteElementSpace(mesh, fec, 3)
+
+    a = mfem.BilinearForm(fespace)
+    a.AddDomainIntegrator(_make_anisotropic_integrator(problem))
+    a.Assemble()
+
+    pin_dofs = _find_origin_pin_tdofs(fespace, mesh)
+    ess_tdof_list = mfem.intArray()
+    for d in pin_dofs:
+        ess_tdof_list.Append(int(d))
+
+    loadcase_strains = np.eye(6)
+    loadcase_stresses = np.zeros((6, 6))
+
+    for k in range(6):
+        E_voigt = loadcase_strains[k]
+
+        u_tilde = mfem.GridFunction(fespace)
+        u_tilde.Assign(0.0)
+
+        b = mfem.LinearForm(fespace)
+        b.AddDomainIntegrator(_make_macro_stress_rhs_integrator(problem, E_voigt))
+        b.Assemble()
+
+        X = mfem.Vector()
+        B = mfem.Vector()
+        A_mat = mfem.SparseMatrix()
+        a.FormLinearSystem(ess_tdof_list, u_tilde, b, A_mat, X, B)
+
+        precond = mfem.GSSmoother(A_mat)
+        solver = mfem.CGSolver()
+        solver.SetRelTol(1e-12)
+        solver.SetAbsTol(0.0)
+        solver.SetMaxIter(5000)
+        solver.SetPrintLevel(0)
+        solver.SetPreconditioner(precond)
+        solver.SetOperator(A_mat)
+        solver.Mult(B, X)
+        a.RecoverFEMSolution(X, b, u_tilde)
+
+        sigma_avg = _assemble_volume_averaged_total_stress(
+            u_tilde, fespace, mesh, problem, E_voigt
+        )
+        loadcase_stresses[:, k] = sigma_avg
+
+    effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
+
+    return HomogenizationResult(
+        effective_stiffness=effective_stiffness,
+        loadcase_strains=loadcase_strains,
+        loadcase_stresses=loadcase_stresses,
+        metadata={
+            "backend": "mfem_periodic",
+            "mesh_resolution": list(problem.mesh_resolution),
+            "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
             "n_cells": int(mesh.GetNE()),
             "n_dofs": int(fespace.GetTrueVSize()),
         },
