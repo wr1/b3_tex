@@ -92,6 +92,25 @@ def test_quadrature_homogeneous_recovers_isotropic_stiffness_to_machine_precisio
     np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
 
 
+@pytest.mark.parametrize("cell_type", ["tetrahedron", "hexahedron"])
+def test_homogeneous_recovers_isotropic_stiffness_on_any_cell_type(cell_type):
+    """The hex periodic backend + hex tensor-product quadrature must recover
+    the homogeneous matrix stiffness exactly, the same way the tet backend does."""
+    cfg = _ud_tow_config(mesh_n=4, radius=0.001)
+    cfg["materials"] = [
+        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+    ]
+    cfg["field"]["yarn_material"] = "matrix"
+    cfg["solver"]["cell_type"] = cell_type
+    problem = RVEProblem.from_config(cfg)
+
+    from b3_tex.backends.dolfinx_periodic_backend import solve
+
+    result = solve(problem)
+    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
+    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+
+
 @pytest.mark.parametrize("qdeg", [3, 4, 6, 8])
 def test_quadrature_homogeneous_at_higher_degrees(qdeg):
     """Higher-order quadrature schemes must still recover the homogeneous

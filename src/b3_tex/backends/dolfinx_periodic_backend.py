@@ -203,11 +203,21 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
 
+    cell_type_name = str(problem.solver.get("cell_type", "tetrahedron"))
+    if cell_type_name == "tetrahedron":
+        cell_type = dolfinx.mesh.CellType.tetrahedron
+    elif cell_type_name == "hexahedron":
+        cell_type = dolfinx.mesh.CellType.hexahedron
+    else:
+        raise ValueError(
+            f"unknown cell_type {cell_type_name!r}; expected 'tetrahedron' or 'hexahedron'"
+        )
+
     mesh = dolfinx.mesh.create_box(
         MPI.COMM_WORLD,
         [np.array([0.0, 0.0, 0.0]), np.array([Lx, Ly, Lz])],
         [nx, ny, nz],
-        cell_type=dolfinx.mesh.CellType.tetrahedron,
+        cell_type=cell_type,
     )
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
