@@ -41,7 +41,7 @@ THRESHOLD = 0.20
 DOMAIN_SIZE = [1.0, 1.0, 0.16]
 
 
-def weave_config(amr_iterations: int) -> dict:
+def weave_config(amr_iterations: int, cell_type: str = "hexahedron") -> dict:
     return {
         "domain": {"size": DOMAIN_SIZE, "mesh_resolution": list(BASE_MESH)},
         "materials": [
@@ -66,7 +66,7 @@ def weave_config(amr_iterations: int) -> dict:
         },
         "solver": {
             "backend": "mfem_periodic",
-            "cell_type": "hexahedron",
+            "cell_type": cell_type,
             "amr": {
                 "enabled": amr_iterations > 0,
                 "threshold": THRESHOLD,
@@ -75,6 +75,12 @@ def weave_config(amr_iterations: int) -> dict:
             },
         },
     }
+
+
+def gps_per_cell(cell_type: str) -> int:
+    """Number of q=2 Gauss points per cell. For hex: 2x2x2 tensor product.
+    For tet: 4-point Hammer rule."""
+    return 8 if cell_type == "hexahedron" else 4
 
 
 def _mfem_mesh_to_pyvista(mesh):
@@ -137,30 +143,32 @@ def render_slice(mesh, metric, out_path: Path, title: str) -> None:
     p.close()
 
 
-def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
     from b3_tex.amr import cell_heterogeneity_metric_mfem
     from b3_tex.backends.mfem_backend import _build_mesh, solve_periodic
 
+    gp_per_cell = gps_per_cell(cell_type)
     runs: list[dict] = []
-    for it in [0, 1, 2, 3]:
-        problem = RVEProblem.from_config(weave_config(it))
-        print(f"AMR iterations: {it} ...", end=" ", flush=True)
+    for it in iters:
+        problem = RVEProblem.from_config(weave_config(it, cell_type=cell_type))
+        print(f"  [{cell_type[:3]}] AMR iter {it} ...", end=" ", flush=True)
 
-        # First: solve.
         t0 = time.perf_counter()
         result = solve_periodic(problem)
         elapsed = time.perf_counter() - t0
 
-        # Second: rebuild the same mesh for visualisation + metric.
         mesh_for_viz = _build_mesh(problem)
         metric = cell_heterogeneity_metric_mfem(mesh_for_viz, problem)
 
         e_const = result.engineering_constants()
+        n_cells = result.metadata["n_cells"]
         rec = {
+            "cell_type": cell_type,
             "amr_iterations": it,
-            "n_cells": result.metadata["n_cells"],
+            "n_cells": n_cells,
             "n_dofs": result.metadata["n_dofs"],
+            "n_gps": n_cells * gp_per_cell,
+            "gps_per_cell": gp_per_cell,
             "elapsed_s": elapsed,
             "C": result.effective_stiffness.tolist(),
             "e_x_GPa": e_const["e_x"] / 1e9,
@@ -169,71 +177,102 @@ def main() -> None:
             "g_xy_GPa": e_const["g_xy"] / 1e9,
         }
         runs.append(rec)
-        print(f"n_cells={rec['n_cells']:5d}  n_dofs={rec['n_dofs']:6d}  "
-              f"E_x={rec['e_x_GPa']:5.2f}  E_y={rec['e_y_GPa']:5.2f}  "
-              f"E_z={rec['e_z_GPa']:5.2f}  t={elapsed:5.1f}s")
+        print(f"cells={n_cells:5d} GPs={rec['n_gps']:6d} DOFs={rec['n_dofs']:6d}  "
+              f"E_x={rec['e_x_GPa']:5.2f} E_z={rec['e_z_GPa']:5.2f}  t={elapsed:6.1f}s")
 
-        render_slice(
-            mesh_for_viz, metric,
-            OUT_DIR / f"mfem_weave_amr_iter{it}.png",
-            f"MFEM hex periodic, AMR iter {it}: {rec['n_cells']} hex cells, "
-            f"{rec['n_dofs']} DOFs",
-        )
+        if cell_type == "hexahedron":
+            render_slice(
+                mesh_for_viz, metric,
+                OUT_DIR / f"mfem_weave_amr_iter{it}.png",
+                f"MFEM hex periodic, AMR iter {it}: {n_cells} cells (8 GPs each = "
+                f"{rec['n_gps']} material samples), {rec['n_dofs']} DOFs",
+            )
+    return runs
 
-    # Convergence panel.
-    iters = np.array([r["amr_iterations"] for r in runs])
-    cells = np.array([r["n_cells"] for r in runs])
-    e_x = np.array([r["e_x_GPa"] for r in runs])
-    e_y = np.array([r["e_y_GPa"] for r in runs])
-    e_z = np.array([r["e_z_GPa"] for r in runs])
-    g_xy = np.array([r["g_xy_GPa"] for r in runs])
-    elapsed = np.array([r["elapsed_s"] for r in runs])
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+def main() -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Hex AMR (NCMesh octree, 8 GPs/cell):")
+    hex_runs = _sweep("hexahedron", [0, 1, 2, 3])
+    print("Tet AMR (Plaza red-green, 4 GPs/cell):")
+    # Tet AMR is conforming-only -> cell count grows faster; cap at 2 iters
+    tet_runs = _sweep("tetrahedron", [0, 1, 2])
+    runs = hex_runs + tet_runs
+
+    # Convergence panels: x-axis = number of material/Gauss point samples.
+    # This normalises for hex (8 GPs/cell) vs tet (4 GPs/cell) so the
+    # "is hex more efficient" question is asked at matched constitutive
+    # work.
+    def arr(records, key):
+        return np.array([r[key] for r in records])
+
+    style = {
+        "hexahedron": {"marker": "o", "color": "#1b9e77",
+                       "label": "hex (8 GPs/cell, NCMesh octree)"},
+        "tetrahedron": {"marker": "s", "color": "#d95f02",
+                        "label": "tet (4 GPs/cell, Plaza red-green)"},
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.5))
+
     ax = axes[0, 0]
-    ax.plot(cells, e_x, marker="o", color="#1b9e77", label=r"$E_x$")
-    ax.plot(cells, e_y, marker="s", color="#d95f02", label=r"$E_y$")
-    for it, c, vx in zip(iters, cells, e_x, strict=True):
-        ax.annotate(f"iter {it}", (c, vx), fontsize=8, alpha=0.6,
-                    xytext=(5, 5), textcoords="offset points")
+    for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
+        s = style[ct]
+        ax.plot(arr(recs, "n_gps"), arr(recs, "e_x_GPa"),
+                marker=s["marker"], color=s["color"], linestyle="-",
+                label=f"{s['label']}: $E_x$")
+        ax.plot(arr(recs, "n_gps"), arr(recs, "e_z_GPa"),
+                marker=s["marker"], color=s["color"], linestyle="--",
+                alpha=0.6, label=f"{s['label']}: $E_z$")
     ax.set_xscale("log")
-    ax.set_xlabel("hex cells")
-    ax.set_ylabel(r"in-plane modulus [GPa]")
-    ax.set_title("In-plane modulus convergence under AMR")
-    ax.legend(loc="best", frameon=False)
+    ax.set_xlabel("# Gauss points = # material samples")
+    ax.set_ylabel("modulus [GPa]")
+    ax.set_title("Modulus convergence under hex vs tet AMR")
+    ax.legend(loc="best", frameon=False, fontsize=8)
     ax.grid(True, which="both", alpha=0.3)
 
     ax = axes[0, 1]
-    ax.plot(cells, e_z, marker="o", color="#7570b3", label=r"$E_z$")
-    ax.plot(cells, g_xy, marker="s", color="#e7298a", label=r"$G_{xy}$")
+    for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
+        s = style[ct]
+        ax.plot(arr(recs, "n_gps"), arr(recs, "n_dofs"),
+                marker=s["marker"], color=s["color"], label=s["label"])
     ax.set_xscale("log")
-    ax.set_xlabel("hex cells")
-    ax.set_ylabel(r"modulus [GPa]")
-    ax.set_title("Through-thickness $E_z$ and in-plane shear $G_{xy}$")
-    ax.legend(loc="best", frameon=False)
+    ax.set_yscale("log")
+    ax.set_xlabel("# Gauss points = # material samples")
+    ax.set_ylabel("# displacement DOFs")
+    ax.set_title("DOF count per GP -- hex has fewer DOFs per GP")
+    ax.legend(loc="best", frameon=False, fontsize=8)
     ax.grid(True, which="both", alpha=0.3)
 
     ax = axes[1, 0]
-    ax.plot(cells, elapsed, marker="o", color="black")
+    for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
+        s = style[ct]
+        ax.plot(arr(recs, "n_gps"), arr(recs, "elapsed_s"),
+                marker=s["marker"], color=s["color"], label=s["label"])
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("hex cells")
+    ax.set_xlabel("# Gauss points = # material samples")
     ax.set_ylabel("wall-clock per solve [s]")
-    ax.set_title("Runtime vs cell count")
+    ax.set_title("Runtime vs constitutive cost")
+    ax.legend(loc="best", frameon=False, fontsize=8)
     ax.grid(True, which="both", alpha=0.3)
 
     ax = axes[1, 1]
-    ax.plot(iters, cells, marker="o", color="black")
+    for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
+        s = style[ct]
+        ax.plot(arr(recs, "amr_iterations"), arr(recs, "n_gps"),
+                marker=s["marker"], color=s["color"], label=s["label"])
     ax.set_xlabel("AMR iteration")
-    ax.set_ylabel("hex cells")
+    ax.set_ylabel("# Gauss points")
     ax.set_yscale("log")
-    ax.set_title("Mesh growth across AMR iterations")
+    ax.set_title("AMR growth: tet refinement floods the mesh")
+    ax.legend(loc="best", frameon=False, fontsize=8)
     ax.grid(True, which="both", alpha=0.3)
 
     fig.suptitle(
-        "MFEM hex periodic + AMR on 2x2 plain weave "
+        "MFEM periodic + AMR on 2x2 plain weave: hex vs tet at matched GP count "
         f"(base mesh {BASE_MESH}, threshold={THRESHOLD})",
-        fontsize=12,
+        fontsize=11,
     )
     fig.tight_layout()
     fig.savefig(OUT_DIR / "mfem_weave_amr_convergence.png", dpi=180)
