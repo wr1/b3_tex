@@ -1,35 +1,31 @@
 """Adaptive mesh refinement based on in-cell stiffness variability (phase 1).
 
-For each cell, sample N sub-points in barycentric coordinates and evaluate the
-``PhaseField``. The cell heterogeneity metric is
+For each cell, sample N sub-points (barycentric for tets, uniform-in-AABB for
+axis-aligned hexes), evaluate the ``PhaseField`` at every sub-point, and
+score the cell:
 
     score = frac_majority_disagree + 0.5 * mean_rotation_spread
 
-where ``frac_majority_disagree`` is the fraction of sub-points whose material
-ID differs from the cell-majority ID (in [0, 0.5]), and
-``mean_rotation_spread`` is the mean Frobenius distance of each sub-point's
-rotation from the cell-mean rotation, normalised by sqrt(6) so it lives in
-roughly [0, 1]. A homogeneous cell scores zero.
+``frac_majority_disagree`` is the fraction of sub-points whose material ID
+differs from the cell-majority ID (in [0, 0.5]); ``mean_rotation_spread`` is
+the mean Frobenius distance of each sub-point's rotation from the cell-mean
+rotation, normalised by sqrt(6) so it lives in roughly [0, 1]. A homogeneous
+cell scores zero.
 
-Cells with score > threshold are flagged. The refinement loop calls
-``dolfinx.mesh.refine`` on the edges incident to flagged cells (Plaza-style
-red-green refinement). Iterates until no cells are flagged or the displacement
-DOF budget is reached.
+Cells with ``score > threshold`` are flagged. Refinement loops are exposed
+per FE framework:
 
-DOLFINx 0.10 only exposes ``refine`` for tetrahedral meshes — hex AMR would
-need a separate driver, so the backend integration explicitly rejects
-``cell_type="hexahedron"`` paired with ``amr.enabled=true``.
+  - ``iteratively_refine``      -- DOLFINx (tet only; ``dolfinx.mesh.refine``
+                                   is Plaza-style red-green refinement, which
+                                   in DOLFINx 0.10 is simplex-only).
+  - ``iteratively_refine_mfem`` -- MFEM (hex or tet via
+                                   ``mfem.Mesh.GeneralRefinement`` after
+                                   ``EnsureNCMesh`` for non-conforming
+                                   refinement with hanging nodes).
 
-Hex-AMR roadmap (deferred to upstream): the natural algorithm for hex AMR
-is octree subdivision (1 hex -> 8 children) with hanging-node constraints
-at coarse-fine interfaces. As of 2026, neither DOLFINx (0.10) nor Firedrake
-exposes this in Python — DOLFINx's ``refine`` is Plaza-only (simplex), and
-Firedrake's adaptive refinement path goes through Netgen/ngsPETSc which is
-also simplex-only. PETSc DMForest wraps p4est at the C level but neither
-framework consumes it. The phase-1 marker and iteration loop in this module
-are cell-type agnostic — only ``refine_flagged_cells`` depends on the
-tet-specific ``dolfinx.mesh.refine``. When upstream support arrives we
-swap one function, not the algorithm.
+The mesh-agnostic core (``_score_from_samples``) is shared between both
+paths so the heterogeneity metric is defined identically regardless of cell
+type or FE framework.
 """
 
 from __future__ import annotations
@@ -43,41 +39,23 @@ if TYPE_CHECKING:
     from b3_tex.problem import RVEProblem
 
 
-def _barycentric_sub_points_in_cell(
-    vertices: NDArray[np.float64], n_samples: int, rng
+# ---------------------------------------------------------------------------
+# mesh-agnostic core
+# ---------------------------------------------------------------------------
+
+def _score_from_samples(
+    ids: NDArray[np.intp],
+    rotations: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Sample ``n_samples`` uniform points inside a tet (4 vertices) via the
-    standard exponential-Dirichlet trick."""
-    weights = rng.exponential(scale=1.0, size=(n_samples, 4))
-    weights /= weights.sum(axis=1, keepdims=True)
-    return weights @ vertices  # (n_samples, 3)
+    """Heterogeneity score from per-cell sub-point samples.
 
+    Inputs:
+        ids:       (n_cells, n_samples) integer material IDs
+        rotations: (n_cells, n_samples, 3, 3)
 
-def cell_heterogeneity_metric(
-    mesh: Any,
-    problem: "RVEProblem",
-    *,
-    n_samples_per_cell: int = 8,
-    seed: int = 0,
-) -> NDArray[np.float64]:
-    """Per-cell heterogeneity score (see module docstring)."""
-    rng = np.random.default_rng(seed)
-    tdim = mesh.topology.dim
-    n_cells = mesh.topology.index_map(tdim).size_local
-
-    cell_vertices = mesh.geometry.x[mesh.geometry.dofmap]  # (n_cells, 4, 3)
-
-    all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
-    for c in range(n_cells):
-        all_pts[c] = _barycentric_sub_points_in_cell(
-            cell_vertices[c], n_samples_per_cell, rng
-        )
-    flat_pts = all_pts.reshape(-1, 3)
-
-    ids_flat, rotations_flat = problem.field.sample_arrays(flat_pts)
-    ids = ids_flat.reshape(n_cells, n_samples_per_cell)
-    rotations = rotations_flat.reshape(n_cells, n_samples_per_cell, 3, 3)
-
+    Returns the (n_cells,) score array. This is the only place the metric
+    formula is defined; both the DOLFINx and MFEM paths feed into it."""
+    n_cells, _n_samples = ids.shape
     n_distinct_materials = max(int(ids.max()) + 1, 1)
     counts = np.zeros((n_cells, n_distinct_materials), dtype=int)
     for k in range(n_distinct_materials):
@@ -100,12 +78,68 @@ def flag_cells_for_refinement(
     return metric > threshold
 
 
-def refine_flagged_cells(mesh: Any, flagged: NDArray[np.bool_]) -> Any:
-    """One refinement pass on the edges incident to flagged cells.
+# ---------------------------------------------------------------------------
+# per-cell-type sub-point samplers
+# ---------------------------------------------------------------------------
 
-    Uses ``dolfinx.mesh.refine`` (Plaza-style red-green) which is tet-only in
-    DOLFINx 0.10. Returns the refined mesh.
-    """
+def _barycentric_sub_points_in_tet(
+    vertices: NDArray[np.float64], n_samples: int, rng
+) -> NDArray[np.float64]:
+    """Sample n_samples uniform points inside a tet (4 vertices) via the
+    standard exponential-Dirichlet trick."""
+    weights = rng.exponential(scale=1.0, size=(n_samples, 4))
+    weights /= weights.sum(axis=1, keepdims=True)
+    return weights @ vertices  # (n_samples, 3)
+
+
+def _uniform_sub_points_in_axis_aligned_hex(
+    vertices: NDArray[np.float64], n_samples: int, rng
+) -> NDArray[np.float64]:
+    """Sample n_samples uniform points inside an axis-aligned hex (8 vertices).
+    Trivially uniform in the AABB since the cell IS the AABB. Holds for
+    Cartesian3D meshes and their NCMesh-refined children (which stay
+    axis-aligned)."""
+    lo = vertices.min(axis=0)
+    hi = vertices.max(axis=0)
+    return rng.uniform(low=lo, high=hi, size=(n_samples, 3))
+
+
+# ---------------------------------------------------------------------------
+# DOLFINx-mesh path (tet-only)
+# ---------------------------------------------------------------------------
+
+def cell_heterogeneity_metric(
+    mesh: Any,
+    problem: "RVEProblem",
+    *,
+    n_samples_per_cell: int = 8,
+    seed: int = 0,
+) -> NDArray[np.float64]:
+    """Per-cell heterogeneity score on a DOLFINx mesh (assumed tetrahedral)."""
+    rng = np.random.default_rng(seed)
+    tdim = mesh.topology.dim
+    n_cells = mesh.topology.index_map(tdim).size_local
+
+    cell_vertices = mesh.geometry.x[mesh.geometry.dofmap]  # (n_cells, 4, 3)
+
+    all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
+    for c in range(n_cells):
+        all_pts[c] = _barycentric_sub_points_in_tet(
+            cell_vertices[c], n_samples_per_cell, rng
+        )
+    flat_pts = all_pts.reshape(-1, 3)
+
+    ids_flat, rotations_flat = problem.field.sample_arrays(flat_pts)
+    ids = ids_flat.reshape(n_cells, n_samples_per_cell)
+    rotations = rotations_flat.reshape(n_cells, n_samples_per_cell, 3, 3)
+
+    return _score_from_samples(ids, rotations)
+
+
+def refine_flagged_cells(mesh: Any, flagged: NDArray[np.bool_]) -> Any:
+    """One Plaza red-green pass on edges incident to flagged cells, via
+    ``dolfinx.mesh.refine`` (tet only in DOLFINx 0.10). Returns the refined
+    mesh."""
     import dolfinx
 
     tdim = mesh.topology.dim
@@ -128,10 +162,9 @@ def iteratively_refine(
     dof_budget: int = 200_000,
     n_samples_per_cell: int = 8,
 ) -> Any:
-    """Run AMR phase 1: refine flagged cells until heterogeneity drops below
-    ``threshold`` or the next iteration would push displacement DOFs past
-    ``dof_budget``. Returns the final mesh.
-    """
+    """DOLFINx-mesh AMR loop: refine flagged cells until heterogeneity drops
+    below ``threshold`` or the next iteration would push DOFs past
+    ``dof_budget``. Returns the final mesh."""
     mesh = initial_mesh
     for _ in range(max_iterations):
         metric = cell_heterogeneity_metric(
@@ -145,4 +178,108 @@ def iteratively_refine(
         if 3 * n_nodes > dof_budget:
             break
         mesh = new_mesh
+    return mesh
+
+
+# ---------------------------------------------------------------------------
+# MFEM-mesh path (hex via NCMesh, also works on tet)
+# ---------------------------------------------------------------------------
+
+def _mfem_cell_vertex_array(mesh, c: int) -> NDArray[np.float64]:
+    """Return a cell's vertex coordinates as a (n_vert, 3) numpy array."""
+    elem = mesh.GetElement(c)
+    vert_ids = elem.GetVerticesArray()
+    return np.array([mesh.GetVertexArray(int(v)) for v in vert_ids], dtype=float)
+
+
+def _mfem_per_cell_sampler(mesh):
+    """Return a function ``(c, n, rng) -> (n, 3) sub-points`` chosen from
+    the mesh's element type. Hex -> uniform-in-AABB; tet -> barycentric."""
+    import mfem.ser as mfem
+
+    elem0 = mesh.GetElement(0)
+    geom = elem0.GetGeometryType()
+    if geom == mfem.Geometry.CUBE:
+        return lambda c, n, rng: _uniform_sub_points_in_axis_aligned_hex(
+            _mfem_cell_vertex_array(mesh, c), n, rng,
+        )
+    if geom == mfem.Geometry.TETRAHEDRON:
+        return lambda c, n, rng: _barycentric_sub_points_in_tet(
+            _mfem_cell_vertex_array(mesh, c), n, rng,
+        )
+    raise NotImplementedError(
+        f"MFEM AMR sub-point sampler for geometry {geom} not implemented "
+        f"(only CUBE/hex and TETRAHEDRON/tet supported)"
+    )
+
+
+def cell_heterogeneity_metric_mfem(
+    mesh: Any,
+    problem: "RVEProblem",
+    *,
+    n_samples_per_cell: int = 8,
+    seed: int = 0,
+) -> NDArray[np.float64]:
+    """Per-cell heterogeneity score on an MFEM mesh (hex or tet)."""
+    rng = np.random.default_rng(seed)
+    n_cells = mesh.GetNE()
+    sample = _mfem_per_cell_sampler(mesh)
+
+    all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
+    for c in range(n_cells):
+        all_pts[c] = sample(c, n_samples_per_cell, rng)
+    flat_pts = all_pts.reshape(-1, 3)
+
+    ids_flat, rotations_flat = problem.field.sample_arrays(flat_pts)
+    ids = ids_flat.reshape(n_cells, n_samples_per_cell)
+    rotations = rotations_flat.reshape(n_cells, n_samples_per_cell, 3, 3)
+
+    return _score_from_samples(ids, rotations)
+
+
+def refine_flagged_cells_mfem(mesh: Any, flagged: NDArray[np.bool_]) -> Any:
+    """One refinement pass on the flagged cells via
+    ``mfem.Mesh.GeneralRefinement``. For hex meshes this is non-conforming
+    octree subdivision (hanging nodes handled automatically by NCMesh);
+    for tet meshes it is conforming refinement. The mesh is refined IN
+    PLACE and returned."""
+    import mfem.ser as mfem
+
+    if mesh.ncmesh is None:
+        mesh.EnsureNCMesh()
+    refs = mfem.intArray()
+    for c in np.where(flagged)[0]:
+        refs.Append(int(c))
+    mesh.GeneralRefinement(refs)
+    return mesh
+
+
+def iteratively_refine_mfem(
+    initial_mesh: Any,
+    problem: "RVEProblem",
+    *,
+    threshold: float = 0.15,
+    max_iterations: int = 4,
+    dof_budget: int = 200_000,
+    n_samples_per_cell: int = 8,
+) -> Any:
+    """MFEM AMR loop. Same termination conditions as the DOLFINx version
+    (``threshold`` on the per-cell metric, hard ``dof_budget`` cap rough-
+    estimated as 3 * GetNV() of the next mesh)."""
+    mesh = initial_mesh
+    for _ in range(max_iterations):
+        metric = cell_heterogeneity_metric_mfem(
+            mesh, problem, n_samples_per_cell=n_samples_per_cell
+        )
+        flagged = flag_cells_for_refinement(metric, threshold)
+        if not flagged.any():
+            break
+        # Quick-stop guess: refining n_flag cells adds at most 7 hex
+        # children each, plus the new vertices their refinement creates.
+        # Use 3 * (current_NV + 8 * n_flag) as a rough upper bound on
+        # post-refinement DOFs.
+        n_flag = int(flagged.sum())
+        if 3 * (mesh.GetNV() + 8 * n_flag) > dof_budget:
+            break
+        refine_flagged_cells_mfem(mesh, flagged)
     return mesh

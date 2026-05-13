@@ -55,7 +55,7 @@ def instrumented_solve_periodic(problem: RVEProblem) -> dict:
         _build_periodic_mesh,
         _collect_element_gp_data,
         _collect_u_gradient_at_gps,
-        _find_origin_pin_tdofs,
+        _find_pin_tdofs,
         _make_precomputed_integrator,
         _make_precomputed_rhs_integrator,
         _volume_averaged_stress,
@@ -84,7 +84,7 @@ def instrumented_solve_periodic(problem: RVEProblem) -> dict:
     a.Assemble()
     timings["bilinear assemble (1x, slices pre-computed C)"] = time.perf_counter() - t0
 
-    pin_dofs = _find_origin_pin_tdofs(fespace, mesh)
+    pin_dofs = _find_pin_tdofs(fespace, mesh)
     ess_tdof_list = mfem.intArray()
     for d in pin_dofs:
         ess_tdof_list.Append(int(d))

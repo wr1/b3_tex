@@ -110,15 +110,33 @@ def _resolve_cell_type(problem: RVEProblem):
     raise ValueError(f"unknown cell_type {name!r}; expected 'hexahedron' or 'tetrahedron'")
 
 
+def _apply_optional_refinement(mesh, problem: RVEProblem):
+    """Apply optional uniform refinement passes and/or marker-based AMR
+    based on ``solver.amr`` config. Both routes use MFEM's NCMesh path,
+    so hex meshes get non-conforming hanging-node refinement and tet
+    meshes stay conforming."""
+    amr_cfg = problem.solver.get("amr", {})
+    for _ in range(int(amr_cfg.get("n_uniform_refines", 0))):
+        mesh.UniformRefinement()
+    if amr_cfg.get("enabled", False):
+        from b3_tex.amr import iteratively_refine_mfem
+        mesh = iteratively_refine_mfem(
+            mesh, problem,
+            threshold=float(amr_cfg.get("threshold", 0.15)),
+            max_iterations=int(amr_cfg.get("max_iterations", 4)),
+            dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
+            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", 8)),
+        )
+    return mesh
+
+
 def _build_mesh(problem: RVEProblem):
     import mfem.ser as mfem
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
     mfem_cell, _ = _resolve_cell_type(problem)
     mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem_cell, Lx, Ly, Lz)
-    for _ in range(int(problem.solver.get("amr", {}).get("n_uniform_refines", 0))):
-        mesh.UniformRefinement()
-    return mesh
+    return _apply_optional_refinement(mesh, problem)
 
 
 def _build_periodic_mesh(problem: RVEProblem):
@@ -134,23 +152,49 @@ def _build_periodic_mesh(problem: RVEProblem):
     ]
     v2v = base.CreatePeriodicVertexMapping(translations)
     mesh = mfem.Mesh.MakePeriodic(base, v2v)
-    for _ in range(int(problem.solver.get("amr", {}).get("n_uniform_refines", 0))):
-        mesh.UniformRefinement()
-    return mesh
+    return _apply_optional_refinement(mesh, problem)
 
 
-def _find_origin_pin_tdofs(fespace, mesh, tol: float = 1e-9) -> list[int]:
+def _find_pin_tdofs(fespace, mesh) -> list[int]:
+    """Three true DOF indices (one per displacement component) to pin out
+    rigid-body translation on a periodic mesh. For periodic meshes, any
+    single vertex's three DOFs suffice (the periodic identifications make
+    the mesh boundary-less, so there is no preferred pin location).
+
+    Two cases:
+      - Conforming mesh (no NCMesh): ``GetRestrictionMatrix()`` returns
+        ``None`` and L-DOFs equal T-DOFs. Vertex 0's vdofs ARE the T-DOFs.
+      - Refined NCMesh (hanging-node constraints): L-DOFs and T-DOFs
+        differ. Walk vertices until we find one whose three L-DOFs each
+        map to a unique T-DOF via R; those T-DOFs are the pin.
+    """
+    R = fespace.GetRestrictionMatrix()
+    if R is None:
+        vdofs = fespace.GetVertexVDofs(0)
+        return [int(v) for v in vdofs]
+
+    # NCMesh case: build an L->T map by scanning R rows via the CSR
+    # arrays. R is (TrueVSize, L-vector-size); for each row t, the L-cols
+    # in that row's CSR slice are the L-DOFs contributing. For Lagrange-1
+    # with the standard prolongation, each true DOF corresponds to exactly
+    # one L-DOF (rows with a single column entry of value 1).
+    ia = R.GetIArray()
+    ja = R.GetJArray()
+    n_t = R.Height()
+    l_to_t: dict[int, int] = {}
+    for t in range(n_t):
+        cols = ja[ia[t]:ia[t + 1]]
+        if cols.size == 1:
+            l_to_t[int(cols[0])] = t
     nv = mesh.GetNV()
-    origin = -1
-    for i in range(nv):
-        v = mesh.GetVertexArray(i)
-        if all(abs(v[d]) < tol for d in range(3)):
-            origin = i
-            break
-    if origin == -1:
-        raise RuntimeError("could not locate origin vertex on periodic mesh")
-    n_scalar = fespace.GetNDofs()
-    return [origin, origin + n_scalar, origin + 2 * n_scalar]
+    for v in range(nv):
+        ldofs = list(fespace.GetVertexVDofs(v))
+        if all(int(l) in l_to_t for l in ldofs):
+            return [l_to_t[int(l)] for l in ldofs]
+    raise RuntimeError(
+        "could not locate a vertex whose 3 vdofs are all true DOFs "
+        "(NCMesh constraint elimination removed every candidate)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +490,7 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
     a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
     a.Assemble()
 
-    pin_dofs = _find_origin_pin_tdofs(fespace, mesh)
+    pin_dofs = _find_pin_tdofs(fespace, mesh)
     ess_tdof_list = mfem.intArray()
     for d in pin_dofs:
         ess_tdof_list.Append(int(d))

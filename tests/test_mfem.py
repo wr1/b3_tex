@@ -284,6 +284,101 @@ def test_mfem_and_dolfinx_periodic_agree_on_ud_tow():
     assert rel_err < 2e-2, f"MFEM vs DOLFINx periodic disagreement: rel_err = {rel_err:.3e}"
 
 
+def _tet_volumes_dolfinx(mesh) -> np.ndarray:
+    """Per-cell tet volume = |det([v1-v0, v2-v0, v3-v0])| / 6 (DOLFINx mesh)."""
+    geom = mesh.geometry.x
+    dofmap = mesh.geometry.dofmap
+    v = geom[dofmap]
+    a = v[:, 1] - v[:, 0]
+    b = v[:, 2] - v[:, 0]
+    c = v[:, 3] - v[:, 0]
+    return np.abs(np.einsum("ij,ij->i", a, np.cross(b, c))) / 6.0
+
+
+def _mfem_cell_volumes_axis_aligned(mesh) -> np.ndarray:
+    """Per-cell volume for axis-aligned hex/tet meshes (uses AABB which
+    equals the cell volume for axis-aligned hex)."""
+    n = mesh.GetNE()
+    vols = np.empty(n, dtype=float)
+    for c in range(n):
+        elem = mesh.GetElement(c)
+        verts = np.array([mesh.GetVertexArray(int(v)) for v in elem.GetVerticesArray()])
+        # Hex: cell IS the AABB; tet: needs det-based formula. For our box
+        # meshes the cells are uniform; AABB volume is a fine proxy.
+        d = verts.max(axis=0) - verts.min(axis=0)
+        vols[c] = float(np.prod(d))
+    return vols
+
+
+def test_mfem_hex_amr_grows_mesh_and_reduces_heterogeneity():
+    """Hex AMR on a UD-tow problem refines interface cells. After one full
+    AMR run: mesh size grows, volume-weighted heterogeneity drops."""
+    import mfem.ser as mfem
+    from b3_tex.amr import (
+        cell_heterogeneity_metric_mfem,
+        iteratively_refine_mfem,
+    )
+
+    problem = RVEProblem.from_config(_ud_tow_config(mesh_n=4, cell_type="hexahedron"))
+    Lx, Ly, Lz = problem.size
+    nx, ny, nz = problem.mesh_resolution
+    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
+
+    metric_before = cell_heterogeneity_metric_mfem(mesh, problem)
+    vols_before = _mfem_cell_volumes_axis_aligned(mesh)
+    h_before = float((metric_before * vols_before).sum())
+    n_cells_before = mesh.GetNE()
+
+    iteratively_refine_mfem(
+        mesh, problem,
+        threshold=0.15, max_iterations=2, dof_budget=10**9,
+    )
+    metric_after = cell_heterogeneity_metric_mfem(mesh, problem)
+    vols_after = _mfem_cell_volumes_axis_aligned(mesh)
+    h_after = float((metric_after * vols_after).sum())
+    n_cells_after = mesh.GetNE()
+
+    assert n_cells_after > n_cells_before
+    assert h_after < h_before
+
+
+def test_mfem_periodic_amr_end_to_end_produces_spd_stiffness():
+    """The MFEM periodic backend honours solver.amr.enabled on a hex mesh
+    and returns a symmetric, positive-definite C_eff."""
+    cfg = _ud_tow_config(mesh_n=4, radius=0.4, cell_type="hexahedron")
+    cfg["solver"]["amr"] = {
+        "enabled": True, "threshold": 0.15, "max_iterations": 1,
+    }
+    problem = RVEProblem.from_config(cfg)
+
+    from b3_tex.backends.mfem_backend import solve_periodic
+
+    result = solve_periodic(problem)
+    assert result.metadata["cell_type"] == "hexahedron"
+    np.testing.assert_allclose(
+        result.effective_stiffness, result.effective_stiffness.T,
+        atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
+    )
+    eigs = np.linalg.eigvalsh(result.effective_stiffness)
+    assert np.all(eigs > 0)
+
+
+def test_mfem_kubc_amr_end_to_end_produces_spd_stiffness():
+    """Same end-to-end check on KUBC."""
+    cfg = _ud_tow_config(mesh_n=4, radius=0.4, cell_type="hexahedron")
+    cfg["solver"]["amr"] = {
+        "enabled": True, "threshold": 0.15, "max_iterations": 1,
+    }
+    problem = RVEProblem.from_config(cfg)
+
+    from b3_tex.backends.mfem_backend import solve
+
+    result = solve(problem)
+    assert result.metadata["cell_type"] == "hexahedron"
+    eigs = np.linalg.eigvalsh(result.effective_stiffness)
+    assert np.all(eigs > 0)
+
+
 def test_mfem_metadata_records_backend_and_cell_type():
     cfg = _homogeneous_isotropic_config()
     problem = RVEProblem.from_config(cfg)

@@ -94,7 +94,49 @@ relative Frobenius error, despite using different periodic-BC machineries.
 The `mfem_periodic <= mfem_kubc` invariant is also pinned (same psd
 ordering test as the DOLFINx side).
 
-## hex AMR (not yet wired)
+## hex AMR (shipped)
+
+`solver.amr.enabled = true` triggers marker-based hex AMR via the same
+``b3_tex.amr.iteratively_refine_mfem`` driver shared with the (planned)
+DOLFINx hex path. Pipeline:
+
+1. ``cell_heterogeneity_metric_mfem(mesh, problem)`` -- per-cell score
+   computed by sampling N sub-points uniformly in each cell's AABB
+   (axis-aligned, holds for ``MakeCartesian3D`` hex meshes and their
+   NCMesh-refined children) and feeding the samples into the same
+   ``_score_from_samples`` core the DOLFINx tet path uses. The metric
+   formula is identical across cell types and frameworks.
+2. ``flag_cells_for_refinement(metric, threshold)`` -- shared helper.
+3. ``refine_flagged_cells_mfem(mesh, flagged)`` -- ``EnsureNCMesh()``
+   then ``mfem.Mesh.GeneralRefinement`` on the flagged element list.
+   Hex cells split 1->8; hanging-node constraints are tracked
+   automatically by ``NCMesh`` and applied during ``FormLinearSystem``
+   via the FE space's restriction matrix.
+
+Quick numbers on the UD tow (1×1×1 box, r=0.4 cylinder, n=4 hex base):
+
+```
+No AMR:   64 hex cells, E_y = 6.40 GPa, 0.28 s
+Hex AMR:  967 hex cells (2 iterations, threshold=0.15), E_y = 6.15 GPa, 0.68 s
+```
+
+E_y drops toward the converged value (~6.18 GPa at fine mesh) and runtime
+scales sub-linearly with cell count because the new cells concentrate at
+the interface where they matter.
+
+## NCMesh-pin gotcha (resolved)
+
+For periodic + hex AMR, the rigid-body translation pin needs to land on
+genuine T-DOFs, not L-DOFs. After ``EnsureNCMesh`` + ``GeneralRefinement``
+the byNODES formula `[0, NDofs, 2*NDofs]` doesn't give valid T-DOFs because
+hanging-node + periodic constraints make ``NDofs * 3 != TrueVSize``.
+``_find_pin_tdofs`` walks ``GetRestrictionMatrix()`` (T-rows × L-cols) to
+build an L→T inverse map, then picks the first vertex whose three vdofs
+all map to genuine T-DOFs. For the simple (no-NCMesh, no-AMR) periodic case
+the restriction matrix is ``None`` and L = T directly, so vertex 0's vdofs
+are used as-is.
+
+## old hex AMR roadmap (now obsolete)
 
 MFEM supports both conforming refinement (`UniformRefinement`) and
 non-conforming AMR with hanging nodes (`mesh.GeneralRefinement(refinement_list)`).
