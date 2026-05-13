@@ -80,28 +80,46 @@ def flag_cells_for_refinement(
 
 # ---------------------------------------------------------------------------
 # per-cell-type sub-point samplers
+#
+# Each sampler returns "reference" weights/coordinates that are pre-computed
+# ONCE per metric evaluation (deterministic given the seed) and applied
+# identically to every cell. This is the symmetry-preserving choice: two
+# cells related by a mesh symmetry (e.g. the two warp yarns in a 2x2 plain
+# weave) receive the same reference-space sub-point pattern, scaled into
+# their respective bounding boxes / convex hulls, so their metric values
+# match exactly. Drawing a fresh batch of random points per cell would
+# break this symmetry and produce visibly asymmetric AMR meshes.
 # ---------------------------------------------------------------------------
 
-def _barycentric_sub_points_in_tet(
-    vertices: NDArray[np.float64], n_samples: int, rng
-) -> NDArray[np.float64]:
-    """Sample n_samples uniform points inside a tet (4 vertices) via the
-    standard exponential-Dirichlet trick."""
-    weights = rng.exponential(scale=1.0, size=(n_samples, 4))
-    weights /= weights.sum(axis=1, keepdims=True)
-    return weights @ vertices  # (n_samples, 3)
+def _tet_barycentric_weights(n_samples: int, rng) -> NDArray[np.float64]:
+    """(n_samples, 4) Dirichlet weights summing to 1 along axis 1. Map a
+    set of these via ``weights @ vertices`` to get uniform sub-points
+    inside any tet."""
+    w = rng.exponential(scale=1.0, size=(n_samples, 4))
+    w /= w.sum(axis=1, keepdims=True)
+    return w
 
 
-def _uniform_sub_points_in_axis_aligned_hex(
-    vertices: NDArray[np.float64], n_samples: int, rng
-) -> NDArray[np.float64]:
-    """Sample n_samples uniform points inside an axis-aligned hex (8 vertices).
-    Trivially uniform in the AABB since the cell IS the AABB. Holds for
-    Cartesian3D meshes and their NCMesh-refined children (which stay
-    axis-aligned)."""
-    lo = vertices.min(axis=0)
-    hi = vertices.max(axis=0)
-    return rng.uniform(low=lo, high=hi, size=(n_samples, 3))
+def _hex_reference_unit_points(n_samples: int, rng) -> NDArray[np.float64]:
+    """(n_samples, 3) sub-points in the unit cube [0, 1]^3.
+
+    When ``n_samples`` is a perfect cube M^3, returns a deterministic
+    tensor-product grid at cell-centres ``(i + 0.5) / M`` of an
+    M-subdivision -- a Riemann-sum sampler that converges the per-cell
+    Vf at rate O(1/M) (one fixed cell of the inner grid has volume
+    1/M^3 and the marginal Vf error scales with the cell-surface area).
+    The AMR marker is a stand-alone material-field evaluator (no FE
+    solve cost), so high M is cheap; the vectorised
+    ``PhaseField.sample_arrays`` handles M^3 * n_cells in one numpy call.
+
+    Other values of ``n_samples`` fall back to uniform random; useful for
+    tests where a small sample count is desired."""
+    cube_root = round(n_samples ** (1.0 / 3.0))
+    if cube_root ** 3 == n_samples:
+        ax = (np.arange(cube_root) + 0.5) / cube_root
+        g = np.stack(np.meshgrid(ax, ax, ax, indexing="ij"), axis=-1)
+        return g.reshape(-1, 3)
+    return rng.uniform(size=(n_samples, 3))
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +130,7 @@ def cell_heterogeneity_metric(
     mesh: Any,
     problem: "RVEProblem",
     *,
-    n_samples_per_cell: int = 8,
+    n_samples_per_cell: int = 1000,
     seed: int = 0,
 ) -> NDArray[np.float64]:
     """Per-cell heterogeneity score on a DOLFINx mesh (assumed tetrahedral)."""
@@ -122,11 +140,10 @@ def cell_heterogeneity_metric(
 
     cell_vertices = mesh.geometry.x[mesh.geometry.dofmap]  # (n_cells, 4, 3)
 
-    all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
-    for c in range(n_cells):
-        all_pts[c] = _barycentric_sub_points_in_tet(
-            cell_vertices[c], n_samples_per_cell, rng
-        )
+    # Symmetric sampling: one reference-space pattern, applied to every cell.
+    bary = _tet_barycentric_weights(n_samples_per_cell, rng)  # (n_samples, 4)
+    # all_pts[c, q, :] = bary[q, :] @ cell_vertices[c, :, :]
+    all_pts = np.einsum("qv,cvi->cqi", bary, cell_vertices)
     flat_pts = all_pts.reshape(-1, 3)
 
     ids_flat, rotations_flat = problem.field.sample_arrays(flat_pts)
@@ -160,7 +177,7 @@ def iteratively_refine(
     threshold: float = 0.15,
     max_iterations: int = 4,
     dof_budget: int = 200_000,
-    n_samples_per_cell: int = 8,
+    n_samples_per_cell: int = 1000,
 ) -> Any:
     """DOLFINx-mesh AMR loop: refine flagged cells until heterogeneity drops
     below ``threshold`` or the next iteration would push DOFs past
@@ -192,42 +209,41 @@ def _mfem_cell_vertex_array(mesh, c: int) -> NDArray[np.float64]:
     return np.array([mesh.GetVertexArray(int(v)) for v in vert_ids], dtype=float)
 
 
-def _mfem_per_cell_sampler(mesh):
-    """Return a function ``(c, n, rng) -> (n, 3) sub-points`` chosen from
-    the mesh's element type. Hex -> uniform-in-AABB; tet -> barycentric."""
-    import mfem.ser as mfem
-
-    elem0 = mesh.GetElement(0)
-    geom = elem0.GetGeometryType()
-    if geom == mfem.Geometry.CUBE:
-        return lambda c, n, rng: _uniform_sub_points_in_axis_aligned_hex(
-            _mfem_cell_vertex_array(mesh, c), n, rng,
-        )
-    if geom == mfem.Geometry.TETRAHEDRON:
-        return lambda c, n, rng: _barycentric_sub_points_in_tet(
-            _mfem_cell_vertex_array(mesh, c), n, rng,
-        )
-    raise NotImplementedError(
-        f"MFEM AMR sub-point sampler for geometry {geom} not implemented "
-        f"(only CUBE/hex and TETRAHEDRON/tet supported)"
-    )
-
-
 def cell_heterogeneity_metric_mfem(
     mesh: Any,
     problem: "RVEProblem",
     *,
-    n_samples_per_cell: int = 8,
+    n_samples_per_cell: int = 1000,
     seed: int = 0,
 ) -> NDArray[np.float64]:
-    """Per-cell heterogeneity score on an MFEM mesh (hex or tet)."""
+    """Per-cell heterogeneity score on an MFEM mesh (hex or tet). The
+    sub-point pattern is the same for every cell (one reference-space
+    draw, reused), so cells related by mesh symmetries receive identical
+    metric values and the AMR refinement preserves problem symmetries."""
+    import mfem.ser as mfem
+
     rng = np.random.default_rng(seed)
     n_cells = mesh.GetNE()
-    sample = _mfem_per_cell_sampler(mesh)
 
-    all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
-    for c in range(n_cells):
-        all_pts[c] = sample(c, n_samples_per_cell, rng)
+    geom = mesh.GetElement(0).GetGeometryType()
+    if geom == mfem.Geometry.CUBE:
+        unit = _hex_reference_unit_points(n_samples_per_cell, rng)  # (n, 3)
+        all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
+        for c in range(n_cells):
+            verts = _mfem_cell_vertex_array(mesh, c)
+            lo = verts.min(axis=0)
+            hi = verts.max(axis=0)
+            all_pts[c] = lo + unit * (hi - lo)
+    elif geom == mfem.Geometry.TETRAHEDRON:
+        bary = _tet_barycentric_weights(n_samples_per_cell, rng)  # (n, 4)
+        all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
+        for c in range(n_cells):
+            verts = _mfem_cell_vertex_array(mesh, c)
+            all_pts[c] = bary @ verts
+    else:
+        raise NotImplementedError(
+            f"MFEM AMR sub-point sampler for geometry {geom} not implemented"
+        )
     flat_pts = all_pts.reshape(-1, 3)
 
     ids_flat, rotations_flat = problem.field.sample_arrays(flat_pts)
@@ -261,7 +277,7 @@ def iteratively_refine_mfem(
     threshold: float = 0.15,
     max_iterations: int = 4,
     dof_budget: int = 200_000,
-    n_samples_per_cell: int = 8,
+    n_samples_per_cell: int = 1000,
 ) -> Any:
     """MFEM AMR loop. Same termination conditions as the DOLFINx version
     (``threshold`` on the per-cell metric, hard ``dof_budget`` cap rough-
