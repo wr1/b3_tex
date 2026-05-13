@@ -139,62 +139,56 @@ def _build_mesh(problem: RVEProblem):
     return _apply_optional_refinement(mesh, problem)
 
 
-def _build_periodic_mesh(problem: RVEProblem):
-    import mfem.ser as mfem
-    Lx, Ly, Lz = (float(s) for s in problem.size)
-    nx, ny, nz = problem.mesh_resolution
-    mfem_cell, _ = _resolve_cell_type(problem)
-    base = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem_cell, Lx, Ly, Lz)
-    translations = [
-        mfem.Vector([Lx, 0.0, 0.0]),
-        mfem.Vector([0.0, Ly, 0.0]),
-        mfem.Vector([0.0, 0.0, Lz]),
-    ]
-    v2v = base.CreatePeriodicVertexMapping(translations)
-    mesh = mfem.Mesh.MakePeriodic(base, v2v)
-    return _apply_optional_refinement(mesh, problem)
+def _mfem_spmat_to_scipy(spmat):
+    """Convert MFEM SparseMatrix (CSR) to scipy.sparse.csr_matrix. Copies
+    the underlying data so the result is owned independently of the
+    MFEM matrix lifetime."""
+    import scipy.sparse as sp
 
-
-def _find_pin_tdofs(fespace, mesh) -> list[int]:
-    """Three true DOF indices (one per displacement component) to pin out
-    rigid-body translation on a periodic mesh. For periodic meshes, any
-    single vertex's three DOFs suffice (the periodic identifications make
-    the mesh boundary-less, so there is no preferred pin location).
-
-    Two cases:
-      - Conforming mesh (no NCMesh): ``GetRestrictionMatrix()`` returns
-        ``None`` and L-DOFs equal T-DOFs. Vertex 0's vdofs ARE the T-DOFs.
-      - Refined NCMesh (hanging-node constraints): L-DOFs and T-DOFs
-        differ. Walk vertices until we find one whose three L-DOFs each
-        map to a unique T-DOF via R; those T-DOFs are the pin.
-    """
-    R = fespace.GetRestrictionMatrix()
-    if R is None:
-        vdofs = fespace.GetVertexVDofs(0)
-        return [int(v) for v in vdofs]
-
-    # NCMesh case: build an L->T map by scanning R rows via the CSR
-    # arrays. R is (TrueVSize, L-vector-size); for each row t, the L-cols
-    # in that row's CSR slice are the L-DOFs contributing. For Lagrange-1
-    # with the standard prolongation, each true DOF corresponds to exactly
-    # one L-DOF (rows with a single column entry of value 1).
-    ia = R.GetIArray()
-    ja = R.GetJArray()
-    n_t = R.Height()
-    l_to_t: dict[int, int] = {}
-    for t in range(n_t):
-        cols = ja[ia[t]:ia[t + 1]]
-        if cols.size == 1:
-            l_to_t[int(cols[0])] = t
-    nv = mesh.GetNV()
-    for v in range(nv):
-        ldofs = list(fespace.GetVertexVDofs(v))
-        if all(int(l) in l_to_t for l in ldofs):
-            return [l_to_t[int(l)] for l in ldofs]
-    raise RuntimeError(
-        "could not locate a vertex whose 3 vdofs are all true DOFs "
-        "(NCMesh constraint elimination removed every candidate)"
+    return sp.csr_matrix(
+        (
+            np.asarray(spmat.GetDataArray()).copy(),
+            np.asarray(spmat.GetJArray()).copy(),
+            np.asarray(spmat.GetIArray()).copy(),
+        ),
+        shape=(spmat.Height(), spmat.Width()),
     )
+
+
+def _periodic_vertex_master_map(
+    mesh, domain_size: tuple[float, float, float], tol: float = 1e-9,
+) -> NDArray[np.intp]:
+    """For each mesh vertex, return the index of its periodic master.
+
+    Master = the vertex whose coordinates, after shifting any coordinate at
+    L_d back to 0 (within tol), match this vertex's canonical position.
+    Each vertex is its own master if no shift is needed."""
+    Lx, Ly, Lz = (float(s) for s in domain_size)
+    nv = mesh.GetNV()
+    master_of = np.empty(nv, dtype=np.intp)
+    canonical_to_master: dict[tuple[int, int, int], int] = {}
+    for v in range(nv):
+        coords = np.asarray(mesh.GetVertexArray(v), dtype=float)
+        canon = coords.copy()
+        if abs(canon[0] - Lx) < tol:
+            canon[0] = 0.0
+        if abs(canon[1] - Ly) < tol:
+            canon[1] = 0.0
+        if abs(canon[2] - Lz) < tol:
+            canon[2] = 0.0
+        key = (
+            round(canon[0] / tol),
+            round(canon[1] / tol),
+            round(canon[2] / tol),
+        )
+        if key not in canonical_to_master:
+            canonical_to_master[key] = v
+        master_of[v] = canonical_to_master[key]
+    return master_of
+
+
+# (Old _find_pin_tdofs helper removed; the MPC path pins via a constraint
+# row on the first vertex's three components, not via essential T-DOFs.)
 
 
 # ---------------------------------------------------------------------------
@@ -472,28 +466,131 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
 
 def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
-    """Periodic-RVE homogenization via the fluctuation split u = E @ x + u_tilde
-    with u_tilde periodic. Mesh-level periodicity (mfem.Mesh.MakePeriodic)
-    eliminates the cascading-MPC pattern the DOLFINx backend uses; a single
-    3-DOF pin at the origin vertex removes the rigid-body translation."""
-    import mfem.ser as mfem
+    """Periodic-RVE homogenization via the fluctuation split
+    u = E @ x + u_tilde with u_tilde periodic, using MPC-style constraint
+    elimination (dolfinx_mpc-equivalent).
 
-    mesh = _build_periodic_mesh(problem)
+    Why MPC instead of mfem.Mesh.MakePeriodic: under NCMesh refinement the
+    mesh-level periodicity is broken because NCMesh inserts mid-edge
+    vertices at the geometric midpoint of edges whose endpoints are
+    periodic identifications, producing elongated cells that span large
+    fractions of the domain (e.g. extent 0.667 across a 1.0 box). The MPC
+    path avoids this: the mesh stays non-periodic, AMR refines hex cells
+    cleanly via NCMesh, and periodicity is enforced as linear constraints
+    among DOFs (u_slave = u_master across opposite faces). The result
+    commutes with NCMesh hanging-node constraints because both are linear
+    equality relations on L-DOFs.
+
+    Algorithm:
+
+    1. Build the non-periodic mesh (optionally with NCMesh refinement).
+    2. Pre-compute GP data and per-GP stiffness as for solve()/KUBC.
+    3. Assemble K at the L-DOF (full vector-DOF) level via the custom
+       integrator.
+    4. Get MFEM's conforming prolongation P_NC (L x T), which handles
+       NCMesh hanging nodes. If the mesh isn't NCMesh, P_NC is identity.
+    5. Build periodic constraints at the T-DOF level: for each vertex
+       periodically identified with a master vertex, the rows of P_NC at
+       the slave's L-DOF and the master's L-DOF must agree on u_T.
+       Difference between those rows is a constraint on u_T.
+    6. Pin the first vertex's three components (one master vertex's
+       (ux, uy, uz)) to remove the rigid-body translation.
+    7. Solve the augmented saddle-point system
+       [[K_T, C^T], [C, 0]] [u_T; lambda] = [b_T; 0] via scipy's sparse
+       LU. C is the stacked periodic + pin constraints.
+    8. Lift u_T back to a GridFunction at L-DOFs and run the standard
+       batched stress recovery.
+    """
+    import mfem.ser as mfem
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spla
+
+    # Build NON-periodic mesh; optional AMR via NCMesh works cleanly here.
+    mesh = _build_mesh(problem)
     fec = mfem.H1_FECollection(1, mesh.Dimension())
     fespace = mfem.FiniteElementSpace(mesh, fec, 3)
 
-    # ONE pre-pass for GP data, ONE call for stiffness across all GPs.
+    # Pre-compute GP data + per-GP stiffness (shared with KUBC path).
     data = _collect_element_gp_data(mesh, fespace)
     c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
 
     a = mfem.BilinearForm(fespace)
     a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
     a.Assemble()
+    a.Finalize()  # required before SpMat().GetJArray() / GetDataArray()
 
-    pin_dofs = _find_pin_tdofs(fespace, mesh)
-    ess_tdof_list = mfem.intArray()
-    for d in pin_dofs:
-        ess_tdof_list.Append(int(d))
+    # P_NC: L x T conforming prolongation. None for non-NCMesh => identity.
+    p_nc_mfem = fespace.GetConformingProlongation()
+    n_L = a.SpMat().Height()
+    if p_nc_mfem is None:
+        n_T = n_L
+        P_NC = sp.eye(n_L, format="csr")
+    else:
+        P_NC = _mfem_spmat_to_scipy(p_nc_mfem)
+        n_T = P_NC.shape[1]
+
+    # K_T = P_NC^T K_L P_NC (handles NCMesh elimination).
+    K_L = _mfem_spmat_to_scipy(a.SpMat())
+    K_T = (P_NC.T @ K_L @ P_NC).tocsr()
+
+    # Build periodic + pin constraints as sparse rows in T-DOF space.
+    n_scalar_L = fespace.GetNDofs()
+    master_of_vertex = _periodic_vertex_master_map(mesh, tuple(problem.size))
+    nv = mesh.GetNV()
+
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+    n_constraints = 0
+
+    def add_constraint_row(row_sparse) -> None:
+        nonlocal n_constraints
+        coo = row_sparse.tocoo()
+        for c, v in zip(coo.col, coo.data, strict=True):
+            rows.append(n_constraints)
+            cols.append(int(c))
+            vals.append(float(v))
+        n_constraints += 1
+
+    # Determine which scalar vertices are non-hanging at the NCMesh level.
+    # A vertex is non-hanging iff its L-DOF row of P_NC has exactly one
+    # nonzero with value 1.0. Hanging vertices' periodic constraints are
+    # redundant with NCMesh interpolation: if NCMesh refinement is
+    # symmetric across opposite faces (which is the case for a
+    # geometry-driven marker on a periodic field), constraining only the
+    # non-hanging master vertices implies the hanging-vertex
+    # periodicity through their NC parents.
+    is_hanging = np.zeros(nv, dtype=bool)
+    for v in range(nv):
+        row = P_NC.getrow(v)
+        if row.nnz != 1 or abs(row.data[0] - 1.0) > 1e-12:
+            is_hanging[v] = True
+
+    # Periodic: for each non-hanging slave vertex whose master is also
+    # non-hanging, add three constraints u_T[slave_T_d] = u_T[master_T_d].
+    for v in range(nv):
+        m = int(master_of_vertex[v])
+        if m == v:
+            continue
+        if is_hanging[v] or is_hanging[m]:
+            continue
+        for d in range(3):
+            l_slave = v + d * n_scalar_L
+            l_master = m + d * n_scalar_L
+            diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
+            if diff_row.nnz > 0:
+                add_constraint_row(diff_row)
+
+    # Pin: three constraints fixing vertex 0's (ux, uy, uz) to zero.
+    for d in range(3):
+        ldof = 0 + d * n_scalar_L
+        add_constraint_row(P_NC.getrow(ldof))
+
+    C = sp.coo_matrix(
+        (vals, (rows, cols)), shape=(n_constraints, n_T)
+    ).tocsr()
+    Z = sp.csr_matrix((n_constraints, n_constraints))
+    A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr")
 
     loadcase_strains = np.eye(6)
     loadcase_stresses = np.zeros((6, 6))
@@ -501,31 +598,22 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
     for k in range(6):
         E_voigt = loadcase_strains[k]
 
-        u_tilde = mfem.GridFunction(fespace)
-        u_tilde.Assign(0.0)
-
-        # sigma_macro(x_q) = C(x_q) @ E_voigt — one numpy einsum, no loop.
+        # Macro-stress per GP and assemble RHS at L-DOFs.
         sigma_macro = np.einsum("nij,j->ni", c_per_gp, E_voigt)
+        b_lf = mfem.LinearForm(fespace)
+        b_lf.AddDomainIntegrator(_make_precomputed_rhs_integrator(sigma_macro, data))
+        b_lf.Assemble()
+        b_L = np.asarray(b_lf.GetDataArray()).copy()
+        b_T = P_NC.T @ b_L
+        b_aug = np.concatenate([b_T, np.zeros(n_constraints)])
 
-        b = mfem.LinearForm(fespace)
-        b.AddDomainIntegrator(_make_precomputed_rhs_integrator(sigma_macro, data))
-        b.Assemble()
+        sol = spla.spsolve(A_aug, b_aug)
+        u_T = sol[:n_T]
+        u_L = P_NC @ u_T
 
-        X = mfem.Vector()
-        B = mfem.Vector()
-        A_mat = mfem.SparseMatrix()
-        a.FormLinearSystem(ess_tdof_list, u_tilde, b, A_mat, X, B)
-
-        precond = mfem.GSSmoother(A_mat)
-        solver = mfem.CGSolver()
-        solver.SetRelTol(1e-12)
-        solver.SetAbsTol(0.0)
-        solver.SetMaxIter(5000)
-        solver.SetPrintLevel(0)
-        solver.SetPreconditioner(precond)
-        solver.SetOperator(A_mat)
-        solver.Mult(B, X)
-        a.RecoverFEMSolution(X, b, u_tilde)
+        # Lift to GridFunction for stress recovery.
+        u_tilde = mfem.GridFunction(fespace)
+        u_tilde.GetDataArray()[:] = u_L
 
         grad_u = _collect_u_gradient_at_gps(u_tilde, mesh, fespace)
         loadcase_stresses[:, k] = _volume_averaged_stress(
@@ -539,10 +627,11 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
         loadcase_strains=loadcase_strains,
         loadcase_stresses=loadcase_stresses,
         metadata={
-            "backend": "mfem_periodic",
+            "backend": "mfem_periodic_mpc",
             "mesh_resolution": list(problem.mesh_resolution),
             "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
             "n_cells": int(mesh.GetNE()),
             "n_dofs": int(fespace.GetTrueVSize()),
+            "n_periodic_constraints": int(n_constraints - 3),
         },
     )
