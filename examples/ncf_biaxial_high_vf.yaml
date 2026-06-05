@@ -1,0 +1,53 @@
+# High-Vf stitched biaxial NCF (non-crimp fabric).
+#
+# Two dense, perfectly straight UD plies (0 deg / 90 deg) stacked at distinct z,
+# stitched by a grid of through-thickness yarns. NCFs reach higher Vf and
+# stiffness than wovens precisely because the load-bearing tows are *straight*
+# (zero crimp) -- the implicit field captures the ply tows and the piercing
+# stitches cleanly without meshing their mutual intersections.
+
+domain:
+  size: [1.0, 1.0, 0.36]
+  mesh_resolution: [32, 32, 18]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9        # carbon fibre
+    e_t: 15.0e9
+    g_lt: 15.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.62
+
+field:
+  type: stitched_biaxial
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.36]
+  ply_z_centers: [0.12, 0.24]
+  n_warp: 6                      # 6 straight tows along x
+  n_weft: 6                      # 6 straight tows along y
+  tow_radius: 0.075
+  n_stitches_x: 2
+  n_stitches_y: 2
+  stitch_radius: 0.018
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling:
+    strategy: local_cloud
+    resolution: 6

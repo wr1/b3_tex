@@ -24,41 +24,22 @@ Implementation notes
 import numpy as np
 from numpy.typing import NDArray
 
+from b3_tex.backends._dolfinx_common import (
+    cell_centroids as _cell_centroids,
+    global_stiffness_at_cell_centroids as _global_stiffness_at_cell_centroids,
+    voigt_strain_ufl as _voigt_strain,
+)
 from b3_tex.problem import RVEProblem
 from b3_tex.quadrature import (
-    global_stiffness_at_points,
+    _resolve_material_sampling_spec,
+    effective_stiffnesses_for_gauss_points,
     make_quadrature_stiffness_function,
     populate_stiffness_at_quadrature_points,
+    quadrature_point_coords,
 )
 from b3_tex.result import HomogenizationResult
 
-
-def _global_stiffness_at_cell_centroids(
-    problem: RVEProblem, centroids: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Sample the phase field at cell centroids; one rotated 6x6 stiffness per cell.
-
-    Thin wrapper around :func:`b3_tex.quadrature.global_stiffness_at_points`,
-    kept for backward-compatible imports from existing tests.
-    """
-    return global_stiffness_at_points(problem, centroids)
-
-
-def _cell_centroids(mesh) -> NDArray[np.float64]:
-    import dolfinx
-
-    tdim = mesh.topology.dim
-    n_cells = mesh.topology.index_map(tdim).size_local
-    cell_indices = np.arange(n_cells, dtype=np.int32)
-    return dolfinx.mesh.compute_midpoints(mesh, tdim, cell_indices)
-
-
-def _voigt_strain(u, ufl_module):
-    eps = ufl_module.sym(ufl_module.grad(u))
-    return ufl_module.as_vector(
-        [eps[0, 0], eps[1, 1], eps[2, 2],
-         2 * eps[1, 2], 2 * eps[0, 2], 2 * eps[0, 1]]
-    )
+__all__ = ["_cell_centroids", "_global_stiffness_at_cell_centroids", "_voigt_strain", "solve"]
 
 
 def _build_pin_bcs(V, mesh):
@@ -226,25 +207,25 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
                 "AMR phase 1 currently requires cell_type='tetrahedron' "
                 f"(got {cell_type_name!r}); dolfinx.mesh.refine is tet-only in 0.10"
             )
-        from b3_tex.amr import iteratively_refine
+        from b3_tex.amr import DEFAULT_AMR_SUB_SAMPLES, iteratively_refine
         amr_cfg = problem.solver["amr"]
         mesh = iteratively_refine(
             mesh, problem,
             threshold=float(amr_cfg.get("threshold", 0.15)),
             max_iterations=int(amr_cfg.get("max_iterations", 4)),
             dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
-            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", 8)),
+            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)),
         )
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
-    sampling = str(problem.solver.get("stiffness_sampling", "quadrature"))
+    spec = _resolve_material_sampling_spec(problem.solver)
     qdeg = int(problem.solver.get("quadrature_degree", 2))
 
-    if sampling == "quadrature":
+    if spec["strategy"] == "exact":
         C_func, dx_q = make_quadrature_stiffness_function(mesh, degree=qdeg)
         populate_stiffness_at_quadrature_points(C_func, problem, mesh=mesh, degree=qdeg)
-    elif sampling == "centroid":
+    elif spec["strategy"] == "cell_constant":
         T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
         C_func = dolfinx.fem.Function(T)
         centroids = _cell_centroids(mesh)
@@ -252,9 +233,18 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         C_func.x.scatter_forward()
         dx_q = ufl.dx(domain=mesh)
     else:
-        raise ValueError(
-            f"unknown stiffness_sampling {sampling!r}; expected 'quadrature' or 'centroid'"
+        gp_coords = quadrature_point_coords(mesh, qdeg)
+        tdim = mesh.topology.dim
+        n_cells = mesh.topology.index_map(tdim).size_local
+        nq = gp_coords.shape[0] // n_cells if n_cells > 0 else 0
+        gp_cell_ids = np.repeat(np.arange(n_cells), nq)
+        cell_verts = mesh.geometry.x[mesh.geometry.dofmap]
+        C_per_gp = effective_stiffnesses_for_gauss_points(
+            problem, gp_coords, gp_cell_ids, cell_verts, spec=spec
         )
+        C_func, dx_q = make_quadrature_stiffness_function(mesh, degree=qdeg)
+        C_func.x.array[:] = C_per_gp.reshape(-1)
+        C_func.x.scatter_forward()
 
     E_voigt = dolfinx.fem.Constant(mesh, np.zeros(6))
 

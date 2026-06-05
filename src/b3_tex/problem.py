@@ -12,11 +12,15 @@ from numpy.typing import NDArray
 from b3_tex.fields import (
     CylinderYarnField,
     MultiStraightYarnField,
+    ParametricWeaveField,
     PhaseField,
     SinusoidalYarn,
     StraightYarn,
     WeaveField,
+    parametric_plain_weave_yarns,
     plain_weave_yarns,
+    satin_weave_yarns,
+    stitched_biaxial_yarns,
 )
 from b3_tex.materials import Material
 
@@ -66,6 +70,7 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             yarn_half_width=float(config["yarn_half_width"]),
             yarn_half_height=float(config["yarn_half_height"]),
             amplitude=float(config["amplitude"]),
+            power=float(config.get("power", 2.0)),
         )
         return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
     if kind == "weave":
@@ -84,10 +89,73 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
                 phase=float(y.get("phase", 0.0)),
                 half_width=float(y["half_width"]),
                 half_height=float(y["half_height"]),
+                power=float(y.get("power", 2.0)),
             )
             for y in config["yarns"]
         )
         return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
+    if kind in ("parametric_plain_weave", "satin_weave"):
+        matrix_name = str(config["matrix_material"])
+        yarn_name = str(config["yarn_material"])
+        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+            if name not in materials:
+                raise ValueError(f"{label} {name!r} is not in materials")
+        domain_size = tuple(float(s) for s in config["domain_size"])
+        common = dict(
+            nominal_vf=float(
+                config.get("nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55))
+            ),
+            max_vf=float(
+                config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9))
+            ),
+        )
+        if kind == "parametric_plain_weave":
+            yarns = parametric_plain_weave_yarns(
+                domain_size=domain_size,
+                n_warp=int(config["n_warp"]),
+                n_weft=int(config["n_weft"]),
+                yarn_half_width=float(config["yarn_half_width"]),
+                yarn_half_height=float(config["yarn_half_height"]),
+                amplitude=float(config.get("amplitude", 0.0)),
+                power=float(config.get("power", 2.0)),
+                compaction=float(config.get("compaction", 0.0)),
+                nest_crossover=bool(config.get("nest_crossover", False)),
+                **common,
+            )
+        else:
+            yarns = satin_weave_yarns(
+                domain_size=domain_size,
+                n_harness=int(config["n_harness"]),
+                shift=int(config.get("shift", 2)),
+                yarn_half_width=float(config["yarn_half_width"]),
+                yarn_half_height=float(config["yarn_half_height"]),
+                amplitude=float(config["amplitude"]),
+                power=float(config.get("power", 2.0)),
+                **common,
+            )
+        return ParametricWeaveField(
+            matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns
+        )
+    if kind == "stitched_biaxial":
+        matrix_name = str(config["matrix_material"])
+        yarn_name = str(config["yarn_material"])
+        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+            if name not in materials:
+                raise ValueError(f"{label} {name!r} is not in materials")
+        domain_size = tuple(float(s) for s in config["domain_size"])
+        yarns = stitched_biaxial_yarns(
+            domain_size=domain_size,
+            ply_z_centers=tuple(float(z) for z in config["ply_z_centers"]),
+            n_warp=int(config["n_warp"]),
+            n_weft=int(config["n_weft"]),
+            tow_radius=float(config["tow_radius"]),
+            n_stitches_x=int(config["n_stitches_x"]),
+            n_stitches_y=int(config["n_stitches_y"]),
+            stitch_radius=float(config["stitch_radius"]),
+        )
+        return MultiStraightYarnField(
+            matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns
+        )
     if kind == "multi_straight_yarn":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])

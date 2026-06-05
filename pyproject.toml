@@ -14,17 +14,18 @@ dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
   "treeparse>=0.2.5",
+  "scipy>=1.10",
+  "mfem",       # PyMFEM — required for the recommended default mfem-* backends
+  "matplotlib>=3.7",  # common plotting dep for examples, convergence studies, and result visualization
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
-mfem = ["mfem"]  # PyMFEM, optional — enables the alternative MFEM backend
 viz = [
-  "matplotlib>=3.7",
-  "pyvista>=0.43",
-  "scipy>=1.10",
-  "scikit-image>=0.22",
+  "pyvista>=0.43",      # 3D interactive visualization (ParaView-style)
+  "scikit-image>=0.22", # image processing for some AMR diagnostics
   "pillow>=10.0",
+  # matplotlib and scipy are already core dependencies
 ]
 
 [project.scripts]
@@ -37,5 +38,5 @@ packages = ["src/b3_tex"]
 testpaths = ["tests"]
 markers = [
   "fenicsx: requires a working DOLFINx and dolfinx_mpc installation",
-  "mfem: requires a working PyMFEM (mfem) installation",
+  "mfem: requires a working PyMFEM (mfem) installation (now a core dependency)",
 ]

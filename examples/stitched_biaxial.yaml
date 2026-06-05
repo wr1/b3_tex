@@ -1,0 +1,45 @@
+# Stitched biaxial NCF: two straight UD plies (0 deg / 90 deg) at distinct z
+# heights, held together by a regular grid of through-thickness stitch yarns
+# running along z. Models the simplest TexGen-style stitched-fabric test case.
+
+domain:
+  size: [1.0, 1.0, 0.4]
+  mesh_resolution: [24, 24, 16]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 70.0e9
+    e_t: 15.0e9
+    g_lt: 24.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: chamis
+    matrix: matrix
+    fibre: fibre
+    fibre_volume_fraction: 0.60
+
+field:
+  type: stitched_biaxial
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.4]
+  ply_z_centers: [0.13, 0.27]   # 0 deg ply below the 90 deg ply
+  n_warp: 4                     # 4 tows running along x at z = 0.13
+  n_weft: 4                     # 4 tows running along y at z = 0.27
+  tow_radius: 0.08
+  n_stitches_x: 2
+  n_stitches_y: 2
+  stitch_radius: 0.02
+
+solver:
+  backend: dolfinx_periodic

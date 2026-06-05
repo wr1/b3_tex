@@ -39,6 +39,9 @@ if TYPE_CHECKING:
     from b3_tex.problem import RVEProblem
 
 
+DEFAULT_AMR_SUB_SAMPLES: int = 1000
+
+
 # ---------------------------------------------------------------------------
 # mesh-agnostic core
 # ---------------------------------------------------------------------------
@@ -63,11 +66,16 @@ def _score_from_samples(
     majority_id = counts.argmax(axis=1)
     disagree = (ids != majority_id[:, None]).mean(axis=1)
 
-    mean_rot = rotations.mean(axis=1)  # (n_cells, 3, 3)
-    rot_spread = (
-        np.linalg.norm(rotations - mean_rot[:, None], axis=(-2, -1)).mean(axis=1)
-        / np.sqrt(6.0)
-    )
+    # Yarn-only spread keeps the metric SO(3)-invariant: the matrix's placeholder
+    # identity rotation would otherwise bias toward yarn families whose local frame
+    # is far from I.
+    yarn = (ids != 0).astype(float)                            # (n_cells, n_samples)
+    n_yarn = yarn.sum(axis=1)                                  # (n_cells,)
+    safe_n = np.where(n_yarn > 0, n_yarn, 1.0)
+    mean_rot = (rotations * yarn[..., None, None]).sum(axis=1) / safe_n[:, None, None]
+    per_pt = np.linalg.norm(rotations - mean_rot[:, None], axis=(-2, -1))  # (n_cells, n_samples)
+    rot_spread = (per_pt * yarn).sum(axis=1) / safe_n / np.sqrt(6.0)
+    rot_spread = np.where(n_yarn > 0, rot_spread, 0.0)
 
     return disagree + 0.5 * rot_spread
 
@@ -79,16 +87,8 @@ def flag_cells_for_refinement(
 
 
 # ---------------------------------------------------------------------------
-# per-cell-type sub-point samplers
-#
-# Each sampler returns "reference" weights/coordinates that are pre-computed
-# ONCE per metric evaluation (deterministic given the seed) and applied
-# identically to every cell. This is the symmetry-preserving choice: two
-# cells related by a mesh symmetry (e.g. the two warp yarns in a 2x2 plain
-# weave) receive the same reference-space sub-point pattern, scaled into
-# their respective bounding boxes / convex hulls, so their metric values
-# match exactly. Drawing a fresh batch of random points per cell would
-# break this symmetry and produce visibly asymmetric AMR meshes.
+# per-cell-type sub-point samplers (shared reference pattern per evaluation
+# preserves mesh symmetries that per-cell sampling would break)
 # ---------------------------------------------------------------------------
 
 def _tet_barycentric_weights(n_samples: int, rng) -> NDArray[np.float64]:
@@ -130,7 +130,7 @@ def cell_heterogeneity_metric(
     mesh: Any,
     problem: "RVEProblem",
     *,
-    n_samples_per_cell: int = 1000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
     seed: int = 0,
 ) -> NDArray[np.float64]:
     """Per-cell heterogeneity score on a DOLFINx mesh (assumed tetrahedral)."""
@@ -177,7 +177,7 @@ def iteratively_refine(
     threshold: float = 0.15,
     max_iterations: int = 4,
     dof_budget: int = 200_000,
-    n_samples_per_cell: int = 1000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
 ) -> Any:
     """DOLFINx-mesh AMR loop: refine flagged cells until heterogeneity drops
     below ``threshold`` or the next iteration would push DOFs past
@@ -213,7 +213,7 @@ def cell_heterogeneity_metric_mfem(
     mesh: Any,
     problem: "RVEProblem",
     *,
-    n_samples_per_cell: int = 1000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
     seed: int = 0,
 ) -> NDArray[np.float64]:
     """Per-cell heterogeneity score on an MFEM mesh (hex or tet). The
@@ -226,20 +226,17 @@ def cell_heterogeneity_metric_mfem(
     n_cells = mesh.GetNE()
 
     geom = mesh.GetElement(0).GetGeometryType()
+    cell_verts = np.stack(
+        [_mfem_cell_vertex_array(mesh, c) for c in range(n_cells)], axis=0
+    )                                                            # (n_cells, n_verts, 3)
     if geom == mfem.Geometry.CUBE:
         unit = _hex_reference_unit_points(n_samples_per_cell, rng)  # (n, 3)
-        all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
-        for c in range(n_cells):
-            verts = _mfem_cell_vertex_array(mesh, c)
-            lo = verts.min(axis=0)
-            hi = verts.max(axis=0)
-            all_pts[c] = lo + unit * (hi - lo)
+        lo = cell_verts.min(axis=1)                              # (n_cells, 3)
+        hi = cell_verts.max(axis=1)
+        all_pts = lo[:, None, :] + unit[None, :, :] * (hi - lo)[:, None, :]
     elif geom == mfem.Geometry.TETRAHEDRON:
         bary = _tet_barycentric_weights(n_samples_per_cell, rng)  # (n, 4)
-        all_pts = np.empty((n_cells, n_samples_per_cell, 3), dtype=float)
-        for c in range(n_cells):
-            verts = _mfem_cell_vertex_array(mesh, c)
-            all_pts[c] = bary @ verts
+        all_pts = np.einsum("nb,cbd->cnd", bary, cell_verts)
     else:
         raise NotImplementedError(
             f"MFEM AMR sub-point sampler for geometry {geom} not implemented"
@@ -277,7 +274,7 @@ def iteratively_refine_mfem(
     threshold: float = 0.15,
     max_iterations: int = 4,
     dof_budget: int = 200_000,
-    n_samples_per_cell: int = 1000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
 ) -> Any:
     """MFEM AMR loop. Same termination conditions as the DOLFINx version
     (``threshold`` on the per-cell metric, hard ``dof_budget`` cap rough-

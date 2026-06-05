@@ -1,0 +1,817 @@
+"""Technical material datasheet: one-page Typst PDF from an RVE YAML config."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+from numpy.typing import NDArray
+
+from b3_tex.materials import Material, MicromechanicalMaterial
+from b3_tex.postprocess import engineering_constants_from_S
+from b3_tex.problem import RVEProblem
+from b3_tex.result import HomogenizationResult
+
+_PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
+_AXIS_NAME = {0: "x", 1: "y", 2: "z"}
+
+# One-page A4 landscape layout targets (Typst + matplotlib).
+_FIG_DPI = 150
+
+
+@dataclass
+class DatasheetSpec:
+    title: str
+    config_path: str
+    version: str
+    rve_rows: list[tuple[str, str]]
+    micro_rows: list[tuple[str, str]]
+    analysis_rows: list[tuple[str, str]]
+    yarn_vf: float | None = None        # vf_b: bundle volume / RVE volume
+    local_vf: dict[str, float] | None = None  # vf_local: fibre Vf inside the tow
+    vf_avg: float | None = None         # vf_avg: overall RVE fibre Vf = vf_b * mean(vf_local)
+    engineering_constants: dict[str, float] | None = None
+    c_eff_gpa: NDArray[np.float64] | None = None
+    mesh_n_cells: int | None = None
+    mesh_n_gp: int | None = None
+    amr_illustration: str | None = None
+    figure_field: Path | None = None
+    figure_mesh: Path | None = None
+    figure_col_fracs: tuple[float, float] = (0.48, 0.52)
+
+
+def _typst_escape(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace("#", "\\#")
+        .replace("$", "\\$")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("_", "\\_")
+    )
+
+
+def _render_table(
+    header: str,
+    rows: list[tuple[str, str]],
+    n_cols: int = 2,
+    *,
+    compact: bool = True,
+) -> str:
+    cell_pt = "6.5pt" if compact else "8pt"
+    head_pt = "7.5pt" if compact else "9pt"
+    inset = "1.5pt" if compact else "4pt"
+    cells = ", ".join(
+        f'[#text(size: {cell_pt})[{_typst_escape(c)}]]'
+        for a, b in rows for c in (a, b)
+    )
+    cols_spec = "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
+    return (
+        f"#text(weight: \"bold\", size: {head_pt})[{header}]\n"
+        "#table(\n"
+        f"  columns: {cols_spec},\n"
+        f"  inset: {inset},\n"
+        "  stroke: 0.3pt,\n"
+        "  align: (left + top),\n"
+        f"  {cells}\n"
+        ")\n"
+    )
+
+
+def _figure_image(filename: str) -> str:
+    """Cell-filling embedding; `fit: contain` keeps aspect and never overflows.
+
+    The enclosing grid gives the cell its size (figure row is `1fr`, columns are
+    aspect-proportional via `_figure_column_fracs`), so both panels resolve to
+    the same display height with minimal letterboxing.
+    """
+    return f'#image("{filename}", width: 100%, height: 100%, fit: "contain")\n'
+
+
+def _figure_column_fracs(
+    problem: RVEProblem,
+    *,
+    axis: str = "z",
+) -> tuple[float, float]:
+    """Typst column weights so field and AMR panels share the same display height."""
+    sweep = {"x": 0, "y": 1, "z": 2}[axis]
+    u_ax, v_ax = _PLANE_AXES[sweep]
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    field_w, field_h = float(problem.size[u_ax]), float(problem.size[v_ax])
+    amr_w, amr_h = Lz + Lx, Lz + Ly
+    left = field_w * amr_h
+    right = amr_w * field_h
+    total = left + right
+    return (left / total, right / total)
+
+
+def _fmt_gpa(value: float) -> str:
+    return f"{value / 1e9:.2f}"
+
+
+def _yarn_volume_fraction(problem: RVEProblem, n: int = 80_000) -> float:
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(np.zeros(3), problem.size, size=(n, 3))
+    ids, _ = problem.field.sample_arrays(pts)
+    return float((ids == 1).mean())
+
+
+def _local_vf_range(problem: RVEProblem, n: int = 80_000) -> dict[str, float] | None:
+    sampler = getattr(problem.field, "sample_local_vf", None)
+    if sampler is None:
+        return None
+    rng = np.random.default_rng(1)
+    pts = rng.uniform(np.zeros(3), problem.size, size=(n, 3))
+    vf = np.asarray(sampler(pts), dtype=float)
+    vf = vf[np.isfinite(vf)]
+    if vf.size == 0:
+        return None
+    return {"min": float(vf.min()), "mean": float(vf.mean()), "max": float(vf.max())}
+
+
+def _field_geometry_rows(raw_field: dict[str, Any]) -> list[tuple[str, str]]:
+    kind = str(raw_field.get("type", ""))
+    rows: list[tuple[str, str]] = [("field type", kind)]
+    common = (
+        ("n_warp", "n_warp"),
+        ("n_weft", "n_weft"),
+        ("yarn half-width", "yarn_half_width"),
+        ("yarn half-height", "yarn_half_height"),
+        ("amplitude", "amplitude"),
+        ("section power", "power"),
+        ("compaction", "compaction"),
+        ("nominal Vf", "nominal_fibre_volume_fraction"),
+        ("max Vf", "max_fibre_volume_fraction"),
+    )
+    for label, key in common:
+        if key in raw_field:
+            rows.append((label, str(raw_field[key])))
+    if raw_field.get("nest_crossover"):
+        h = float(raw_field.get("yarn_half_height", 0.0))
+        comp = float(raw_field.get("compaction", 0.0))
+        rows.append(("crossover nesting", "on"))
+        rows.append(("amplitude (nested)", f"{h * (1.0 - comp):.4g}"))
+    return rows
+
+
+def _material_rows(materials: dict[str, Material], raw_materials: list[dict]) -> list[tuple[str, str]]:
+    from b3_tex.reference import (
+        _engineering_constants_isotropic,
+        engineering_constants_transverse_iso,
+    )
+
+    rows: list[tuple[str, str]] = []
+    raw_by_name = {str(m["name"]): m for m in raw_materials}
+    for name, mat in materials.items():
+        cfg = raw_by_name.get(name, {})
+        kind = str(cfg.get("type", ""))
+        if kind == "isotropic":
+            e, nu = _engineering_constants_isotropic(mat.stiffness)
+            rows.append((f"{name} (matrix)", f"E = {_fmt_gpa(e)} GPa, nu = {nu:.2f}"))
+        elif kind == "transverse_isotropic":
+            c = engineering_constants_transverse_iso(mat.stiffness)
+            rows.append((
+                f"{name} (fibre)",
+                f"E_L = {_fmt_gpa(c['e_l'])}, E_T = {_fmt_gpa(c['e_t'])}, "
+                f"G_LT = {_fmt_gpa(c['g_lt'])}, nu_LT = {c['nu_lt']:.2f}",
+            ))
+        elif kind == "micromechanical":
+            if isinstance(mat, MicromechanicalMaterial):
+                rows.append((f"{name} model", str(cfg.get("micromodel", "chamis"))))
+                rows.append((
+                    f"{name} Vf range",
+                    f"nominal {mat.nominal_vf:.2f}, max {mat.max_vf:.2f}",
+                ))
+    return rows
+
+
+def _build_analysis_rows(
+    problem: RVEProblem,
+    raw_config: dict[str, Any],
+    *,
+    amr_panel: str | None = None,
+) -> list[tuple[str, str]]:
+    """Analysis table: homogenization settings vs optional AMR illustration panel."""
+    solver = problem.solver
+    amr = dict(solver.get("amr", {}))
+    sampling = solver.get("material_sampling", {})
+    rows: list[tuple[str, str]] = [
+        ("backend", str(solver.get("backend", "mfem-periodic"))),
+        ("cell type", str(solver.get("cell_type", "tetrahedron"))),
+        (
+            "homogenization mesh",
+            " x ".join(str(v) for v in problem.mesh_resolution),
+        ),
+        ("BC", "periodic (3-axis MPC / saddle-point)"),
+        ("material sampling", str(sampling.get("strategy", "default"))),
+    ]
+    if sampling and "resolution" in sampling:
+        rows.append(("sampling resolution", str(sampling["resolution"])))
+    rows.append((
+        "periodic tolerance",
+        str(raw_config.get("periodic_tolerance", "1e-8")),
+    ))
+    if amr.get("enabled"):
+        rows.extend([
+            ("homogenization AMR", "on"),
+            ("AMR iterations", str(amr.get("max_iterations", ""))),
+            ("AMR threshold", str(amr.get("threshold", ""))),
+            ("AMR dof budget", str(amr.get("dof_budget", "200000"))),
+        ])
+    else:
+        rows.append(("homogenization AMR", "off (uniform mesh)"))
+    rows.append((
+        "AMR figure (right)",
+        amr_panel if amr_panel else "not shown",
+    ))
+    return rows
+
+
+def collect_spec(
+    problem: RVEProblem,
+    raw_config: dict[str, Any],
+    *,
+    config_path: str,
+    amr_panel: str | None = None,
+) -> DatasheetSpec:
+    raw_field = raw_config["field"]
+
+    size = problem.size.tolist()
+    rve_rows: list[tuple[str, str]] = [
+        ("RVE size [m]", f"{size[0]:.3g} x {size[1]:.3g} x {size[2]:.3g}"),
+        ("matrix material", raw_field.get("matrix_material", "")),
+        ("yarn material", raw_field.get("yarn_material", "")),
+        *_field_geometry_rows(raw_field),
+    ]
+
+    micro_rows = _material_rows(problem.materials, raw_config.get("materials", []))
+    analysis_rows = _build_analysis_rows(problem, raw_config, amr_panel=amr_panel)
+
+    field_kind = str(raw_field.get("type", ""))
+    title_map = {
+        "parametric_plain_weave": "Parametric plain weave (compacted)",
+        "plain_weave": "Plain weave",
+        "satin_weave": "Satin weave",
+        "stitched_biaxial": "Stitched biaxial NCF",
+    }
+    title = title_map.get(field_kind, field_kind.replace("_", " ").title())
+
+    vf_b = _yarn_volume_fraction(problem)
+    local_vf = _local_vf_range(problem)
+    # vf_avg (overall RVE fibre fraction) = bundle fraction * volume-weighted in-tow
+    # fibre fraction; the displayed numbers satisfy this identity by construction.
+    vf_avg = vf_b * local_vf["mean"] if local_vf else None
+
+    return DatasheetSpec(
+        title=title,
+        config_path=config_path,
+        version="b3_tex 0.1.0",
+        rve_rows=rve_rows,
+        micro_rows=micro_rows,
+        analysis_rows=analysis_rows,
+        yarn_vf=vf_b,
+        local_vf=local_vf,
+        vf_avg=vf_avg,
+    )
+
+
+def render_midplane_field(
+    problem: RVEProblem,
+    out_path: Path,
+    *,
+    axis: str = "z",
+    grid: int = 140,
+    quiver_step: int = 7,
+) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    field = problem.field
+    sampler = getattr(field, "sample_local_vf", None)
+    sweep = {"x": 0, "y": 1, "z": 2}[axis]
+    u_ax, v_ax = _PLANE_AXES[sweep]
+    Lu, Lv, Lsweep = problem.size[u_ax], problem.size[v_ax], problem.size[sweep]
+    u = np.linspace(0, Lu, grid)
+    v = np.linspace(0, Lv, grid)
+    U, V = np.meshgrid(u, v)
+    flat_u, flat_v = U.ravel(), V.ravel()
+    n = flat_u.size
+    pos = 0.5 * Lsweep
+
+    pts = np.zeros((n, 3))
+    pts[:, sweep] = pos
+    pts[:, u_ax] = flat_u
+    pts[:, v_ax] = flat_v
+    ids, rot = field.sample_arrays(pts)
+    yarn = ids.reshape(grid, grid) == 1
+    e1u = rot[:, u_ax, 0].reshape(grid, grid)
+    e1v = rot[:, v_ax, 0].reshape(grid, grid)
+    if sampler is not None:
+        vf = np.asarray(sampler(pts), dtype=float).reshape(grid, grid)
+    else:
+        vf = np.where(yarn, 1.0, np.nan)
+    vf = np.where(yarn, vf, np.nan)
+    eu = np.where(yarn, e1u, np.nan)
+    ev = np.where(yarn, e1v, np.nan)
+
+    if sampler is not None:
+        rng = np.random.default_rng(0)
+        sample_pts = rng.uniform(np.zeros(3), problem.size, size=(40_000, 3))
+        sample_vf = np.asarray(sampler(sample_pts), dtype=float)
+        sample_vf = sample_vf[np.isfinite(sample_vf)]
+        vmin = float(np.floor(sample_vf.min() * 100) / 100) if sample_vf.size else 0.0
+        vmax = float(np.ceil(sample_vf.max() * 100) / 100) if sample_vf.size else 1.0
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    s = quiver_step
+    plt.rcParams.update({"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5})
+    fig_w = float(Lu)
+    fig_h = float(Lv)
+    scale = 2.85 / max(fig_w, fig_h)
+    fig, ax = plt.subplots(figsize=(fig_w * scale, fig_h * scale))
+    mesh = ax.pcolormesh(u, v, vf, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest")
+    ax.quiver(
+        U[::s, ::s], V[::s, ::s], eu[::s, ::s], ev[::s, ::s],
+        color="#39d0ff", scale=22, width=0.0045, pivot="mid",
+    )
+    fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
+    ax.set_xlabel(_AXIS_NAME[u_ax])
+    ax.set_ylabel(_AXIS_NAME[v_ax])
+    ax.set_aspect("equal")
+    ax.set_title(f"mid-{axis}  $V_f$ + fibre", pad=1.5, fontsize=6.5)
+    # No bbox_inches="tight": keep the saved aspect == figsize aspect (Lu:Lv) so
+    # it matches the Typst column frac and the panel does not letterbox.
+    fig.subplots_adjust(left=0.085, right=0.92, top=0.94, bottom=0.085)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=_FIG_DPI)
+    plt.close(fig)
+    return out_path
+
+
+# slice normal axis -> (in-plane axis a, in-plane axis b, xlabel, ylabel)
+_SLICE_PANELS = {
+    0: (2, 1, "z", "y"),   # plane x = const  (side: y vertical, z horizontal)
+    1: (0, 2, "x", "z"),   # plane y = const  (top)
+    2: (0, 1, "x", "y"),   # plane z = const  (plan)
+}
+
+
+def _hex_slice_rectangles(mesh, axis: int, pos: float, *, tol: float = 1e-9):
+    from matplotlib.patches import Rectangle
+
+    from b3_tex.amr import _mfem_cell_vertex_array
+
+    a_ax, b_ax, _, _ = _SLICE_PANELS[axis]
+    rects, idx = [], []
+    for c in range(mesh.GetNE()):
+        v = _mfem_cell_vertex_array(mesh, c)
+        if v[:, axis].min() - tol <= pos <= v[:, axis].max() + tol:
+            xmin, ymin = v[:, a_ax].min(), v[:, b_ax].min()
+            rects.append(Rectangle(
+                (xmin, ymin),
+                v[:, a_ax].max() - xmin,
+                v[:, b_ax].max() - ymin,
+            ))
+            idx.append(c)
+    return rects, np.asarray(idx, dtype=int)
+
+
+def _yarn_outline_on_slice(
+    field,
+    problem: RVEProblem,
+    axis: int,
+    pos: float,
+    *,
+    grid_n: int = 160,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fine grid of yarn indicator on a slice plane; returns (a_coords, b_coords, indicator)."""
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    L = (Lx, Ly, Lz)
+    a_ax, b_ax, _, _ = _SLICE_PANELS[axis]
+    na = max(40, int(grid_n * L[a_ax] / max(L)))
+    nb = max(40, int(grid_n * L[b_ax] / max(L)))
+    a = np.linspace(0, L[a_ax], na)
+    b = np.linspace(0, L[b_ax], nb)
+    A, B = np.meshgrid(a, b)
+    pts = np.zeros((A.size, 3))
+    pts[:, axis] = pos
+    pts[:, a_ax] = A.ravel()
+    pts[:, b_ax] = B.ravel()
+    ids, _ = field.sample_arrays(pts)
+    return a, b, ids.reshape(A.shape).astype(float)
+
+
+def _draw_amr_slice_panel(
+    ax,
+    mesh,
+    metric: np.ndarray,
+    field,
+    problem: RVEProblem,
+    axis: int,
+    pos: float,
+):
+    from matplotlib.collections import PatchCollection
+
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    L = (Lx, Ly, Lz)
+    a_ax, b_ax, xlabel, ylabel = _SLICE_PANELS[axis]
+    rects, idx = _hex_slice_rectangles(mesh, axis, pos)
+    pc = PatchCollection(rects, cmap="viridis", edgecolor="black", linewidth=0.25)
+    if idx.size:
+        pc.set_array(metric[idx])
+    pc.set_clim(0.0, 0.5)
+    ax.add_collection(pc)
+    a, b, ind = _yarn_outline_on_slice(field, problem, axis, pos)
+    ax.contour(a, b, ind, levels=[0.5], colors="white", linewidths=0.9)
+    ax.set_xlim(0, L[a_ax])
+    ax.set_ylim(0, L[b_ax])
+    ax.set_aspect("equal")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    return pc
+
+
+def _annotate_cut_plane_locations(
+    ax_plan,
+    ax_top,
+    ax_side,
+    *,
+    x0: float,
+    y0: float,
+    z0: float,
+    Lx: float,
+    Ly: float,
+) -> None:
+    """Show where the top (y=const) and side (x=const) cuts lie on the plan slice."""
+    cut = dict(color="#39d0ff", ls="--", lw=0.9, alpha=0.9)
+    ax_plan.axhline(y0, **cut)
+    ax_plan.axvline(x0, **cut)
+    ax_plan.plot(x0, y0, "+", color=cut["color"], ms=5, mew=0.9)
+    ax_plan.text(
+        0.02, y0 + 0.02, "top cut",
+        color=cut["color"], fontsize=5, va="bottom",
+    )
+    ax_plan.text(
+        x0 + 0.02, Ly - 0.02, "side cut",
+        color=cut["color"], fontsize=5, va="top",
+    )
+    ax_top.axvline(x0, **cut)
+    ax_top.plot(x0, z0, "+", color=cut["color"], ms=4, mew=0.8)
+    ax_side.axhline(y0, **cut)
+    ax_side.plot(z0, y0, "+", color=cut["color"], ms=4, mew=0.8)
+
+
+def render_amr_snapshot(
+    problem: RVEProblem,
+    out_path: Path,
+    *,
+    base_mesh: tuple[int, int, int] | None = None,
+    iters: int = 2,
+    threshold: float = 0.20,
+) -> tuple[Path, int, int]:
+    """AMR mesh with plan (xy), top (xz), and side (yz) mid-plane cuts."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from b3_tex.amr import (
+        cell_heterogeneity_metric_mfem,
+        flag_cells_for_refinement,
+        refine_flagged_cells_mfem,
+    )
+
+    import mfem.ser as mfem
+
+    field = problem.field
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    x0 = 0.25 * Lx   # side cut (yz plane)
+    y0 = 0.5 * Ly    # top cut (xz plane)
+    z0 = 0.5 * Lz    # plan cut (xy plane)
+    nx, ny, nz = base_mesh or problem.mesh_resolution
+    mesh = mfem.Mesh.MakeCartesian3D(
+        nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz
+    )
+
+    for it in range(iters + 1):
+        metric = cell_heterogeneity_metric_mfem(mesh, problem, n_samples_per_cell=216)
+        flagged = flag_cells_for_refinement(metric, threshold)
+        n_flag = int(flagged.sum())
+        if it == iters or n_flag == 0:
+            break
+        refine_flagged_cells_mfem(mesh, flagged)
+
+    plt.rcParams.update({"font.size": 5.5, "axes.titlesize": 5.5, "axes.labelsize": 5.5})
+    # Orthographic layout: side | (top above plan); axes share physical scale.
+    total_w = Lz + Lx
+    total_h = Lz + Ly
+    scale = 2.85 / max(total_w, total_h)
+    fig = plt.figure(figsize=(total_w * scale, total_h * scale))
+    gs = fig.add_gridspec(
+        2,
+        2,
+        width_ratios=[Lz, Lx],
+        height_ratios=[Lz, Ly],
+        hspace=0.06,
+        wspace=0.06,
+    )
+    ax_top = fig.add_subplot(gs[0, 1])
+    ax_side = fig.add_subplot(gs[1, 0])
+    ax_plan = fig.add_subplot(gs[1, 1])
+    fig.add_subplot(gs[0, 0]).axis("off")
+
+    pc = _draw_amr_slice_panel(ax_top, mesh, metric, field, problem, 1, y0)
+    ax_top.set_title(f"top  y={y0:.2f}", pad=0.8)
+    _draw_amr_slice_panel(ax_side, mesh, metric, field, problem, 0, x0)
+    ax_side.set_title(f"side  x={x0:.2f}", pad=0.8)
+    _draw_amr_slice_panel(ax_plan, mesh, metric, field, problem, 2, z0)
+    ax_plan.set_title(f"plan  z={z0:.2f}  ({mesh.GetNE()} cells)", pad=0.8)
+    _annotate_cut_plane_locations(
+        ax_plan, ax_top, ax_side, x0=x0, y0=y0, z0=z0, Lx=Lx, Ly=Ly,
+    )
+
+    fig.subplots_adjust(left=0.06, right=0.995, top=0.95, bottom=0.135)
+    cax = fig.add_axes([0.12, 0.035, 0.78, 0.026])
+    fig.colorbar(pc, cax=cax, orientation="horizontal", label="het. score")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=_FIG_DPI)
+    plt.close(fig)
+
+    nq = 8  # q=2 hex tensor GL
+    n_cells = mesh.GetNE()
+    return out_path, n_cells, n_cells * nq
+
+
+def solve_homogenization(problem: RVEProblem) -> HomogenizationResult:
+    # Use the backend registry directly (not b3_tex.cli) so the datasheet does
+    # not pull in the CLI's treeparse dependency just to homogenize.
+    from b3_tex.backends.base import get_backend
+
+    backend = str(problem.solver.get("backend", "mfem-periodic"))
+    return get_backend(backend)(problem)
+
+
+def build_typst(spec: DatasheetSpec) -> str:
+    rve = _render_table("RVE settings", spec.rve_rows)
+    micro_rows = list(spec.micro_rows)
+    if spec.yarn_vf is not None:
+        micro_rows.append(("Vf_b bundle/RVE (MC)", f"{spec.yarn_vf:.3f}"))
+    if spec.local_vf:
+        micro_rows.append((
+            "Vf_local in-tow",
+            f"{spec.local_vf['min']:.2f}–{spec.local_vf['max']:.2f} "  # noqa: RUF001
+            f"(μ={spec.local_vf['mean']:.2f})",
+        ))
+    if spec.vf_avg is not None:
+        micro_rows.append(("Vf_avg RVE fibre", f"{spec.vf_avg:.3f}"))
+    micro = _render_table("Micromechanics", micro_rows)
+
+    analysis = _render_table("Analysis", spec.analysis_rows)
+
+    eng_block = ""
+    matrix_block = ""
+    if spec.engineering_constants and spec.c_eff_gpa is not None:
+        ec = spec.engineering_constants
+        eng_block = (
+            "#text(weight: \"bold\", size: 7pt)[Engineering constants]\n"
+            "#text(size: 6.5pt)["
+            f"$E$ = ({ec['E_x']/1e9:.1f}, {ec['E_y']/1e9:.1f}, {ec['E_z']/1e9:.1f}) GPa; "
+            f"$G$ = ({ec['G_xy']/1e9:.2f}, {ec['G_xz']/1e9:.2f}, {ec['G_yz']/1e9:.2f}); "
+            f"$nu$ = ({ec['nu_xy']:.2f}, {ec['nu_xz']:.2f}, {ec['nu_yz']:.2f})"
+            "]\n"
+        )
+        labels = ["", "11", "22", "33", "23", "13", "12"]
+        rows: list[tuple[str, ...]] = []
+        c = spec.c_eff_gpa
+        for i in range(6):
+            rows.append(
+                (labels[i + 1], *(f"{c[i, j]:.2f}" for j in range(6)))
+            )
+        cells = ", ".join(
+            f'[#text(size: 6pt)[{_typst_escape(x)}]]'
+            for row in rows for x in row
+        )
+        matrix_block = (
+            "#table(\n"
+            "  columns: (auto,) + (auto,) * 6,\n"
+            "  inset: 1.5pt,\n"
+            "  stroke: 0.3pt,\n"
+            f"  {cells}\n"
+            ")\n"
+        )
+        footer = (
+            "#grid(\n"
+            "  columns: (1fr, 1fr),\n"
+            "  column-gutter: 0.25cm,\n"
+            "  align: (left + top, left + top),\n"
+            f"  [{eng_block}],\n"
+            f"  [#align(left)[#text(weight: \"bold\", size: 7pt)[$C_\"eff\"$ [GPa]] "
+            f"#v(0.5pt) {matrix_block}]],\n"
+            ")\n"
+        )
+    else:
+        footer = "#text(size: 7pt)[(homogenization skipped — no $C_\"eff\"$)]\n"
+
+    # Figure panels: present columns adapt to how many images exist so a single
+    # panel (e.g. AMR skipped) still spans the full width instead of half.
+    col_l, col_r = spec.figure_col_fracs
+    panels: list[tuple[str, float]] = []
+    if spec.figure_field and spec.figure_field.is_file():
+        panels.append((_figure_image(spec.figure_field.name), col_l))
+    if spec.figure_mesh and spec.figure_mesh.is_file():
+        panels.append((_figure_image(spec.figure_mesh.name), col_r))
+
+    config_name = Path(spec.config_path).name
+    title_block = (
+        f"#align(center)[#text(size: 10pt, weight: \"bold\")[{_typst_escape(spec.title)}]"
+        f" #text(size: 6pt)[· {_typst_escape(config_name)} · "
+        f"{_typst_escape(spec.version)}]]\n"
+        "#v(1pt)\n"
+        "#grid(\n"
+        "  columns: (1fr, 1fr, 1fr),\n"
+        "  column-gutter: 0.14cm,\n"
+        f"  [{rve}],\n"
+        f"  [{micro}],\n"
+        f"  [{analysis}],\n"
+        ")\n"
+    )
+
+    head = (
+        "#set page(paper: \"a4\", flipped: true, margin: (x: 0.32cm, y: 0.2cm))\n"
+        "#set text(size: 7.5pt, font: \"Liberation Sans\")\n"
+        "#set par(leading: 0.42em)\n"
+    )
+
+    if not panels:
+        return head + title_block + "#v(0.5pt)\n" + footer + "\n"
+
+    cols = ", ".join(f"{frac}fr" for _, frac in panels)
+    cells = "".join(f"  [{img}],\n" for img, _ in panels)
+    aligns = ", ".join(["center + horizon"] * len(panels))
+    # `1fr` row expands to fill whatever vertical space the tables/footer leave;
+    # the inner grid fills that row and the images fill their cells (fit: contain),
+    # so the figures grow to absorb the page instead of leaving a blank band.
+    figure_row = (
+        "#block(width: 100%, height: 100%)[#grid(\n"
+        f"  columns: ({cols}),\n"
+        "  rows: (1fr,),\n"
+        "  column-gutter: 0.15cm,\n"
+        f"  align: ({aligns}),\n"
+        f"{cells}"
+        ")]\n"
+    )
+    return (
+        head
+        + "#grid(\n"
+        "  rows: (auto, 1fr, auto),\n"
+        "  row-gutter: 0.12cm,\n"
+        f"  [{title_block}],\n"
+        f"  [{figure_row}],\n"
+        f"  [{footer}],\n"
+        ")\n"
+    )
+
+
+def compile_datasheet(
+    typst_src: str,
+    out_pdf: Path,
+    *,
+    out_png: Path | None = None,
+    root: Path | None = None,
+) -> None:
+    """Compile Typst; ``root`` is the directory holding figure PNGs (and the .typ file)."""
+    out_pdf = Path(out_pdf)
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    root = Path(root or out_pdf.parent)
+    src = root / "datasheet.typ"
+    src.write_text(typst_src)
+    proc = subprocess.run(
+        ["typst", "compile", str(src.name), str(out_pdf.resolve())],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"typst compile failed ({proc.returncode}):\n{proc.stderr}"
+        )
+    if out_png is not None:
+        png_pattern = root / "datasheet-{p}.png"
+        proc2 = subprocess.run(
+            [
+                "typst", "compile", "--format", "png", "--ppi", "150",
+                str(src.name), str(png_pattern.name),
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if proc2.returncode != 0:
+            raise RuntimeError(
+                f"typst png export failed ({proc2.returncode}):\n{proc2.stderr}"
+            )
+        rendered = next(root.glob("datasheet-*.png"))
+        shutil.copy(rendered, out_png)
+
+
+# Coarse base used only for the AMR illustration panel (fast; independent of the
+# homogenization mesh resolution in the YAML).
+_AMR_ILLUSTRATION_BASE = (10, 10, 3)
+
+
+def generate(
+    config: str | Path,
+    out_pdf: str | Path,
+    *,
+    out_png: str | Path | None = None,
+    axis: str = "z",
+    amr_iterations: int = 2,
+    amr_threshold: float = 0.20,
+    solve_amr_iterations: int = 0,
+    solve_mesh_resolution: tuple[int, int, int] | None = None,
+    skip_solve: bool = False,
+    skip_amr: bool = False,
+    c_eff_npz: str | Path | None = None,
+) -> DatasheetSpec:
+    """Build figures, optionally homogenize, and compile the one-page datasheet."""
+    config_path = Path(config)
+    with config_path.open() as f:
+        raw = yaml.safe_load(f)
+
+    if solve_mesh_resolution is not None:
+        raw.setdefault("domain", {})["mesh_resolution"] = list(solve_mesh_resolution)
+
+    solver = dict(raw.get("solver", {}))
+    if solve_amr_iterations > 0:
+        solver["amr"] = {
+            **solver.get("amr", {}),
+            "enabled": True,
+            "max_iterations": solve_amr_iterations,
+            "threshold": amr_threshold,
+        }
+    raw["solver"] = solver
+    problem = RVEProblem.from_config(raw)
+
+    out_pdf = Path(out_pdf)
+    if out_png is None:
+        out_png = out_pdf.with_suffix(".png")
+
+    work = out_pdf.parent / f".datasheet_{out_pdf.stem}"
+    work.mkdir(parents=True, exist_ok=True)
+
+    amr_panel_desc: str | None = None
+    if not skip_amr:
+        mesh_iters = amr_iterations
+        base = _AMR_ILLUSTRATION_BASE
+        mesh_path, n_cells, n_gp = render_amr_snapshot(
+            problem,
+            work / "amr_slice.png",
+            base_mesh=base,
+            iters=mesh_iters,
+            threshold=amr_threshold,
+        )
+        Lx, Ly, Lz = (float(s) for s in problem.size)
+        amr_panel_desc = (
+            f"on — base {base[0]}×{base[1]}×{base[2]} hex, "  # noqa: RUF001
+            f"{mesh_iters} pass(es), τ={amr_threshold}; "
+            f"cuts plan z={0.5 * Lz:.2f}, top y={0.5 * Ly:.2f}, side x={0.25 * Lx:.2f}"
+        )
+
+    spec = collect_spec(
+        problem, raw, config_path=str(config_path), amr_panel=amr_panel_desc
+    )
+    spec.figure_col_fracs = _figure_column_fracs(problem, axis=axis)
+    spec.figure_field = render_midplane_field(
+        problem, work / "field_midplane.png", axis=axis
+    )
+    if amr_panel_desc:
+        spec.figure_mesh = mesh_path
+        spec.mesh_n_cells = n_cells
+        spec.mesh_n_gp = n_gp
+        spec.amr_illustration = amr_panel_desc
+
+    if c_eff_npz is not None:
+        data = np.load(c_eff_npz)
+        c = np.asarray(data["effective_stiffness"], dtype=float)
+        spec.c_eff_gpa = c / 1e9
+        spec.engineering_constants = engineering_constants_from_S(np.linalg.inv(c))
+    elif not skip_solve:
+        print("Homogenizing (this may take several minutes on fine meshes)...", flush=True)
+        result = solve_homogenization(problem)
+        spec.c_eff_gpa = result.effective_stiffness / 1e9
+        spec.engineering_constants = engineering_constants_from_S(
+            np.linalg.inv(result.effective_stiffness)
+        )
+
+    typst_src = build_typst(spec)
+    compile_datasheet(typst_src, out_pdf, out_png=Path(out_png), root=work)
+    return spec

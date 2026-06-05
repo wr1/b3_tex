@@ -65,23 +65,18 @@ import numpy as np
 from numpy.typing import NDArray
 
 from b3_tex.problem import RVEProblem
-from b3_tex.quadrature import global_stiffness_at_points
+from b3_tex.quadrature import (
+    _resolve_material_sampling_spec,
+    effective_stiffnesses_for_gauss_points,
+    global_stiffness_at_points,
+)
 from b3_tex.result import HomogenizationResult
-from b3_tex.tensors import voigt_b_matrix
+from b3_tex.tensors import voigt_b_matrix, voigt_strain_to_tensor
 
 
 # ---------------------------------------------------------------------------
 # small helpers
 # ---------------------------------------------------------------------------
-
-def _voigt_strain_to_tensor(eps_voigt: NDArray[np.float64]) -> NDArray[np.float64]:
-    e = eps_voigt
-    return np.array([
-        [e[0],     e[5] / 2, e[4] / 2],
-        [e[5] / 2, e[1],     e[3] / 2],
-        [e[4] / 2, e[3] / 2, e[2]],
-    ], dtype=float)
-
 
 def _grad_to_voigt_strain_batch(grad_u: NDArray[np.float64]) -> NDArray[np.float64]:
     """(N, 3, 3) grad(u) -> (N, 6) Voigt strain with engineering shear."""
@@ -119,13 +114,13 @@ def _apply_optional_refinement(mesh, problem: RVEProblem):
     for _ in range(int(amr_cfg.get("n_uniform_refines", 0))):
         mesh.UniformRefinement()
     if amr_cfg.get("enabled", False):
-        from b3_tex.amr import iteratively_refine_mfem
+        from b3_tex.amr import DEFAULT_AMR_SUB_SAMPLES, iteratively_refine_mfem
         mesh = iteratively_refine_mfem(
             mesh, problem,
             threshold=float(amr_cfg.get("threshold", 0.15)),
             max_iterations=int(amr_cfg.get("max_iterations", 4)),
             dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
-            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", 8)),
+            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)),
         )
     return mesh
 
@@ -153,6 +148,28 @@ def _mfem_spmat_to_scipy(spmat):
         ),
         shape=(spmat.Height(), spmat.Width()),
     )
+
+
+def _build_cell_vertices_mfem(mesh) -> np.ndarray:
+    """Return (n_elem, n_verts_per_elem, 3) physical vertex coordinates for
+    every element. This is the minimal information the shared material
+    sampling routines in b3_tex.quadrature need to map the regular
+    reference material grid into each cell's AABB.
+    """
+    n_elem = mesh.GetNE()
+    if n_elem == 0:
+        return np.empty((0, 0, 3), dtype=float)
+    el0 = mesh.GetElement(0)
+    n_verts = el0.GetNVertices()
+    verts = np.zeros((n_elem, n_verts, 3), dtype=float)
+    for e in range(n_elem):
+        el = mesh.GetElement(e)
+        vids = el.GetVerticesArray()          # modern PyMFEM API (returns array of vertex indices)
+        for v in range(n_verts):
+            vidx = int(vids[v])
+            pos = mesh.GetVertexArray(vidx)          # returns a usable array (not raw SwigPyObject)
+            verts[e, v] = [pos[0], pos[1], pos[2]]
+    return verts
 
 
 def _periodic_vertex_master_map(
@@ -203,6 +220,7 @@ class _ElementGPData:
         gp_coords:  (n_elem * nq, 3)
         gp_dshapes: (n_elem * nq, nd, 3) physical-space shape derivatives
         gp_weights: (n_elem * nq,) ip.weight * |J|
+        elem_vdofs: (n_elem, 3, nd) global L-DOF indices, byNODES layout
 
     Indexing: element e's GPs are contiguous at indices
     ``[e*nq, (e+1)*nq)``. Tests assume uniform nd/nq across the mesh
@@ -212,6 +230,7 @@ class _ElementGPData:
     gp_coords: NDArray[np.float64]
     gp_dshapes: NDArray[np.float64]
     gp_weights: NDArray[np.float64]
+    elem_vdofs: NDArray[np.intp]
     n_elem: int
     nq: int
     nd: int
@@ -220,12 +239,14 @@ class _ElementGPData:
 
 def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
     """Walk the mesh once and collect every element's GP coordinates,
-    physical-space shape derivatives, and weights into three numpy arrays."""
+    physical-space shape derivatives, weights, and vdof indices."""
     import mfem.ser as mfem
 
     n_elem = mesh.GetNE()
     if n_elem == 0:
         raise ValueError("mesh is empty")
+    if fespace.GetOrdering() != mfem.Ordering.byNODES:
+        raise NotImplementedError("mfem_backend assumes byNODES dof ordering")
 
     fe0 = fespace.GetFE(0)
     nd = fe0.GetDof()
@@ -237,6 +258,7 @@ def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
     gp_coords = np.empty((total, 3), dtype=float)
     gp_dshapes = np.empty((total, nd, 3), dtype=float)
     gp_weights = np.empty(total, dtype=float)
+    elem_vdofs = np.empty((n_elem, 3, nd), dtype=np.intp)
 
     dshape_ref = mfem.DenseMatrix(nd, dim)
     J_inv = mfem.DenseMatrix(dim, dim)
@@ -253,6 +275,7 @@ def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
             raise NotImplementedError(
                 "mfem_backend assumes uniform element type across the mesh"
             )
+        elem_vdofs[e] = np.asarray(fespace.GetElementVDofs(e), dtype=np.intp).reshape(3, nd)
         for q in range(nq):
             ip = ir.IntPoint(q)
             T.SetIntPoint(ip)
@@ -266,33 +289,18 @@ def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
 
     return _ElementGPData(
         gp_coords=gp_coords, gp_dshapes=gp_dshapes, gp_weights=gp_weights,
-        n_elem=n_elem, nq=nq, nd=nd, dim=dim,
+        elem_vdofs=elem_vdofs, n_elem=n_elem, nq=nq, nd=nd, dim=dim,
     )
 
 
-def _collect_u_gradient_at_gps(u, mesh, fespace) -> NDArray[np.float64]:
-    """Walk the mesh once and extract grad(u) at every GP. Returns
-    (n_elem * nq, 3, 3). Order matches _collect_element_gp_data."""
-    import mfem.ser as mfem
-
-    n_elem = mesh.GetNE()
-    fe0 = fespace.GetFE(0)
-    ir0 = mfem.IntRules.Get(fe0.GetGeomType(), 2 * fe0.GetOrder())
-    nq = ir0.GetNPoints()
-
-    grad_arr = np.empty((n_elem * nq, 3, 3), dtype=float)
-    grad_buf = mfem.DenseMatrix(3, 3)
-
-    for e in range(n_elem):
-        T = mesh.GetElementTransformation(e)
-        fe = fespace.GetFE(e)
-        ir = mfem.IntRules.Get(fe.GetGeomType(), 2 * fe.GetOrder())
-        for q in range(nq):
-            ip = ir.IntPoint(q)
-            T.SetIntPoint(ip)
-            u.GetVectorGradient(T, grad_buf)
-            grad_arr[e * nq + q] = np.asarray(grad_buf.GetDataArray())
-    return grad_arr
+def _collect_u_gradient_at_gps(u_array: NDArray[np.float64], data: _ElementGPData) -> NDArray[np.float64]:
+    """grad(u) at every GP, vectorised via the cached per-element vdofs and
+    physical-space dshapes. Returns (n_elem * nq, 3, 3) in the same order
+    as ``data.gp_coords``."""
+    u_elem = u_array[data.elem_vdofs]                         # (n_elem, 3, nd)
+    dsh = data.gp_dshapes.reshape(data.n_elem, data.nq, data.nd, 3)
+    grad = np.einsum("ein,eqnj->eqij", u_elem, dsh)           # (n_elem, nq, 3, 3)
+    return grad.reshape(data.n_elem * data.nq, 3, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +403,20 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
     # ONE pre-pass for GP data, ONE call for stiffness across all GPs.
     data = _collect_element_gp_data(mesh, fespace)
-    c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
+
+    spec = _resolve_material_sampling_spec(problem.solver)
+
+    # Use tensorized high-resolution material sampling when requested
+    if spec.get("strategy") == "local_cloud" and spec.get("resolution", 1) > 1:
+        cell_verts = _build_cell_vertices_mfem(mesh)
+        n_cells = data.n_elem
+        nq = data.nq
+        gp_cell_ids = np.repeat(np.arange(n_cells), nq)
+        c_per_gp = effective_stiffnesses_for_gauss_points(
+            problem, data.gp_coords, gp_cell_ids, cell_verts, spec=spec
+        )
+    else:
+        c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
 
     a = mfem.BilinearForm(fespace)
     a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
@@ -419,7 +440,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
     for k in range(6):
         E_voigt = loadcase_strains[k]
-        E_tensor = _voigt_strain_to_tensor(E_voigt)
+        E_tensor = voigt_strain_to_tensor(E_voigt)
 
         bc_coef = _AffineBC(E_tensor)
         u = mfem.GridFunction(fespace)
@@ -444,8 +465,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         solver.Mult(B, X)
         a.RecoverFEMSolution(X, b, u)
 
-        # Batched stress recovery: walk mesh once for grad(u), then numpy.
-        grad_u = _collect_u_gradient_at_gps(u, mesh, fespace)
+        grad_u = _collect_u_gradient_at_gps(np.asarray(u.GetDataArray()), data)
         loadcase_stresses[:, k] = _volume_averaged_stress(c_per_gp, grad_u, data.gp_weights)
 
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
@@ -465,161 +485,234 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     )
 
 
-def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
-    """Periodic-RVE homogenization via the fluctuation split
-    u = E @ x + u_tilde with u_tilde periodic, using MPC-style constraint
-    elimination (dolfinx_mpc-equivalent).
+class MfemPeriodicSession:
+    """MFEM MPC-periodic loadcase session: assembles K, builds periodic+pin
+    constraints, factors the augmented saddle-point system once.
 
-    Why MPC instead of mfem.Mesh.MakePeriodic: under NCMesh refinement the
-    mesh-level periodicity is broken because NCMesh inserts mid-edge
-    vertices at the geometric midpoint of edges whose endpoints are
-    periodic identifications, producing elongated cells that span large
-    fractions of the domain (e.g. extent 0.667 across a 1.0 box). The MPC
-    path avoids this: the mesh stays non-periodic, AMR refines hex cells
-    cleanly via NCMesh, and periodicity is enforced as linear constraints
-    among DOFs (u_slave = u_master across opposite faces). The result
-    commutes with NCMesh hanging-node constraints because both are linear
-    equality relations on L-DOFs.
-
-    Algorithm:
-
-    1. Build the non-periodic mesh (optionally with NCMesh refinement).
-    2. Pre-compute GP data and per-GP stiffness as for solve()/KUBC.
-    3. Assemble K at the L-DOF (full vector-DOF) level via the custom
-       integrator.
-    4. Get MFEM's conforming prolongation P_NC (L x T), which handles
-       NCMesh hanging nodes. If the mesh isn't NCMesh, P_NC is identity.
-    5. Build periodic constraints at the T-DOF level: for each vertex
-       periodically identified with a master vertex, the rows of P_NC at
-       the slave's L-DOF and the master's L-DOF must agree on u_T.
-       Difference between those rows is a constraint on u_T.
-    6. Pin the first vertex's three components (one master vertex's
-       (ux, uy, uz)) to remove the rigid-body translation.
-    7. Solve the augmented saddle-point system
-       [[K_T, C^T], [C, 0]] [u_T; lambda] = [b_T; 0] via scipy's sparse
-       LU. C is the stacked periodic + pin constraints.
-    8. Lift u_T back to a GridFunction at L-DOFs and run the standard
-       batched stress recovery.
+    MPC (rather than ``mfem.Mesh.MakePeriodic``) keeps periodicity well-defined
+    under NCMesh refinement, where mesh-level periodicity breaks at hanging nodes.
     """
-    import mfem.ser as mfem
-    import scipy.sparse as sp
-    import scipy.sparse.linalg as spla
 
-    # Build NON-periodic mesh; optional AMR via NCMesh works cleanly here.
-    mesh = _build_mesh(problem)
-    fec = mfem.H1_FECollection(1, mesh.Dimension())
-    fespace = mfem.FiniteElementSpace(mesh, fec, 3)
+    def __init__(self, problem: RVEProblem):
+        import mfem.ser as mfem
+        import scipy.sparse as sp
+        import scipy.sparse.linalg as spla
 
-    # Pre-compute GP data + per-GP stiffness (shared with KUBC path).
-    data = _collect_element_gp_data(mesh, fespace)
-    c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
+        self._mfem = mfem
+        self.problem = problem
 
-    a = mfem.BilinearForm(fespace)
-    a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
-    a.Assemble()
-    a.Finalize()  # required before SpMat().GetJArray() / GetDataArray()
+        mesh = _build_mesh(problem)
+        fec = mfem.H1_FECollection(1, mesh.Dimension())
+        fespace = mfem.FiniteElementSpace(mesh, fec, 3)
+        data = _collect_element_gp_data(mesh, fespace)
 
-    # P_NC: L x T conforming prolongation. None for non-NCMesh => identity.
-    p_nc_mfem = fespace.GetConformingProlongation()
-    n_L = a.SpMat().Height()
-    if p_nc_mfem is None:
-        n_T = n_L
-        P_NC = sp.eye(n_L, format="csr")
-    else:
-        P_NC = _mfem_spmat_to_scipy(p_nc_mfem)
-        n_T = P_NC.shape[1]
+        spec = _resolve_material_sampling_spec(problem.solver)
+        if spec.get("strategy") == "local_cloud" and spec.get("resolution", 1) > 1:
+            cell_verts = _build_cell_vertices_mfem(mesh)
+            n_cells = data.n_elem
+            nq = data.nq
+            gp_cell_ids = np.repeat(np.arange(n_cells), nq)
+            c_per_gp = effective_stiffnesses_for_gauss_points(
+                problem, data.gp_coords, gp_cell_ids, cell_verts, spec=spec
+            )
+        else:
+            c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
 
-    # K_T = P_NC^T K_L P_NC (handles NCMesh elimination).
-    K_L = _mfem_spmat_to_scipy(a.SpMat())
-    K_T = (P_NC.T @ K_L @ P_NC).tocsr()
+        a = mfem.BilinearForm(fespace)
+        a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
+        a.Assemble()
+        a.Finalize()
 
-    # Build periodic + pin constraints as sparse rows in T-DOF space.
-    n_scalar_L = fespace.GetNDofs()
-    master_of_vertex = _periodic_vertex_master_map(mesh, tuple(problem.size))
-    nv = mesh.GetNV()
+        p_nc_mfem = fespace.GetConformingProlongation()
+        n_L = a.SpMat().Height()
+        if p_nc_mfem is None:
+            n_T = n_L
+            P_NC = sp.eye(n_L, format="csr")
+        else:
+            P_NC = _mfem_spmat_to_scipy(p_nc_mfem)
+            n_T = P_NC.shape[1]
 
-    rows: list[int] = []
-    cols: list[int] = []
-    vals: list[float] = []
-    n_constraints = 0
+        K_L = _mfem_spmat_to_scipy(a.SpMat())
+        K_T = (P_NC.T @ K_L @ P_NC).tocsr()
 
-    def add_constraint_row(row_sparse) -> None:
-        nonlocal n_constraints
-        coo = row_sparse.tocoo()
-        for c, v in zip(coo.col, coo.data, strict=True):
-            rows.append(n_constraints)
-            cols.append(int(c))
-            vals.append(float(v))
-        n_constraints += 1
+        n_scalar_L = fespace.GetNDofs()
+        master_of_vertex = _periodic_vertex_master_map(mesh, tuple(problem.size))
+        nv = mesh.GetNV()
 
-    # Determine which scalar vertices are non-hanging at the NCMesh level.
-    # A vertex is non-hanging iff its L-DOF row of P_NC has exactly one
-    # nonzero with value 1.0. Hanging vertices' periodic constraints are
-    # redundant with NCMesh interpolation: if NCMesh refinement is
-    # symmetric across opposite faces (which is the case for a
-    # geometry-driven marker on a periodic field), constraining only the
-    # non-hanging master vertices implies the hanging-vertex
-    # periodicity through their NC parents.
-    is_hanging = np.zeros(nv, dtype=bool)
-    for v in range(nv):
-        row = P_NC.getrow(v)
-        if row.nnz != 1 or abs(row.data[0] - 1.0) > 1e-12:
-            is_hanging[v] = True
+        rows: list[int] = []
+        cols: list[int] = []
+        vals: list[float] = []
+        n_constraints = 0
 
-    # Periodic: for each non-hanging slave vertex whose master is also
-    # non-hanging, add three constraints u_T[slave_T_d] = u_T[master_T_d].
-    for v in range(nv):
-        m = int(master_of_vertex[v])
-        if m == v:
-            continue
-        if is_hanging[v] or is_hanging[m]:
-            continue
+        def add_row(row_sparse) -> None:
+            nonlocal n_constraints
+            coo = row_sparse.tocoo()
+            for c, v in zip(coo.col, coo.data, strict=True):
+                rows.append(n_constraints)
+                cols.append(int(c))
+                vals.append(float(v))
+            n_constraints += 1
+
+        is_hanging = np.zeros(nv, dtype=bool)
+        for v in range(nv):
+            row = P_NC.getrow(v)
+            if row.nnz != 1 or abs(row.data[0] - 1.0) > 1e-12:
+                is_hanging[v] = True
+
+        for v in range(nv):
+            m = int(master_of_vertex[v])
+            if m == v or is_hanging[v] or is_hanging[m]:
+                continue
+            for d in range(3):
+                l_slave = v + d * n_scalar_L
+                l_master = m + d * n_scalar_L
+                diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
+                if diff_row.nnz > 0:
+                    add_row(diff_row)
+
         for d in range(3):
-            l_slave = v + d * n_scalar_L
-            l_master = m + d * n_scalar_L
-            diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
-            if diff_row.nnz > 0:
-                add_constraint_row(diff_row)
+            add_row(P_NC.getrow(0 + d * n_scalar_L))
 
-    # Pin: three constraints fixing vertex 0's (ux, uy, uz) to zero.
-    for d in range(3):
-        ldof = 0 + d * n_scalar_L
-        add_constraint_row(P_NC.getrow(ldof))
+        C = sp.coo_matrix((vals, (rows, cols)),
+                          shape=(n_constraints, n_T)).tocsr()
+        Z = sp.csr_matrix((n_constraints, n_constraints))
+        A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
 
-    C = sp.coo_matrix(
-        (vals, (rows, cols)), shape=(n_constraints, n_T)
-    ).tocsr()
-    Z = sp.csr_matrix((n_constraints, n_constraints))
-    A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr")
+        self.mesh = mesh
+        self.fespace = fespace
+        self._data = data
+        self._c_per_gp = c_per_gp
+        self._P_NC = P_NC
+        self._n_T = n_T
+        self._n_constraints = n_constraints
+        self._n_scalar_L = n_scalar_L
+        self._nv = nv
+        self._lu = spla.splu(A_aug)
+        self.n_periodic_constraints = n_constraints - 3
 
-    loadcase_strains = np.eye(6)
-    loadcase_stresses = np.zeros((6, 6))
+    # --- LoadcaseSolverSession protocol surface ---
 
-    for k in range(6):
-        E_voigt = loadcase_strains[k]
+    @property
+    def gp_weights(self) -> NDArray[np.float64]:
+        return self._data.gp_weights
 
-        # Macro-stress per GP and assemble RHS at L-DOFs.
+    @property
+    def gp_coords(self) -> NDArray[np.float64]:
+        return self._data.gp_coords
+
+    @property
+    def c_per_gp(self) -> NDArray[np.float64]:
+        return self._c_per_gp
+
+    @property
+    def n_elem(self) -> int:
+        return self._data.n_elem
+
+    @property
+    def nq(self) -> int:
+        return self._data.nq
+
+    @property
+    def n_vertices(self) -> int:
+        return self._nv
+
+    @property
+    def n_dofs(self) -> int:
+        return int(self.fespace.GetTrueVSize())
+
+    def solve_macro_strain(self, E_voigt: NDArray[np.float64]):
+        """Back-solve for one macro strain. Returns a LoadcaseSolveResult."""
+        from b3_tex.postprocess import LoadcaseSolveResult
+
+        mfem = self._mfem
+        E_voigt = np.asarray(E_voigt, dtype=float)
+        c_per_gp = self._c_per_gp
+        data = self._data
+        P_NC = self._P_NC
+        nv = self._nv
+        n_scalar_L = self._n_scalar_L
+
         sigma_macro = np.einsum("nij,j->ni", c_per_gp, E_voigt)
-        b_lf = mfem.LinearForm(fespace)
-        b_lf.AddDomainIntegrator(_make_precomputed_rhs_integrator(sigma_macro, data))
+        b_lf = mfem.LinearForm(self.fespace)
+        b_lf.AddDomainIntegrator(
+            _make_precomputed_rhs_integrator(sigma_macro, data)
+        )
         b_lf.Assemble()
         b_L = np.asarray(b_lf.GetDataArray()).copy()
         b_T = P_NC.T @ b_L
-        b_aug = np.concatenate([b_T, np.zeros(n_constraints)])
+        b_aug = np.concatenate([b_T, np.zeros(self._n_constraints)])
+        sol = self._lu.solve(b_aug)
+        u_L = P_NC @ sol[:self._n_T]
 
-        sol = spla.spsolve(A_aug, b_aug)
-        u_T = sol[:n_T]
-        u_L = P_NC @ u_T
+        grad_u = _collect_u_gradient_at_gps(u_L, data)
+        eps_per_gp = _grad_to_voigt_strain_batch(grad_u) + E_voigt[None, :]
+        sigma_per_gp = np.einsum("nij,nj->ni", c_per_gp, eps_per_gp)
 
-        # Lift to GridFunction for stress recovery.
-        u_tilde = mfem.GridFunction(fespace)
-        u_tilde.GetDataArray()[:] = u_L
+        # Vertex displacements (byNODES: u[v + d*Ns] is component d at vertex v).
+        u_at_vertices = np.column_stack([
+            u_L[d * n_scalar_L: d * n_scalar_L + nv] for d in range(3)
+        ])
 
-        grad_u = _collect_u_gradient_at_gps(u_tilde, mesh, fespace)
-        loadcase_stresses[:, k] = _volume_averaged_stress(
-            c_per_gp, grad_u, data.gp_weights, E_voigt=E_voigt
+        macro_stress = (data.gp_weights[:, None] * sigma_per_gp
+                        ).sum(axis=0) / data.gp_weights.sum()
+
+        return LoadcaseSolveResult(
+            u_at_vertices=u_at_vertices,
+            eps_per_gp=eps_per_gp,
+            sigma_per_gp=sigma_per_gp,
+            macro_strain=E_voigt,
+            macro_stress=macro_stress,
         )
 
+
+def make_periodic_session(problem: RVEProblem) -> MfemPeriodicSession:
+    """Backend entry-point matching the LoadcaseSolverSession protocol.
+    Used by ``solve_periodic`` and by ``b3_tex.postprocess.attach_homogenization_fields``."""
+    return MfemPeriodicSession(problem)
+
+
+def mfem_mesh_to_pyvista_grid(mesh):
+    """Convert an MFEM hex/tet mesh to a pyvista UnstructuredGrid.
+    Lives here (not in postprocess) so that postprocess stays
+    backend-agnostic; DOLFINx will provide its own equivalent."""
+    import pyvista
+
+    nv = mesh.GetNV()
+    points = np.empty((nv, 3), dtype=float)
+    for i in range(nv):
+        points[i] = mesh.GetVertexArray(i)
+
+    cells_list: list[int] = []
+    cell_types: list[int] = []
+    for e in range(mesh.GetNE()):
+        verts = mesh.GetElement(e).GetVerticesArray()
+        n = len(verts)
+        if n == 8:
+            cells_list.append(8)
+            cells_list.extend(int(v) for v in verts)
+            cell_types.append(12)        # VTK_HEXAHEDRON
+        elif n == 4:
+            cells_list.append(4)
+            cells_list.extend(int(v) for v in verts)
+            cell_types.append(10)        # VTK_TETRA
+        else:
+            raise NotImplementedError(f"unsupported cell with {n} vertices")
+    return pyvista.UnstructuredGrid(
+        np.asarray(cells_list, dtype=np.int64),
+        np.asarray(cell_types, dtype=np.uint8),
+        points,
+    )
+
+
+def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
+    """Public periodic-RVE solve via ``MfemPeriodicSession``."""
+    session = make_periodic_session(problem)
+    loadcase_strains = np.eye(6)
+    loadcase_stresses = np.zeros((6, 6))
+    for k in range(6):
+        loadcase_stresses[:, k] = (
+            session.solve_macro_strain(loadcase_strains[k]).macro_stress
+        )
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 
     return HomogenizationResult(
@@ -630,8 +723,8 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
             "backend": "mfem_periodic_mpc",
             "mesh_resolution": list(problem.mesh_resolution),
             "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
-            "n_cells": int(mesh.GetNE()),
-            "n_dofs": int(fespace.GetTrueVSize()),
-            "n_periodic_constraints": int(n_constraints - 3),
+            "n_cells": int(session.mesh.GetNE()),
+            "n_dofs": session.n_dofs,
+            "n_periodic_constraints": session.n_periodic_constraints,
         },
     )

@@ -105,6 +105,44 @@ def rotate_stiffness_batch(
     return stiffness_tensor_to_voigt_batch(rotated)
 
 
+def stiffness_voigt_to_tensor_batch(c_voigt: ArrayLike) -> NDArray[np.float64]:
+    """Batched (N, 6, 6) -> (N, 3, 3, 3, 3) inverse Voigt projection."""
+    c = np.asarray(c_voigt, dtype=float)
+    if c.ndim != 3 or c.shape[1:] != (6, 6):
+        raise ValueError(f"stiffness batch must have shape (N, 6, 6), got {c.shape}")
+    n = c.shape[0]
+    tensor = np.zeros((n, 3, 3, 3, 3), dtype=float)
+    for a, (i, j) in enumerate(VOIGT_PAIRS):
+        for b, (k, l) in enumerate(VOIGT_PAIRS):
+            value = c[:, a, b]
+            tensor[:, i, j, k, l] = value
+            tensor[:, j, i, k, l] = value
+            tensor[:, i, j, l, k] = value
+            tensor[:, j, i, l, k] = value
+    return tensor
+
+
+def rotate_stiffness_batch_varying(
+    c_voigt: ArrayLike, rotations: ArrayLike
+) -> NDArray[np.float64]:
+    """Apply a per-point rotation to a per-point stiffness.
+
+    ``c_voigt`` is ``(N, 6, 6)`` and ``rotations`` is ``(N, 3, 3)``; returns the
+    ``(N, 6, 6)`` rotated stiffnesses. Used when the local stiffness itself varies
+    point-to-point (e.g. a micromechanical yarn with spatially-varying Vf)."""
+    R = np.asarray(rotations, dtype=float)
+    c = np.asarray(c_voigt, dtype=float)
+    if R.ndim != 3 or R.shape[1:] != (3, 3):
+        raise ValueError(f"rotations must have shape (N, 3, 3), got {R.shape}")
+    if c.shape[0] != R.shape[0]:
+        raise ValueError("c_voigt and rotations must have matching leading dim")
+    tensor = stiffness_voigt_to_tensor_batch(c)
+    rotated = np.einsum(
+        "nia,njb,nkc,nld,nabcd->nijkl", R, R, R, R, tensor, optimize=True
+    )
+    return stiffness_tensor_to_voigt_batch(rotated)
+
+
 def voigt_b_matrix(
     dshape: ArrayLike, *, ordering: str = "byNODES"
 ) -> NDArray[np.float64]:

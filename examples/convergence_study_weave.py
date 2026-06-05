@@ -238,11 +238,15 @@ def main() -> None:
         "e_z": 1.0 / np.linalg.inv(C_ref)[2, 2],
     }
 
+    # Naming convention used throughout the plots: both sampling modes use
+    # the same Gauss quadrature for the integral itself; what differs is the
+    # number of physical points at which the stiffness field C(x) is sampled
+    # to populate the constitutive integrand.
     style = {
         "centroid":   {"marker": "o", "linestyle": "--", "color": "#d95f02",
-                       "label": "centroid (DG-0)"},
+                       "label": "C at cell centroid (1 sample/cell)"},
         "quadrature": {"marker": "s", "linestyle": "-",  "color": "#1b9e77",
-                       "label": "quadrature (q=2)"},
+                       "label": "C at GPs (tet, q=2 → 4 samples/cell)"},
     }
     ref_label = (
         f"reference: quadrature, "
@@ -339,15 +343,22 @@ def main() -> None:
         np.linalg.norm(np.asarray(r["C"]) - C_ref) / np.linalg.norm(C_ref)
         for r in deg_runs
     ]
-    fig, ax = plt.subplots(figsize=(6.0, 4.2))
+    # Number of Gauss points per tet at basix "default" scheme, indexed by degree.
+    # Source: basix.make_quadrature(CellType.tetrahedron, "default", deg).
+    GPS_PER_TET = {1: 1, 2: 4, 3: 5, 4: 11, 6: 24, 8: 45}
+    deg_xticklabels = [f"deg {d}\n{GPS_PER_TET[d]} GP/tet" for d in deg_x]
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.4))
     ax.plot(deg_x, deg_y, marker="s", linestyle="-", color="#1b9e77",
-            label=f"quadrature, fixed n=({DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[1]})")
+            label=f"C at GPs, tet, fixed n=({DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[1]})")
     ax.axhline(centroid_baseline_err, color="#d95f02", linewidth=1.0,
-               linestyle="--", label="centroid baseline at the same mesh")
+               linestyle="--", label="C at cell centroid (1 sample/cell), same mesh")
     ax.set_yscale("log")
-    ax.set_xlabel("quadrature degree (basix default tet rule)")
+    ax.set_xticks(deg_x)
+    ax.set_xticklabels(deg_xticklabels, fontsize=8)
+    ax.set_xlabel("stiffness sampling rule (basix default tet quadrature degree)")
     ax.set_ylabel(r"$\|C_\mathrm{eff} - C_\mathrm{ref}\|_F \,/\, \|C_\mathrm{ref}\|_F$")
-    ax.set_title("Quadrature-degree convergence at fixed mesh — 2x2 plain weave")
+    ax.set_title("Stiffness sampling density at fixed mesh — 2x2 plain weave")
     ax.legend(loc="best", frameon=False, fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
@@ -362,16 +373,16 @@ def main() -> None:
     hex_quad = [(r["n_dofs_disp"], frob_err(np.asarray(r["C"]))) for r in hex_runs]
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     ax.plot(*zip(*tet_centroid, strict=True), marker="o", linestyle="--",
-            color="#d95f02", label="tet + centroid")
+            color="#d95f02", label="tet, C at centroid (1 sample/cell)")
     ax.plot(*zip(*tet_quad, strict=True), marker="s", linestyle="-",
-            color="#1b9e77", label="tet + quadrature (q=2)")
+            color="#1b9e77", label="tet, C at GPs, q=2 (4 samples/cell)")
     ax.plot(*zip(*hex_quad, strict=True), marker="^", linestyle="-",
-            color="#7570b3", label="hex + quadrature (q=2)")
+            color="#7570b3", label="hex, C at GPs, q=2 (8 samples/cell)")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"$\|C_\mathrm{eff} - C_\mathrm{ref}\|_F \,/\, \|C_\mathrm{ref}\|_F$")
-    ax.set_title("Hex tensor-product vs tet quadrature — 2x2 plain weave")
+    ax.set_title("Stiffness sampling density vs error — 2x2 plain weave")
     ax.legend(loc="best", frameon=False, fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
@@ -386,11 +397,11 @@ def main() -> None:
     hex_quad_t = [(r["n_dofs_disp"], r["elapsed_s"]) for r in hex_runs]
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     ax.plot(*zip(*tet_centroid_t, strict=True), marker="o", linestyle="--",
-            color="#d95f02", label="tet + centroid")
+            color="#d95f02", label="tet, C at centroid (1 sample/cell)")
     ax.plot(*zip(*tet_quad_t, strict=True), marker="s", linestyle="-",
-            color="#1b9e77", label="tet + quadrature (q=2)")
+            color="#1b9e77", label="tet, C at GPs, q=2 (4 samples/cell)")
     ax.plot(*zip(*hex_quad_t, strict=True), marker="^", linestyle="-",
-            color="#7570b3", label="hex + quadrature (q=2)")
+            color="#7570b3", label="hex, C at GPs, q=2 (8 samples/cell)")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("displacement DOFs")

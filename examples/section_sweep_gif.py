@@ -1,0 +1,166 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "b3-tex",
+# ]
+#
+# [tool.uv.sources]
+# b3-tex = { path = "..", editable = true }
+# ///
+
+"""Animated cut-plane sweep through a textile RVE.
+
+A planar slice travels through the RVE along one axis. On every slice we sample
+the implicit field and draw:
+
+  * a filled colour map of the **local in-tow fibre volume fraction** (compressed
+    crossovers pack denser, so they glow) — matrix is left blank;
+  * a **quiver of the local fibre direction** (the yarn local 1-axis, ``R[:, 0]``)
+    projected into the slice. A tow running *through* the plane shows long arrows
+    along its run; a tow running *perpendicular* to the plane (you are looking
+    down its fibres) collapses to short arrows — an immediate read of orientation.
+
+The frames are assembled into a GIF. This is a pure geometry/field visualisation —
+no FE solve and no FE backend required.
+
+Run with:
+    uv run --with-editable . --extra viz python examples/section_sweep_gif.py
+    # options: --config <yaml> --axis {x,y,z} --frames N --grid N --out path.gif
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.animation import FuncAnimation, PillowWriter
+
+from b3_tex.problem import RVEProblem
+
+EXAMPLES = Path(__file__).resolve().parent
+OUT_DIR = EXAMPLES.parent / "results"
+_PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}  # sweep axis -> in-plane (u, v)
+_AXIS_NAME = {0: "x", 1: "y", 2: "z"}
+
+
+def _load(path: Path) -> dict:
+    import yaml
+
+    with path.open() as f:
+        return yaml.safe_load(f)
+
+
+def vf_limits(problem: RVEProblem) -> tuple[float, float]:
+    """Stable colour limits: nominal Vf to the packing cap, from a volume sample."""
+    sampler = getattr(problem.field, "sample_local_vf", None)
+    if sampler is None:
+        return 0.0, 1.0
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(np.zeros(3), problem.size, size=(60_000, 3))
+    vf = np.asarray(sampler(pts), dtype=float)
+    vf = vf[np.isfinite(vf)]
+    if vf.size == 0:
+        return 0.0, 1.0
+    return float(np.floor(vf.min() * 100) / 100), float(np.ceil(vf.max() * 100) / 100)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml"))
+    ap.add_argument("--axis", choices=("x", "y", "z"), default="z",
+                    help="axis along which the cut plane travels")
+    ap.add_argument("--frames", type=int, default=30)
+    ap.add_argument("--grid", type=int, default=140, help="in-plane samples per side")
+    ap.add_argument("--quiver-step", type=int, default=7)
+    ap.add_argument("--out", default=str(OUT_DIR / "section_sweep.gif"))
+    args = ap.parse_args()
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    problem = RVEProblem.from_config(_load(Path(args.config)))
+    field = problem.field
+    sampler = getattr(field, "sample_local_vf", None)
+
+    sweep = {"x": 0, "y": 1, "z": 2}[args.axis]
+    u_ax, v_ax = _PLANE_AXES[sweep]
+    Lu, Lv, Lsweep = problem.size[u_ax], problem.size[v_ax], problem.size[sweep]
+    u = np.linspace(0, Lu, args.grid)
+    v = np.linspace(0, Lv, args.grid)
+    U, V = np.meshgrid(u, v)  # (nv, nu)
+    flat_u, flat_v = U.ravel(), V.ravel()
+    n = flat_u.size
+    # Sweep positions stay just inside the domain so slices are populated.
+    positions = np.linspace(0.04 * Lsweep, 0.96 * Lsweep, args.frames)
+    vmin, vmax = vf_limits(problem)
+    s = args.quiver_step
+
+    def sample_plane(pos: float):
+        pts = np.zeros((n, 3))
+        pts[:, sweep] = pos
+        pts[:, u_ax] = flat_u
+        pts[:, v_ax] = flat_v
+        ids, rot = field.sample_arrays(pts)
+        yarn = ids.reshape(args.grid, args.grid) == 1
+        e1u = rot[:, u_ax, 0].reshape(args.grid, args.grid)
+        e1v = rot[:, v_ax, 0].reshape(args.grid, args.grid)
+        if sampler is not None:
+            vf = np.asarray(sampler(pts), dtype=float).reshape(args.grid, args.grid)
+        else:
+            vf = np.where(yarn, 1.0, np.nan)
+        vf = np.where(yarn, vf, np.nan)
+        eu = np.where(yarn, e1u, np.nan)
+        ev = np.where(yarn, e1v, np.nan)
+        return vf, eu, ev
+
+    fig, ax = plt.subplots(figsize=(6.4, 5.6))
+    vf0, eu0, ev0 = sample_plane(positions[0])
+    mesh = ax.pcolormesh(u, v, vf0, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest")
+    quiv = ax.quiver(
+        U[::s, ::s], V[::s, ::s], eu0[::s, ::s], ev0[::s, ::s],
+        color="#39d0ff", scale=22, width=0.0045, pivot="mid",
+    )
+    cbar = fig.colorbar(mesh, ax=ax)
+    cbar.set_label("local in-tow fibre volume fraction $V_f$")
+    ax.set_xlabel(_AXIS_NAME[u_ax])
+    ax.set_ylabel(_AXIS_NAME[v_ax])
+    ax.set_aspect("equal")
+    title = ax.set_title("")
+
+    def update(k: int):
+        pos = positions[k]
+        vf, eu, ev = sample_plane(pos)
+        mesh.set_array(vf.ravel())  # 'nearest' shading: one colour cell per node
+        quiv.set_UVC(eu[::s, ::s], ev[::s, ::s])
+        title.set_text(
+            f"{Path(args.config).stem}\ncut plane  {args.axis} = {pos:.3f}   "
+            f"(fibre direction → quiver, $V_f$ → colour)"
+        )
+        return mesh, quiv, title
+
+    anim = FuncAnimation(fig, update, frames=args.frames, blit=False)
+    out = Path(args.out)
+    anim.save(out, writer=PillowWriter(fps=8))
+    plt.close(fig)
+    print(f"Wrote {out}  ({args.frames} frames, sweep along {args.axis})")
+
+    # Also dump a representative mid-sweep still.
+    still = out.with_name(out.stem + "_mid.png")
+    fig2, ax2 = plt.subplots(figsize=(6.4, 5.6))
+    vf, eu, ev = sample_plane(positions[len(positions) // 2])
+    m2 = ax2.pcolormesh(u, v, vf, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest")
+    ax2.quiver(U[::s, ::s], V[::s, ::s], eu[::s, ::s], ev[::s, ::s],
+               color="#39d0ff", scale=22, width=0.0045, pivot="mid")
+    fig2.colorbar(m2, ax=ax2, label="local in-tow fibre volume fraction $V_f$")
+    ax2.set_xlabel(_AXIS_NAME[u_ax]); ax2.set_ylabel(_AXIS_NAME[v_ax])
+    ax2.set_aspect("equal")
+    ax2.set_title(f"{Path(args.config).stem}  mid-sweep ({args.axis})")
+    fig2.tight_layout(); fig2.savefig(still, dpi=130); plt.close(fig2)
+    print(f"Wrote {still}")
+
+
+if __name__ == "__main__":
+    main()

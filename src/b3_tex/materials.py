@@ -109,25 +109,115 @@ class Material:
             return cls.orthotropic(name, **{k: float(config[k]) for k in keys})
         if kind == "stiffness":
             return cls(name=name, stiffness=np.asarray(config["stiffness"], dtype=float))
-        if kind == "chamis":
+        if kind in ("chamis", "micromechanical"):
             if registry is None:
                 raise ValueError(
-                    "chamis material requires a registry of previously defined materials "
-                    "(matrix and fibre); pass `registry=...` to from_config"
+                    f"{kind} material requires a registry of previously defined "
+                    "materials (matrix and fibre); pass `registry=...` to from_config"
                 )
             for ref in ("matrix", "fibre"):
                 if config[ref] not in registry:
                     raise ValueError(
-                        f"chamis material {name!r} references {ref}={config[ref]!r}, "
+                        f"{kind} material {name!r} references {ref}={config[ref]!r}, "
                         f"which is not in the registry; declare it before this material in the YAML"
                     )
-            return cls.from_chamis(
+            matrix = registry[str(config["matrix"])]
+            fibre = registry[str(config["fibre"])]
+            if kind == "chamis":
+                return cls.from_chamis(
+                    name,
+                    matrix=matrix,
+                    fibre=fibre,
+                    fibre_volume_fraction=float(config["fibre_volume_fraction"]),
+                )
+            # micromechanical: stiffness is computed on the fly from a (possibly
+            # spatially-varying) local fibre volume fraction via a pluggable model.
+            from b3_tex.micromodels import get_micromodel
+
+            return MicromechanicalMaterial.from_constituents(
                 name,
-                matrix=registry[str(config["matrix"])],
-                fibre=registry[str(config["fibre"])],
-                fibre_volume_fraction=float(config["fibre_volume_fraction"]),
+                matrix=matrix,
+                fibre=fibre,
+                micromodel=get_micromodel(str(config.get("micromodel", "chamis"))),
+                nominal_vf=float(config["nominal_fibre_volume_fraction"]),
+                max_vf=float(config.get("max_fibre_volume_fraction", 0.9)),
             )
         raise ValueError(f"unknown material type {kind!r}")
 
     def rotated(self, rotation: ArrayLike) -> NDArray[np.float64]:
         return rotate_stiffness(self.stiffness, rotation)
+
+
+@dataclass(frozen=True)
+class MicromechanicalMaterial(Material):
+    """A yarn material whose stiffness is a function of local fibre volume fraction.
+
+    ``stiffness`` (inherited) holds the nominal-Vf value so this slots into the
+    fixed-stiffness assembly path unchanged. When the phase field reports a
+    spatially-varying local Vf (compressed tows at crossovers), the stiffness
+    assembly instead evaluates :meth:`build_lut` / :meth:`stiffness_at_vf` per
+    point through the pluggable ``micromodel``.
+    """
+
+    matrix: "Material" = None  # type: ignore[assignment]
+    fibre: "Material" = None  # type: ignore[assignment]
+    micromodel: object = None
+    nominal_vf: float = 0.55
+    max_vf: float = 0.9
+
+    def __post_init__(self) -> None:
+        Material.__post_init__(self)
+        if self.matrix is None or self.fibre is None or self.micromodel is None:
+            raise ValueError(
+                "MicromechanicalMaterial requires matrix, fibre and micromodel; "
+                "use MicromechanicalMaterial.from_constituents(...)"
+            )
+        if not 0.0 < self.nominal_vf <= 1.0 or not 0.0 < self.max_vf <= 1.0:
+            raise ValueError("nominal_vf and max_vf must lie in (0, 1]")
+
+    @classmethod
+    def from_constituents(
+        cls,
+        name: str,
+        *,
+        matrix: "Material",
+        fibre: "Material",
+        micromodel: object,
+        nominal_vf: float,
+        max_vf: float = 0.9,
+    ) -> "MicromechanicalMaterial":
+        nominal = micromodel.stiffness(
+            matrix=matrix, fibre=fibre, fibre_volume_fraction=nominal_vf
+        )
+        return cls(
+            name=name,
+            stiffness=nominal,
+            matrix=matrix,
+            fibre=fibre,
+            micromodel=micromodel,
+            nominal_vf=float(nominal_vf),
+            max_vf=float(max_vf),
+        )
+
+    def stiffness_at_vf(self, vf: float) -> NDArray[np.float64]:
+        return self.micromodel.stiffness(
+            matrix=self.matrix, fibre=self.fibre, fibre_volume_fraction=float(vf)
+        )
+
+    def build_lut(
+        self, vf_lo: float, vf_hi: float, n_bins: int = 256
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return ``(vf_centers (K,), table (K, 6, 6))`` over ``[vf_lo, vf_hi]``.
+
+        A bin-quantised lookup keeps the micromechanics cost ``O(n_bins)`` no
+        matter how many quadrature/sub-sample points reference this material.
+        """
+        lo = float(min(vf_lo, vf_hi))
+        hi = float(max(vf_lo, vf_hi))
+        if hi - lo < 1e-9:
+            hi = lo + 1e-9
+        centers = (np.arange(n_bins) + 0.5) / n_bins * (hi - lo) + lo
+        table = self.micromodel.stiffness_batch(
+            matrix=self.matrix, fibre=self.fibre, vf=centers
+        )
+        return centers, table

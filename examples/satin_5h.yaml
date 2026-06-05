@@ -1,0 +1,60 @@
+# 5-harness satin weave (5H, step 2).
+#
+# A satin differs from a plain weave in its *interlacing*: each warp floats over
+# N-1 = 4 wefts and dips under just one, the interlacing point stepping by `shift`
+# columns per row. The result is long, low-crimp floats -- higher in-plane
+# stiffness and a smoother surface than a plain weave at the same Vf. The yarns
+# are ParametricYarns with float-and-dip polyline centerlines, so the crimp is
+# concentrated at the single interlacing point rather than spread over every
+# crossing.
+#
+# `shift` must be coprime with `n_harness` (5H: shift 2 or 3; never a divisor).
+
+domain:
+  size: [1.0, 1.0, 0.12]
+  mesh_resolution: [40, 40, 12]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9
+    e_t: 15.0e9
+    g_lt: 15.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: micromechanical
+    matrix: matrix
+    fibre: fibre
+    micromodel: chamis
+    nominal_fibre_volume_fraction: 0.58
+    max_fibre_volume_fraction: 0.90
+
+field:
+  type: satin_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.12]
+  n_harness: 5
+  shift: 2
+  yarn_half_width: 0.090           # 5 tows across a unit cell -> half-pitch 0.10
+  yarn_half_height: 0.022
+  amplitude: 0.028
+  power: 4.0
+  nominal_fibre_volume_fraction: 0.58
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling:
+    strategy: local_cloud
+    resolution: 6

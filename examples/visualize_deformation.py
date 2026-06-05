@@ -210,6 +210,84 @@ def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
     plotter.close()
 
 
+def _render_fiber_panel(problem: RVEProblem, out_path: Path) -> None:
+    """Render yarn cells at low opacity with fibre-direction arrow glyphs.
+
+    Glyphs are coloured by |e1 . x_hat| so warps (red, aligned with x) and
+    wefts (blue, aligned with y) are visually distinct; the yarn body is
+    rendered translucent so the interior orientation is readable.
+    """
+    Lx, Ly, Lz = (float(s) for s in problem.size)
+    nx, ny, nz = problem.mesh_resolution
+    mesh = dolfinx.mesh.create_box(
+        MPI.COMM_WORLD,
+        [np.array([0.0, 0.0, 0.0]), np.array([Lx, Ly, Lz])],
+        [nx, ny, nz],
+        cell_type=dolfinx.mesh.CellType.tetrahedron,
+    )
+    V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
+    centroids = _cell_centroids(mesh)
+    samples = problem.field.sample(centroids)
+    yarn_name = getattr(problem.field, "yarn_material", None)
+    in_yarn = np.array([s.material == yarn_name for s in samples])
+
+    cells, cell_types, points = dolfinx.plot.vtk_mesh(V)
+    grid = pv.UnstructuredGrid(cells, cell_types, points)
+    grid.cell_data["yarn"] = in_yarn.astype(float)
+
+    yarn_grid = grid.threshold(0.5, scalars="yarn")
+
+    e1_per_cell = np.array([s.rotation[:, 0] for s in samples])
+    yarn_centroids = centroids[in_yarn]
+    yarn_e1 = e1_per_cell[in_yarn]
+
+    # Subsample glyphs: aim for ~1500 arrows so each one is readable.
+    target = 1500
+    stride = max(1, yarn_centroids.shape[0] // target)
+    rng = np.random.default_rng(0)
+    pick = rng.permutation(yarn_centroids.shape[0])[::stride][:target]
+    glyph_pd = pv.PolyData(yarn_centroids[pick])
+    glyph_pd["e1"] = yarn_e1[pick]
+    glyph_pd["align_x"] = np.abs(yarn_e1[pick, 0])
+
+    # Arrow length ~ in-plane spacing so neighbouring arrows almost touch.
+    glyph_scale = 1.2 * min(Lx / max(nx, 1), Ly / max(ny, 1))
+    arrow = pv.Arrow(start=(-0.5, 0, 0), tip_length=0.30, tip_radius=0.20,
+                     shaft_radius=0.08)
+    glyphs = glyph_pd.glyph(orient="e1", scale=False, geom=arrow, factor=glyph_scale)
+
+    plotter = pv.Plotter(off_screen=True, window_size=(2200, 1500))
+    if yarn_grid.n_cells > 0:
+        plotter.add_mesh(
+            yarn_grid, color="#bcb8d4", opacity=0.18,
+            show_edges=True, edge_color="#888888", line_width=0.3,
+            show_scalar_bar=False,
+        )
+    plotter.add_mesh(
+        glyphs, scalars="align_x", cmap="coolwarm",
+        clim=(0.0, 1.0),
+        show_scalar_bar=True,
+        scalar_bar_args={
+            "title": "|e1 . x_hat|   (1 = warp, 0 = weft)",
+            "title_font_size": 18, "label_font_size": 14, "n_labels": 3,
+        },
+    )
+    plotter.add_text(
+        f"Fibre orientation field   (yarn cells @ 18% opacity, "
+        f"{int(in_yarn.sum())} of {len(in_yarn)} cells; "
+        f"{glyph_pd.n_points} arrows subsampled from yarn cell centroids; "
+        f"arrow = local e1; colour = |e1 . x_hat|)",
+        position="upper_left", font_size=18, color="black",
+    )
+    plotter.view_isometric()
+    # Zoom in further: default isometric framing has the cube tiny in the
+    # canvas. Pull the camera closer along the same direction.
+    plotter.camera.zoom(2.0)
+    plotter.add_axes(line_width=3, color="black")
+    plotter.screenshot(str(out_path))
+    plotter.close()
+
+
 def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> None:
     deformed_meshes = [
         grid_pt.warp_by_vector("u", factor=exaggeration) for _, _, _, grid_pt in panels
@@ -506,15 +584,17 @@ def main():
         results_dir = REPO / "results" / yaml_stem
     results_dir.mkdir(parents=True, exist_ok=True)
     mesh_png = results_dir / "_mesh_panel.png"
+    fiber_png = results_dir / "_fiber_panel.png"
     loadcases_png = results_dir / "_loadcases_3d.png"
     table_png = results_dir / "_loadcases_table.png"
     final_png = results_dir / "uniaxial_deformation_iso.png"
 
     verification = _measure_periodic_residuals(solve_loadcase, _V_ref, total_strain)
     _render_mesh_panel(problem, mesh_png)
+    _render_fiber_panel(problem, fiber_png)
     _render_3d_grid(panels, vm_clim, exaggeration, loadcases_png)
     _render_typst_table(problem, results_dir / "C_eff.npz", table_png, verification=verification)
-    _composite([mesh_png, loadcases_png, table_png], final_png)
+    _composite([mesh_png, fiber_png, loadcases_png, table_png], final_png)
     print(f"wrote {final_png}")
     for k, v in verification.items():
         print(f"  {k}: {v:.3e}")

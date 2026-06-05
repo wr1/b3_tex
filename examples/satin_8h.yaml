@@ -1,0 +1,54 @@
+# 8-harness satin weave (8H, step 3).
+#
+# An 8H satin has even longer floats (over 7, under 1) than the 5H, approaching
+# a unidirectional-like in-plane response on each face. `shift: 3` is coprime
+# with 8 (valid steps for 8H: 3 or 5). See satin_5h.yaml for the modelling notes.
+
+domain:
+  size: [1.0, 1.0, 0.12]
+  mesh_resolution: [48, 48, 12]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9
+    e_t: 15.0e9
+    g_lt: 15.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: micromechanical
+    matrix: matrix
+    fibre: fibre
+    micromodel: chamis
+    nominal_fibre_volume_fraction: 0.60
+    max_fibre_volume_fraction: 0.90
+
+field:
+  type: satin_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.12]
+  n_harness: 8
+  shift: 3
+  yarn_half_width: 0.056           # 8 tows across a unit cell -> half-pitch 0.0625
+  yarn_half_height: 0.020
+  amplitude: 0.026
+  power: 4.0
+  nominal_fibre_volume_fraction: 0.60
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling:
+    strategy: local_cloud
+    resolution: 6

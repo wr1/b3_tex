@@ -1,0 +1,64 @@
+# Compacted high-Vf plain weave with spatially-varying in-tow fibre volume fraction.
+#
+# This is the showcase for the variable-cross-section -> local-Vf pipeline. The
+# tows are modelled as ParametricYarns whose super-ellipse cross-section is
+# *squeezed* at the crossovers (`compaction: 0.4`): the section half-height drops
+# toward the interlacing points. Fibre area is conserved, so where the tow is
+# compressed the local fibre volume fraction rises (here from the nominal 0.55 up
+# to the 0.90 packing cap). The yarn material is `micromechanical`, so the
+# Chamis stiffness is evaluated per-point from that local Vf instead of a single
+# baked value -- the compacted crossovers come out stiffer, as they are in reality.
+#
+# Compare against plain_weave_high_vf.yaml (constant in-tow Vf) to see the effect.
+
+domain:
+  size: [1.0, 1.0, 0.092]          # thickness = 4*half_height*(1-compaction): the
+                                   # nested tows fill it, touching both faces
+  mesh_resolution: [40, 40, 8]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - name: matrix
+    type: isotropic
+    youngs_modulus: 3.0e9
+    poisson_ratio: 0.35
+
+  - name: fibre
+    type: transverse_isotropic
+    e_l: 230.0e9        # carbon (IM-class) fibre
+    e_t: 15.0e9
+    g_lt: 15.0e9
+    nu_lt: 0.20
+    nu_tt: 0.30
+
+  - name: yarn
+    type: micromechanical          # stiffness = micromodel(matrix, fibre, local Vf)
+    matrix: matrix
+    fibre: fibre
+    micromodel: chamis             # built-in baseline; swap for mori_tanaka or a surrogate
+    nominal_fibre_volume_fraction: 0.55
+    max_fibre_volume_fraction: 0.90
+
+field:
+  type: parametric_plain_weave
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [1.0, 1.0, 0.092]
+  n_warp: 2
+  n_weft: 2
+  yarn_half_width: 0.245
+  yarn_half_height: 0.038
+  power: 4.0                       # super-ellipse fills the inter-tow corners
+  compaction: 0.40                 # section thins to 60% height at crossovers
+  nest_crossover: true             # amplitude derived from the compacted section so
+                                   # interlacing tows touch at crossovers (no matrix gap)
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling:
+    strategy: local_cloud
+    resolution: 6

@@ -1,3 +1,13 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "b3-tex",
+# ]
+#
+# [tool.uv.sources]
+# b3-tex = { path = "..", editable = true }
+# ///
+
 """MFEM hex AMR on a 2x2 plain weave -- the headline test of everything.
 
 Setup mirrors examples/plain_weave_high_vf.yaml: a thin 1x1x0.16 box with
@@ -30,6 +40,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from b3_tex.problem import RVEProblem
+
+try:
+    import b3_tex  # noqa: F401
+except ImportError:
+    import sys
+    print(
+        "\n[error] 'b3_tex' (and its mfem dependency) is not importable.\n"
+        "        Run this example with:\n"
+        "            uv run --with-editable . --extra viz python examples/mfem_weave_amr.py\n",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "results"
 
@@ -192,9 +214,18 @@ def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    print("Hex AMR (NCMesh octree, 8 GPs/cell):")
+    # Subsampling / quadrature schemes:
+    #   AMR metric (mesh-driver):  10x10x10 = 1000 deterministic sub-points
+    #                              per cell (tensor grid in unit cube),
+    #                              shared across both cell types.
+    #   FE quadrature (assembly):  q = 2 * Lagrange-1 order = 2 in MFEM.
+    #     hex: tensor 2x2x2 Gauss-Legendre  -> 8 GPs/cell.
+    #     tet: 4-point Hammer (degree 2)    -> 4 GPs/cell.
+    #   Stress recovery uses these same FE GPs, so per-cell stresses are
+    #   the volume-weighted means over the same nq points the assembly used.
+    print("Hex AMR (NCMesh octree, FE q=2: 2x2x2 GL = 8 GPs/cell):")
     hex_runs = _sweep("hexahedron", [0, 1, 2, 3])
-    print("Tet AMR (Plaza red-green, 4 GPs/cell):")
+    print("Tet AMR (Plaza red-green, FE q=2: 4-pt Hammer = 4 GPs/cell):")
     # Tet AMR is conforming-only -> cell count grows faster; cap at 2 iters
     tet_runs = _sweep("tetrahedron", [0, 1, 2])
     runs = hex_runs + tet_runs
