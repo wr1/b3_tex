@@ -62,3 +62,8 @@ solver:
   material_sampling:
     strategy: local_cloud
     resolution: 6
+  amr:                       # marker-based hex AMR during homogenization (NCMesh)
+    enabled: true
+    max_iterations: 2
+    threshold: 0.2
+    dof_budget: 200000

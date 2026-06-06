@@ -34,16 +34,17 @@ def test_collect_spec_parametric_weave(compacted_problem):
     assert any("micromechanical" in k or "yarn" in k.lower() for k in micro)
     assert spec.title == "Parametric plain weave (compacted)"
     analysis = dict(spec.analysis_rows)
-    assert analysis["homogenization AMR"] == "off (uniform mesh)"
+    # the showcase config enables homogenization AMR (consistent with the AMR figure)
+    assert analysis["homogenization AMR"] == "on"
     assert analysis["AMR figure (right)"] == "not shown"
 
 
 def test_analysis_amr_panel_consistent(compacted_problem):
     problem, raw = compacted_problem
-    panel = "on — base 10×10×3 hex, 2 pass(es), τ=0.2, final slice 120 cells"
+    panel = "on - base 10x10x3 hex, 2 pass(es), tau=0.2, final slice 120 cells"
     spec = collect_spec(problem, raw, config_path="x.yaml", amr_panel=panel)
     analysis = dict(spec.analysis_rows)
-    assert analysis["homogenization AMR"] == "off (uniform mesh)"
+    assert analysis["homogenization AMR"] == "on"
     assert analysis["AMR figure (right)"] == panel
 
 

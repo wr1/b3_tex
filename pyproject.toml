@@ -22,10 +22,11 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 viz = [
-  "pyvista>=0.43",      # 3D interactive visualization (ParaView-style)
-  "scikit-image>=0.22", # image processing for some AMR diagnostics
-  "pillow>=10.0",
-  # matplotlib and scipy are already core dependencies
+  "pyvista>=0.43",      # 3D scene: volume render, level-set isosurface, glyphs
+  "pillow>=10.0",       # overview() panel compositing
+  "imageio>=2.30",      # animation frame I/O (orbit / amr / section sweeps)
+  "imageio-ffmpeg>=0.4", # mp4 via imageio (the explainer also uses the ffmpeg CLI)
+  # matplotlib and scipy are already core dependencies; scikit-image is optional
 ]
 
 [project.scripts]

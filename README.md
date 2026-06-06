@@ -1,3 +1,5 @@
+<a href="https://blade3.io"><img src="docs/b3_logo.svg" alt="blade3.io" width="96" align="right"></a>
+
 # b3_tex
 
 Implicit modelling and homogenization of textile-composite RVEs on FEniCSx
