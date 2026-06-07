@@ -1,0 +1,34 @@
+# 4-harness satin carbon/epoxy fabric (long floats, low crimp).  units: m (SI)
+# Mirrors louisepb/TexGenScripts 2dweave.py family; satin interlacing via
+# WeavePattern.satin(n=4, shift=1).  TexGen mm -> m as in weave_twill_2x2.yaml.
+
+domain:
+  size: [0.02, 0.02, 0.0022]      # 4 x 4 tows at 5 mm pitch
+  mesh_resolution: [48, 48, 10]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.58, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: woven
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.02, 0.02, 0.0022]
+  pattern: {kind: satin, n: 4, shift: 1}
+  warp_width: 0.004
+  warp_height: 0.0008
+  power: 4.0
+  compaction: 0.25
+  nest: true
+  nominal_fibre_volume_fraction: 0.58
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}

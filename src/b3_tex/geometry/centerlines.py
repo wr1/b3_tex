@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
@@ -100,6 +100,62 @@ class SinusoidalCenterline:
         self, points: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         s = points[:, self._running_axis]
+        return s, self.position(s)
+
+
+@dataclass(frozen=True)
+class UndulatingCenterline:
+    """Graph centerline running along an arbitrary **in-plane** direction, undulating in z::
+
+        position(s) = origin + s*in_plane_dir + (0, 0, amplitude*sin(2*pi*s/period + phase))
+
+    Generalizes :class:`SinusoidalCenterline` to any in-plane angle (off-axis NCF
+    plies, +/- bias braid yarns). ``origin`` carries the z mid-plane in its z
+    component. Projection is exact along the running direction (graph convention).
+    """
+
+    origin: NDArray[np.float64]        # (3,)
+    in_plane_dir: NDArray[np.float64]  # (3,), z component ignored/zeroed
+    amplitude: float
+    period: float
+    phase: float = 0.0
+    s_min: float = 0.0
+    s_max: float = 1.0
+
+    def __post_init__(self) -> None:
+        o = np.asarray(self.origin, dtype=float).reshape(3)
+        d = np.asarray(self.in_plane_dir, dtype=float).reshape(3).copy()
+        d[2] = 0.0
+        n = np.linalg.norm(d)
+        if n < 1e-30:
+            raise ValueError("in_plane_dir must have a non-zero in-plane component")
+        object.__setattr__(self, "origin", o)
+        object.__setattr__(self, "in_plane_dir", d / n)
+
+    def z_at(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        return self.origin[2] + self.amplitude * np.sin(
+            2 * np.pi * s / self.period + self.phase
+        )
+
+    def position(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        out = self.origin[None, :] + s[:, None] * self.in_plane_dir[None, :]
+        out[:, 2] = self.z_at(s)
+        return out
+
+    def tangent(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        slope = self.amplitude * (2 * np.pi / self.period) * np.cos(
+            2 * np.pi * s / self.period + self.phase
+        )
+        t = np.broadcast_to(self.in_plane_dir, (s.shape[0], 3)).copy()
+        t[:, 2] = slope
+        return t / np.linalg.norm(t, axis=1, keepdims=True)
+
+    def project(
+        self, points: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        s = (np.asarray(points, dtype=float) - self.origin) @ self.in_plane_dir
         return s, self.position(s)
 
 

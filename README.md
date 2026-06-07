@@ -22,6 +22,25 @@ Implicit modelling with AMR enables:
 
 
 
+## Fabric architectures
+
+A data-driven generator layer turns a fabric spec into implicit yarns (see
+`examples/`). Pick one with `field.type`:
+
+- **`woven`** — any 2D weave from a `pattern` block: `plain`, `twill(n_over,n_under,step)`,
+  `satin(n,shift)`, `basket(n)`, or a custom `matrix`. Crimp, compaction and tow nesting
+  come straight from the interlacing (`weave_twill_2x2`, `weave_satin_4h`, `weave_basket_2x2`).
+- **`orthogonal`** / **`layer_to_layer`** — 3D woven: stacked warp/weft layers with a
+  through-thickness or diagonal-interlock binder (`woven_3d_orthogonal`, `woven_layer_to_layer`).
+- **`ncf`** — multi-axial non-crimp fabric: straight inlay plies at arbitrary angles +
+  tricot/pillar stitch (`ncf_tricot_stitched`).
+- **`braid`** — triaxial braid: axial + ±bias yarns (`triaxial_braid`).
+
+The example set mirrors the [TexGenScripts](https://github.com/louisepb/TexGenScripts)
+fabric library in SI metres. The legacy `plain_weave` / `parametric_plain_weave` /
+`satin_weave` / `stitched_biaxial` types still work but are deprecated in favour of the
+unified `woven` / `ncf` generators.
+
 **Example material datasheet** (one-page PDF for the compacted high-Vf plain weave):
 
 [![Technical material datasheet](results/datasheet_plain_weave_compacted.png)](results/datasheet_plain_weave_compacted.pdf)

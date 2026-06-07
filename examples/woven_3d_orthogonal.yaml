@@ -1,0 +1,44 @@
+# 3D orthogonal woven RVE (CTextileOrthogonal). units: m (SI)
+# Mirrors louisepb/TexGenScripts 3dOrthogonalRefined.py (TexGen mm / 1000).
+# Stacked straight warp + weft layers locked by through-thickness binder warps.
+
+domain:
+  size: [0.0228, 0.0112, 0.0014]      # n_warp*warp_spacing x n_weft*weft_spacing x thickness
+  mesh_resolution: [48, 24, 14]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: orthogonal
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.0228, 0.0112, 0.0014]
+  n_warp: 6
+  n_weft: 4
+  warp_layers: 2
+  weft_layers: 3
+  n_binder: 2
+  warp_spacing: 0.0038
+  warp_width: 0.0036
+  warp_height: 0.00035
+  weft_spacing: 0.0028
+  weft_width: 0.00258
+  weft_height: 0.00025
+  binder_spacing: 0.0014
+  binder_width: 0.001375
+  binder_height: 0.00016
+  fabric_thickness: 0.0014
+  power: 2.0
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}

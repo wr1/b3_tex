@@ -41,17 +41,16 @@ materials:
     max_fibre_volume_fraction: 0.90
 
 field:
-  type: parametric_plain_weave
+  type: woven                       # unified pattern-driven weave generator
   matrix_material: matrix
   yarn_material: yarn
   domain_size: [1.0, 1.0, 0.092]
-  n_warp: 2
-  n_weft: 2
-  yarn_half_width: 0.245
-  yarn_half_height: 0.038
+  pattern: {kind: plain, n_warp: 2, n_weft: 2}
+  warp_width: 0.49                  # full tow width  (= 2 * old yarn_half_width)
+  warp_height: 0.076               # full tow height (= 2 * old yarn_half_height)
   power: 4.0                       # super-ellipse fills the inter-tow corners
   compaction: 0.40                 # section thins to 60% height at crossovers
-  nest_crossover: true             # amplitude derived from the compacted section so
+  nest: true                       # amplitude derived from the compacted section so
                                    # interlacing tows touch at crossovers (no matrix gap)
   nominal_fibre_volume_fraction: 0.55
   max_fibre_volume_fraction: 0.90

@@ -1,0 +1,43 @@
+# 3D layer-to-layer angle-interlock woven RVE (CTextileDecoupledLToL). units: m (SI)
+# Mirrors louisepb/TexGenScripts DecoupledLToLTextile.py (TexGen mm / 1000).
+# Binders step one weft layer per pick, sweeping diagonally through the thickness.
+
+domain:
+  size: [0.00568, 0.00996, 0.0009]    # n_warp*warp_spacing x n_weft*weft_spacing x thickness
+  mesh_resolution: [24, 40, 12]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: layer_to_layer
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.00568, 0.00996, 0.0009]
+  n_warp: 4
+  n_weft: 6
+  warp_layers: 2
+  weft_layers: 3
+  n_binder: 2
+  binder_layers: 2
+  warp_spacing: 0.00142
+  weft_spacing: 0.00166
+  warp_height: 0.0003
+  weft_height: 0.0003
+  warp_width: 0.0012
+  weft_width: 0.0012
+  binder_width: 0.0012
+  binder_height: 0.0003
+  power: 2.0
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}

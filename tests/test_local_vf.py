@@ -63,14 +63,17 @@ def test_no_compaction_local_vf_is_constant_nominal():
 
 
 def test_same_orientation_points_have_equal_stiffness():
-    """Two points at the same running position (same tangent + same Vf) must get
-    identical assembled stiffness — isolating the local-Vf effect from rotation."""
+    """Two adjacent points in the same warp column get near-identical assembled
+    stiffness — isolating the local-Vf effect from rotation. (Under the unified
+    ``woven`` path the centerline is a polyline whose nearest-segment projection
+    makes two points at the same x map to slightly different s, so the match is
+    close rather than exact — the old analytic sinusoid gave bit-exact equality.)"""
     problem = _compacted_problem(compaction=0.4)
     p1 = np.array([[0.25, 0.25, 0.115]])
-    p2 = np.array([[0.25, 0.25, 0.125]])  # same x (same s) -> same frame and Vf
+    p2 = np.array([[0.25, 0.25, 0.125]])  # same column -> nearly same frame and Vf
     c1 = global_stiffness_at_points(problem, p1)[0]
     c2 = global_stiffness_at_points(problem, p2)[0]
-    np.testing.assert_allclose(c1, c2, rtol=1e-9)
+    assert np.linalg.norm(c1 - c2) <= 1e-2 * np.linalg.norm(c1)
 
 
 def test_lut_matches_exact_micromodel():

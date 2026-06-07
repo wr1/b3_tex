@@ -26,13 +26,15 @@ def compacted_problem():
 def test_collect_spec_parametric_weave(compacted_problem):
     problem, raw = compacted_problem
     spec = collect_spec(problem, raw, config_path=str(COMPACTED))
-    assert dict(spec.rve_rows).get("field type") == "parametric_plain_weave"
+    # the showcase now uses the unified pattern-driven 'woven' generator
+    assert dict(spec.rve_rows).get("field type") == "woven"
+    assert dict(spec.rve_rows).get("pattern") == "plain"
     assert spec.yarn_vf is not None
     assert spec.local_vf is not None
     assert spec.local_vf["min"] <= spec.local_vf["max"]
     micro = dict(spec.micro_rows)
     assert any("micromechanical" in k or "yarn" in k.lower() for k in micro)
-    assert spec.title == "Parametric plain weave (compacted)"
+    assert spec.title == "Plain weave"
     analysis = dict(spec.analysis_rows)
     # the showcase config enables homogenization AMR (consistent with the AMR figure)
     assert analysis["homogenization AMR"] == "on"

@@ -1,0 +1,33 @@
+# 2x2 basket weave carbon/epoxy fabric.  units: m (SI)
+# WeavePattern.basket(n=2): plain weave of 2-yarn groups.  TexGen mm -> m.
+
+domain:
+  size: [0.02, 0.02, 0.0024]      # 4 x 4 tows (two 2x2 groups) at 5 mm pitch
+  mesh_resolution: [48, 48, 10]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: woven
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.02, 0.02, 0.0024]
+  pattern: {kind: basket, n: 2}
+  warp_width: 0.004
+  warp_height: 0.0008
+  power: 4.0
+  compaction: 0.3
+  nest: true
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}

@@ -1,0 +1,45 @@
+# Quad-axial [0/+45/-45/90] non-crimp fabric (NCF) with a tricot stitch.
+# Mirrors louisepb/TexGenScripts NonCrimpFabric.py; TexGen mm dimensions mapped
+# to SI metres (/1000): tow width 0.95 mm -> 0.00095, spacing 1.0 mm -> 0.001,
+# tow height 0.2 mm -> 0.0002, stitch radius 0.025 mm -> 0.000025.
+#
+# Four straight inlay plies stacked through-thickness at z = 0.2/0.4/0.6/0.8 mm,
+# each laid at its own in-plane angle, held by tricot stitch columns that dip
+# below the bottom ply and rise above the top ply (z_span spans the whole stack).
+
+domain:
+  size: [0.004, 0.004, 0.001]        # 4 x 4 mm in plane, 1 mm thick
+  mesh_resolution: [40, 40, 16]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: ncf
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.004, 0.004, 0.001]
+  power: 0.5                          # power-ellipse (lenticular) inlay sections
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+  plies:
+    - {angle_deg: 0,   z_center: 0.0002, width: 0.00095, height: 0.0002, spacing: 0.001}
+    - {angle_deg: 45,  z_center: 0.0004, width: 0.00095, height: 0.0002, spacing: 0.001}
+    - {angle_deg: -45, z_center: 0.0006, width: 0.00095, height: 0.0002, spacing: 0.001}
+    - {angle_deg: 90,  z_center: 0.0008, width: 0.00095, height: 0.0002, spacing: 0.001}
+  stitch:
+    pattern: tricot
+    n_x: 4
+    n_y: 4
+    radius: 0.000025
+    z_span: [0.00005, 0.00095]
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}

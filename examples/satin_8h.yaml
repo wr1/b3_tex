@@ -33,14 +33,13 @@ materials:
     max_fibre_volume_fraction: 0.90
 
 field:
-  type: satin_weave
+  type: woven                      # unified generator; satin via the pattern block
   matrix_material: matrix
   yarn_material: yarn
   domain_size: [1.0, 1.0, 0.12]
-  n_harness: 8
-  shift: 3
-  yarn_half_width: 0.056           # 8 tows across a unit cell -> half-pitch 0.0625
-  yarn_half_height: 0.020
+  pattern: {kind: satin, n: 8, shift: 3}
+  warp_width: 0.112                # 8 tows across a unit cell -> pitch 0.125
+  warp_height: 0.040
   amplitude: 0.026
   power: 4.0
   nominal_fibre_volume_fraction: 0.60

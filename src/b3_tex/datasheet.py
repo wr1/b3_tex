@@ -136,6 +136,23 @@ def _local_vf_range(problem: RVEProblem, n: int = 80_000) -> dict[str, float] | 
 def _field_geometry_rows(raw_field: dict[str, Any]) -> list[tuple[str, str]]:
     kind = str(raw_field.get("type", ""))
     rows: list[tuple[str, str]] = [("field type", kind)]
+    if "pattern" in raw_field:  # unified woven family
+        pat = raw_field["pattern"]
+        rows.append(("pattern", str(pat.get("kind", ""))))
+        for label, key in (("n_warp", "n_warp"), ("n_weft", "n_weft"), ("n", "n"),
+                           ("shift", "shift"), ("n_over", "n_over"), ("n_under", "n_under")):
+            if key in pat:
+                rows.append((label, str(pat[key])))
+        for label, key in (("warp width", "warp_width"), ("warp height", "warp_height"),
+                           ("weft width", "weft_width"), ("weft height", "weft_height"),
+                           ("section power", "power"), ("compaction", "compaction"),
+                           ("nominal Vf", "nominal_fibre_volume_fraction"),
+                           ("max Vf", "max_fibre_volume_fraction")):
+            if key in raw_field:
+                rows.append((label, str(raw_field[key])))
+        if raw_field.get("nest"):
+            rows.append(("crossover nesting", "on"))
+        return rows
     common = (
         ("n_warp", "n_warp"),
         ("n_weft", "n_weft"),
@@ -257,8 +274,15 @@ def collect_spec(
         "plain_weave": "Plain weave",
         "satin_weave": "Satin weave",
         "stitched_biaxial": "Stitched biaxial NCF",
+        "ncf": "Non-crimp fabric",
+        "orthogonal": "3D orthogonal weave",
+        "layer_to_layer": "Layer-to-layer 3D weave",
+        "braid": "Triaxial braid",
     }
-    title = title_map.get(field_kind, field_kind.replace("_", " ").title())
+    if field_kind == "woven":
+        title = f"{str(raw_field.get('pattern', {}).get('kind', 'plain')).title()} weave"
+    else:
+        title = title_map.get(field_kind, field_kind.replace("_", " ").title())
 
     vf_b = _yarn_volume_fraction(problem)
     local_vf = _local_vf_range(problem)

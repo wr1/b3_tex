@@ -1,0 +1,49 @@
+# Triaxial carbon/epoxy braid.  units: m (SI)
+# Mirrors louisepb/TexGenScripts TriaxialBraid.py (TexGen mm dimensions -> metres):
+# braid path (2, 1.1547) -> braid angle atan(1.1547/2) = 30 deg; y-repeat 0.57735 mm
+# -> 0.00057735 m; bias tow 0.45 x 0.13 mm; axial tow 0.6 x 0.15 mm.
+#
+# Layout: straight axial tows along the braid axis (y) + two bias families at
+# +/- 30 deg that interlace through a small z undulation (one up-phase, one
+# down-phase) so near every crossing one bias tow sits above the mid-plane and
+# the other below.
+#
+# field schema (type: braid):
+#   domain_size:    [Lx, Ly, Lz]      one braid unit cell (SI metres)
+#   braid_angle_deg:                  bias angle to the braid axis (y); default 30
+#   n_bias_per_dir:                   tows per bias family across the cell
+#   bias_width / bias_height:         bias tow lenticular section (full extents)
+#   z_amplitude:                      bias undulation amplitude (interlacing)
+#   axial:                            {enabled, count, width, height} for axial tows
+#   nominal_fibre_volume_fraction / max_fibre_volume_fraction (or nominal_vf/max_vf)
+
+domain:
+  size: [0.0017, 0.00057735, 0.0006]   # ~1 braid unit cell
+  mesh_resolution: [34, 12, 12]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: braid
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.0017, 0.00057735, 0.0006]
+  braid_angle_deg: 30
+  n_bias_per_dir: 3
+  bias_width: 0.00045
+  bias_height: 0.00013
+  z_amplitude: 0.00006
+  axial: {enabled: true, count: 2, width: 0.0006, height: 0.00015}
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}
