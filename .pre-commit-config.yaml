@@ -1,0 +1,10 @@
+# Run `pre-commit install` once to activate. Hooks run on staged files only,
+# so they fix new/changed code without churning the (currently un-lint-clean)
+# rest of the tree. CI's ruff job stays advisory until the backlog is cleared.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
