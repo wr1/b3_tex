@@ -22,7 +22,6 @@ Implementation notes
 """
 
 import numpy as np
-from numpy.typing import NDArray
 
 from b3_tex.backends._dolfinx_common import (
     cell_centroids as _cell_centroids,
@@ -115,13 +114,19 @@ def _build_periodic_mpc(V, problem: RVEProblem, bcs):
         )
 
     def rel_face_x(x, Lx=Lx):
-        out = x.copy(); out[0] -= Lx; return out
+        out = x.copy()
+        out[0] -= Lx
+        return out
 
     def rel_face_y(x, Ly=Ly):
-        out = x.copy(); out[1] -= Ly; return out
+        out = x.copy()
+        out[1] -= Ly
+        return out
 
     def rel_face_z(x, Lz=Lz):
-        out = x.copy(); out[2] -= Lz; return out
+        out = x.copy()
+        out[2] -= Lz
+        return out
 
     mpc.create_periodic_constraint_geometrical(V, face_x, rel_face_x, bcs=bcs)
     mpc.create_periodic_constraint_geometrical(V, face_y, rel_face_y, bcs=bcs)
@@ -147,13 +152,22 @@ def _build_periodic_mpc(V, problem: RVEProblem, bcs):
         )
 
     def rel_edge_xy(x, Lx=Lx, Ly=Ly):
-        out = x.copy(); out[0] -= Lx; out[1] -= Ly; return out
+        out = x.copy()
+        out[0] -= Lx
+        out[1] -= Ly
+        return out
 
     def rel_edge_xz(x, Lx=Lx, Lz=Lz):
-        out = x.copy(); out[0] -= Lx; out[2] -= Lz; return out
+        out = x.copy()
+        out[0] -= Lx
+        out[2] -= Lz
+        return out
 
     def rel_edge_yz(x, Ly=Ly, Lz=Lz):
-        out = x.copy(); out[1] -= Ly; out[2] -= Lz; return out
+        out = x.copy()
+        out[1] -= Ly
+        out[2] -= Lz
+        return out
 
     mpc.create_periodic_constraint_geometrical(V, edge_xy, rel_edge_xy, bcs=bcs)
     mpc.create_periodic_constraint_geometrical(V, edge_xz, rel_edge_xz, bcs=bcs)
@@ -167,7 +181,11 @@ def _build_periodic_mpc(V, problem: RVEProblem, bcs):
         )
 
     def rel_corner(x, Lx=Lx, Ly=Ly, Lz=Lz):
-        out = x.copy(); out[0] -= Lx; out[1] -= Ly; out[2] -= Lz; return out
+        out = x.copy()
+        out[0] -= Lx
+        out[1] -= Ly
+        out[2] -= Lz
+        return out
 
     mpc.create_periodic_constraint_geometrical(V, corner, rel_corner, bcs=bcs)
 

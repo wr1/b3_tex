@@ -338,16 +338,19 @@ def engineering_constants_from_loadcases(
     """Engineering constants read off the FE response of the stress-controlled loadcases."""
     out: dict[str, float] = {}
     if "tens_x" in macro_strains:
-        e = macro_strains["tens_x"]; s = macro_stresses["tens_x"]
+        e = macro_strains["tens_x"]
+        s = macro_stresses["tens_x"]
         out["E_x"] = float(s[0] / e[0])
         out["nu_xy"] = float(-e[1] / e[0])
         out["nu_xz"] = float(-e[2] / e[0])
     if "tens_y" in macro_strains:
-        e = macro_strains["tens_y"]; s = macro_stresses["tens_y"]
+        e = macro_strains["tens_y"]
+        s = macro_stresses["tens_y"]
         out["E_y"] = float(s[1] / e[1])
         out["nu_yz"] = float(-e[2] / e[1])
     if "tens_z" in macro_strains:
-        e = macro_strains["tens_z"]; s = macro_stresses["tens_z"]
+        e = macro_strains["tens_z"]
+        s = macro_stresses["tens_z"]
         out["E_z"] = float(s[2] / e[2])
     if "shear_yz" in macro_strains:
         out["G_yz"] = float(macro_stresses["shear_yz"][3] / macro_strains["shear_yz"][3])

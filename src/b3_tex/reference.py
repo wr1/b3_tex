@@ -63,10 +63,10 @@ def engineering_constants_transverse_iso(stiffness: NDArray[np.float64]) -> dict
     n = C[0, 0]
     k = 0.5 * (C[1, 1] + C[1, 2])
     m = 0.5 * (C[1, 1] - C[1, 2])
-    l = C[0, 1]
+    ell = C[0, 1]  # Hill's modulus l
     p = C[5, 5]
-    e_l = n - l * l / k
-    nu_lt = l / (2.0 * k)
+    e_l = n - ell * ell / k
+    nu_lt = ell / (2.0 * k)
     g_lt = p
     e_t = 1.0 / (1.0 / (4.0 * k) + 1.0 / (4.0 * m) + nu_lt * nu_lt / e_l)
     nu_tt = (e_t / (2.0 * m)) - 1.0

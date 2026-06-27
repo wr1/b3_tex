@@ -21,12 +21,6 @@ _PLIES_0_90 = [
 
 def test_inlay_ply_fibre_directions():
     """A tow's local 1-axis (rotation col 0) equals its ply's in-plane direction."""
-    plies = [
-        {"angle_deg": 0, "z_center": 0.0002, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
-        {"angle_deg": 90, "z_center": 0.0004, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
-        {"angle_deg": 45, "z_center": 0.0006, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
-        {"angle_deg": -45, "z_center": 0.0008, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
-    ]
     centre = np.array([[0.002, 0.002, 0.0]])
 
     expected = {

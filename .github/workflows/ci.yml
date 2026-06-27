@@ -40,11 +40,8 @@ jobs:
         run: PYTHONPATH=src python -m pytest -q
 
   lint:
-    name: lint (ruff, advisory)
+    name: lint (ruff)
     runs-on: ubuntu-latest
-    # Advisory only: the tree has pre-existing ruff findings to clean up
-    # incrementally; surfacing them must not block the test gate above.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

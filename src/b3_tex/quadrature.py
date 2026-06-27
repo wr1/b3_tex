@@ -138,10 +138,7 @@ def populate_stiffness_at_quadrature_points(
 # Generalized, fully tensorized material sampling across all cells
 # ---------------------------------------------------------------------------
 
-from typing import Any as _Any  # local alias to avoid name clash in older stubs
-
-
-def _resolve_material_sampling_spec(solver: dict[str, _Any]) -> dict[str, _Any]:
+def _resolve_material_sampling_spec(solver: dict[str, Any]) -> dict[str, Any]:
     """Parse solver config into a clean sampling spec.
 
     Supports the new structured form and the legacy ``stiffness_sampling`` key
@@ -215,7 +212,7 @@ def effective_stiffnesses_for_gauss_points(
     gp_coords: NDArray[np.float64],
     gp_cell_ids: NDArray[np.intp],
     cell_vertices: NDArray[np.float64],   # (n_cells, n_verts, 3)
-    spec: dict[str, _Any] | None = None,
+    spec: dict[str, Any] | None = None,
 ) -> NDArray[np.float64]:
     """(N_gps, 6, 6) effective stiffness per GP. Strategy is one of:
     ``exact`` (sample at GPs), ``cell_constant`` (sample at centroids),

@@ -91,7 +91,8 @@ def test_periodic_cascading_corner_handling_and_pin_enforcement():
     C_func.x.scatter_forward()
 
     E_voigt = dolfinx.fem.Constant(mesh, np.zeros(6))
-    u = ufl.TrialFunction(V); v = ufl.TestFunction(V)
+    u = ufl.TrialFunction(V)
+    v = ufl.TestFunction(V)
     a_form = ufl.inner(ufl.dot(C_func, _voigt_strain(u, ufl)), _voigt_strain(v, ufl)) * ufl.dx
     L_form = -ufl.inner(ufl.dot(C_func, E_voigt), _voigt_strain(v, ufl)) * ufl.dx
 
@@ -130,7 +131,8 @@ def test_periodic_cascading_corner_handling_and_pin_enforcement():
         ((0.5, 0, 0.5), (0.5, L, 0.5)),
         ((0.5, 0.5, 0), (0.5, 0.5, L)),
     ):
-        u_m = at(p_master); u_s = at(p_slave)
+        u_m = at(p_master)
+        u_s = at(p_slave)
         assert u_m is not None and u_s is not None
         np.testing.assert_allclose(u_m, u_s, atol=1e-10)
 

@@ -43,12 +43,12 @@ def stiffness_voigt_to_tensor(c_voigt: ArrayLike) -> NDArray[np.float64]:
         raise ValueError(f"stiffness must have shape (6, 6), got {c.shape}")
     tensor = np.zeros((3, 3, 3, 3), dtype=float)
     for a, (i, j) in enumerate(VOIGT_PAIRS):
-        for b, (k, l) in enumerate(VOIGT_PAIRS):
+        for b, (k, m) in enumerate(VOIGT_PAIRS):
             value = c[a, b]
-            tensor[i, j, k, l] = value
-            tensor[j, i, k, l] = value
-            tensor[i, j, l, k] = value
-            tensor[j, i, l, k] = value
+            tensor[i, j, k, m] = value
+            tensor[j, i, k, m] = value
+            tensor[i, j, m, k] = value
+            tensor[j, i, m, k] = value
     return tensor
 
 
@@ -58,8 +58,8 @@ def stiffness_tensor_to_voigt(c_tensor: ArrayLike) -> NDArray[np.float64]:
         raise ValueError(f"stiffness tensor must have shape (3, 3, 3, 3), got {c.shape}")
     voigt = np.zeros((6, 6), dtype=float)
     for a, (i, j) in enumerate(VOIGT_PAIRS):
-        for b, (k, l) in enumerate(VOIGT_PAIRS):
-            voigt[a, b] = c[i, j, k, l]
+        for b, (k, m) in enumerate(VOIGT_PAIRS):
+            voigt[a, b] = c[i, j, k, m]
     return voigt
 
 
@@ -82,8 +82,8 @@ def stiffness_tensor_to_voigt_batch(c_tensor: ArrayLike) -> NDArray[np.float64]:
     n = c.shape[0]
     voigt = np.zeros((n, 6, 6), dtype=float)
     for a, (i, j) in enumerate(VOIGT_PAIRS):
-        for b, (k, l) in enumerate(VOIGT_PAIRS):
-            voigt[:, a, b] = c[:, i, j, k, l]
+        for b, (k, m) in enumerate(VOIGT_PAIRS):
+            voigt[:, a, b] = c[:, i, j, k, m]
     return voigt
 
 
@@ -113,12 +113,12 @@ def stiffness_voigt_to_tensor_batch(c_voigt: ArrayLike) -> NDArray[np.float64]:
     n = c.shape[0]
     tensor = np.zeros((n, 3, 3, 3, 3), dtype=float)
     for a, (i, j) in enumerate(VOIGT_PAIRS):
-        for b, (k, l) in enumerate(VOIGT_PAIRS):
+        for b, (k, m) in enumerate(VOIGT_PAIRS):
             value = c[:, a, b]
-            tensor[:, i, j, k, l] = value
-            tensor[:, j, i, k, l] = value
-            tensor[:, i, j, l, k] = value
-            tensor[:, j, i, l, k] = value
+            tensor[:, i, j, k, m] = value
+            tensor[:, j, i, k, m] = value
+            tensor[:, i, j, m, k] = value
+            tensor[:, j, i, m, k] = value
     return tensor
 
 

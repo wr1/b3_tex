@@ -9,7 +9,6 @@ from b3_tex.fields import (
     CylinderYarnField,
     MultiStraightYarnField,
     PhaseSample,
-    SinusoidalYarn,
     StraightYarn,
     WeaveField,
     orthonormal_frame_along,
