@@ -62,7 +62,7 @@ class _BatchLoopMixin:
 
 
 @dataclass(frozen=True)
-class ChamisModel(_BatchLoopMixin):
+class ChamisModel:
     """Chamis rule-of-mixtures UD micromechanics (package baseline)."""
 
     name: str = "chamis"
@@ -76,9 +76,16 @@ class ChamisModel(_BatchLoopMixin):
             matrix=matrix, fibre=fibre, fibre_volume_fraction=fibre_volume_fraction
         )
 
+    def stiffness_batch(
+        self, *, matrix: Material, fibre: Material, vf: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        from b3_tex.micromechanics import chamis_ud_stiffness_batch
+
+        return chamis_ud_stiffness_batch(matrix=matrix, fibre=fibre, vf=vf)
+
 
 @dataclass(frozen=True)
-class MoriTanakaModel(_BatchLoopMixin):
+class MoriTanakaModel:
     """Mori-Tanaka cylindrical-inclusion UD estimate."""
 
     name: str = "mori_tanaka"
@@ -92,9 +99,16 @@ class MoriTanakaModel(_BatchLoopMixin):
             matrix=matrix, fibre=fibre, fibre_volume_fraction=fibre_volume_fraction
         )
 
+    def stiffness_batch(
+        self, *, matrix: Material, fibre: Material, vf: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        from b3_tex.reference import mori_tanaka_cylinder_batch
+
+        return mori_tanaka_cylinder_batch(matrix=matrix, fibre=fibre, vf=vf)
+
 
 @dataclass(frozen=True)
-class SurrogateModel(_BatchLoopMixin):
+class SurrogateModel:
     """Adapter for a learned surrogate ``predict(features) -> (6, 6)``.
 
     The ``predict`` callable receives a feature vector and must return a
@@ -127,13 +141,56 @@ class SurrogateModel(_BatchLoopMixin):
     def stiffness(
         self, *, matrix: Material, fibre: Material, fibre_volume_fraction: float
     ) -> NDArray[np.float64]:
-        c = np.asarray(
-            self.predict(self._features(matrix, fibre, float(fibre_volume_fraction))),
-            dtype=float,
+        return self.stiffness_batch(
+            matrix=matrix,
+            fibre=fibre,
+            vf=np.array([fibre_volume_fraction], dtype=float),
+        )[0]
+
+    def stiffness_batch(
+        self, *, matrix: Material, fibre: Material, vf: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        vf_arr = np.asarray(vf, dtype=float).ravel()
+        features = self._feature_matrix(matrix, fibre, vf_arr)
+        n = vf_arr.shape[0]
+        try:
+            predicted = np.asarray(self.predict(features), dtype=float)
+        except (TypeError, ValueError, IndexError):
+            predicted = None
+        if predicted is not None:
+            if predicted.ndim == 2 and predicted.shape == (6, 6):
+                predicted = predicted[None, :, :]
+            if predicted.shape == (n, 6, 6):
+                return 0.5 * (predicted + np.transpose(predicted, (0, 2, 1)))
+        out = np.empty((n, 6, 6), dtype=float)
+        for i in range(n):
+            c = np.asarray(self.predict(features[i]), dtype=float)
+            if c.shape != (6, 6):
+                raise ValueError(f"surrogate predict must return (6, 6), got {c.shape}")
+            out[i] = 0.5 * (c + c.T)
+        return out
+
+    def _feature_matrix(
+        self, matrix: Material, fibre: Material, vf: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        from b3_tex.reference import (
+            _engineering_constants_isotropic,
+            engineering_constants_transverse_iso,
         )
-        if c.shape != (6, 6):
-            raise ValueError(f"surrogate predict must return (6, 6), got {c.shape}")
-        return 0.5 * (c + c.T)
+
+        em, num = _engineering_constants_isotropic(matrix.stiffness)
+        fc = engineering_constants_transverse_iso(fibre.stiffness)
+        n = vf.shape[0]
+        out = np.empty((n, 8), dtype=float)
+        out[:, 0] = vf
+        out[:, 1] = em
+        out[:, 2] = num
+        out[:, 3] = fc["e_l"]
+        out[:, 4] = fc["e_t"]
+        out[:, 5] = fc["g_lt"]
+        out[:, 6] = fc["nu_lt"]
+        out[:, 7] = fc["g_tt"]
+        return out
 
 
 # --- registry ---------------------------------------------------------------

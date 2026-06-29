@@ -84,13 +84,18 @@ def _build_periodic_loadcase_solver(problem: RVEProblem):
     T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
     C_func = dolfinx.fem.Function(T)
     centroids = _cell_centroids(mesh)
-    C_func.x.array[:] = _global_stiffness_at_cell_centroids(problem, centroids).reshape(-1)
+    C_func.x.array[:] = _global_stiffness_at_cell_centroids(problem, centroids).reshape(
+        -1
+    )
     C_func.x.scatter_forward()
 
     E_voigt = dolfinx.fem.Constant(mesh, np.zeros(6))
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
-    a_form = ufl.inner(ufl.dot(C_func, _voigt_strain(u, ufl)), _voigt_strain(v, ufl)) * ufl.dx
+    a_form = (
+        ufl.inner(ufl.dot(C_func, _voigt_strain(u, ufl)), _voigt_strain(v, ufl))
+        * ufl.dx
+    )
     L_form = -ufl.inner(ufl.dot(C_func, E_voigt), _voigt_strain(v, ufl)) * ufl.dx
 
     bcs = _build_pin_bcs(V, mesh)
@@ -98,10 +103,16 @@ def _build_periodic_loadcase_solver(problem: RVEProblem):
 
     u_sol = dolfinx.fem.Function(mpc.function_space, name="u_tilde")
     linear_problem = dolfinx_mpc.LinearProblem(
-        a_form, L_form, mpc, bcs=bcs, u=u_sol,
+        a_form,
+        L_form,
+        mpc,
+        bcs=bcs,
+        u=u_sol,
         petsc_options_prefix="b3tex_viz_",
         petsc_options={
-            "ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps",
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
         },
     )
 
@@ -120,7 +131,9 @@ def _von_mises_per_cell(mesh, u_sol, C_func):
     eps_voigt_ufl = _voigt_strain(u_sol, ufl)
     T_post = dolfinx.fem.functionspace(mesh, ("DG", 0, (6,)))
     eps_DG = dolfinx.fem.Function(T_post)
-    eps_expr = dolfinx.fem.Expression(eps_voigt_ufl, T_post.element.interpolation_points)
+    eps_expr = dolfinx.fem.Expression(
+        eps_voigt_ufl, T_post.element.interpolation_points
+    )
     eps_DG.interpolate(eps_expr)
     eps_voigt = eps_DG.x.array.reshape(-1, 6)
     cell_C = C_func.x.array.reshape(-1, 6, 6)
@@ -128,7 +141,8 @@ def _von_mises_per_cell(mesh, u_sol, C_func):
     sigma_voigt = np.einsum("nij,nj->ni", cell_C[:n], eps_voigt[:n])
     s = sigma_voigt
     return np.sqrt(
-        0.5 * (
+        0.5
+        * (
             (s[:, 0] - s[:, 1]) ** 2
             + (s[:, 1] - s[:, 2]) ** 2
             + (s[:, 2] - s[:, 0]) ** 2
@@ -170,7 +184,9 @@ def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
     centroids = _cell_centroids(mesh)
     samples = problem.field.sample(centroids)
-    yarn_name = problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    yarn_name = (
+        problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    )
     yarns = getattr(problem.field, "yarns", None)
     if yarns is not None and not isinstance(yarns, np.ndarray):
         yarns_seq = list(yarns) if isinstance(yarns, tuple) else None
@@ -182,7 +198,7 @@ def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
         for i, sample in enumerate(samples):
             if sample.material == yarn_name:
                 for k, yarn in enumerate(yarns_seq):
-                    if yarn.contains(centroids[i:i+1])[0]:
+                    if yarn.contains(centroids[i : i + 1])[0]:
                         phase[i] = 1.0 + 0.5 * k
                         break
     else:
@@ -194,15 +210,22 @@ def _render_mesh_panel(problem: RVEProblem, out_path: Path) -> None:
 
     plotter = pv.Plotter(off_screen=True, window_size=(2400, 750))
     plotter.add_mesh(
-        grid, scalars="phase", cmap=["#bcd0e4", "#cc4422"],
+        grid,
+        scalars="phase",
+        cmap=["#bcd0e4", "#cc4422"],
         clim=(0.0, 1.0),
-        show_edges=True, edge_color="black", line_width=0.4,
-        opacity=1.0, show_scalar_bar=False,
+        show_edges=True,
+        edge_color="black",
+        line_width=0.4,
+        opacity=1.0,
+        show_scalar_bar=False,
     )
     plotter.add_text(
         f"FE mesh (tet) — {nx}x{ny}x{nz} structured + {len(phase)} cells; "
         f"yarn = red, matrix = blue (cell-centroid phase classification)",
-        position="upper_left", font_size=18, color="black",
+        position="upper_left",
+        font_size=18,
+        color="black",
     )
     plotter.view_isometric()
     plotter.add_axes(line_width=3, color="black")
@@ -252,24 +275,33 @@ def _render_fiber_panel(problem: RVEProblem, out_path: Path) -> None:
 
     # Arrow length ~ in-plane spacing so neighbouring arrows almost touch.
     glyph_scale = 1.2 * min(Lx / max(nx, 1), Ly / max(ny, 1))
-    arrow = pv.Arrow(start=(-0.5, 0, 0), tip_length=0.30, tip_radius=0.20,
-                     shaft_radius=0.08)
+    arrow = pv.Arrow(
+        start=(-0.5, 0, 0), tip_length=0.30, tip_radius=0.20, shaft_radius=0.08
+    )
     glyphs = glyph_pd.glyph(orient="e1", scale=False, geom=arrow, factor=glyph_scale)
 
     plotter = pv.Plotter(off_screen=True, window_size=(2200, 1500))
     if yarn_grid.n_cells > 0:
         plotter.add_mesh(
-            yarn_grid, color="#bcb8d4", opacity=0.18,
-            show_edges=True, edge_color="#888888", line_width=0.3,
+            yarn_grid,
+            color="#bcb8d4",
+            opacity=0.18,
+            show_edges=True,
+            edge_color="#888888",
+            line_width=0.3,
             show_scalar_bar=False,
         )
     plotter.add_mesh(
-        glyphs, scalars="align_x", cmap="coolwarm",
+        glyphs,
+        scalars="align_x",
+        cmap="coolwarm",
         clim=(0.0, 1.0),
         show_scalar_bar=True,
         scalar_bar_args={
             "title": "|e1 . x_hat|   (1 = warp, 0 = weft)",
-            "title_font_size": 18, "label_font_size": 14, "n_labels": 3,
+            "title_font_size": 18,
+            "label_font_size": 14,
+            "n_labels": 3,
         },
     )
     plotter.add_text(
@@ -277,7 +309,9 @@ def _render_fiber_panel(problem: RVEProblem, out_path: Path) -> None:
         f"{int(in_yarn.sum())} of {len(in_yarn)} cells; "
         f"{glyph_pd.n_points} arrows subsampled from yarn cell centroids; "
         f"arrow = local e1; colour = |e1 . x_hat|)",
-        position="upper_left", font_size=18, color="black",
+        position="upper_left",
+        font_size=18,
+        color="black",
     )
     plotter.view_isometric()
     # Zoom in further: default isometric framing has the cube tiny in the
@@ -320,16 +354,21 @@ def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> Non
             show_scalar_bar=(k == 5),
             scalar_bar_args={
                 "title": "von Mises [Pa]",
-                "title_font_size": 18, "label_font_size": 14, "n_labels": 4,
-            } if k == 5 else None,
+                "title_font_size": 18,
+                "label_font_size": 14,
+                "n_labels": 4,
+            }
+            if k == 5
+            else None,
         )
         if "phase" in deformed_surface.point_data:
-            interface = deformed_surface.contour(
-                isosurfaces=[0.5], scalars="phase"
-            )
+            interface = deformed_surface.contour(isosurfaces=[0.5], scalars="phase")
             if interface.n_points > 0:
                 plotter.add_mesh(
-                    interface, color="white", line_width=3.0, render_lines_as_tubes=False,
+                    interface,
+                    color="white",
+                    line_width=3.0,
+                    render_lines_as_tubes=False,
                     show_scalar_bar=False,
                 )
         plotter.add_text(label, position="upper_left", font_size=18, color="black")
@@ -366,7 +405,16 @@ def _measure_periodic_residuals(solve_loadcase, V, total_strain: float) -> dict:
             pairs.append(((0.0, vlo, wlo), (L, vlo, wlo)))
             pairs.append(((vlo, 0.0, wlo), (vlo, L, wlo)))
             pairs.append(((vlo, wlo, 0.0), (vlo, wlo, L)))
-    corners = [(0,0,0),(L,0,0),(0,L,0),(0,0,L),(L,L,0),(L,0,L),(0,L,L),(L,L,L)]
+    corners = [
+        (0, 0, 0),
+        (L, 0, 0),
+        (0, L, 0),
+        (0, 0, L),
+        (L, L, 0),
+        (L, 0, L),
+        (0, L, L),
+        (L, L, L),
+    ]
     centre = (0.5 * L, 0.5 * L, 0.5 * L)
 
     worst_pair = 0.0
@@ -380,7 +428,9 @@ def _measure_periodic_residuals(solve_loadcase, V, total_strain: float) -> dict:
         for c in corners[1:]:
             i = at(c)
             if i is not None:
-                worst_corners = max(worst_corners, float(np.linalg.norm(arr[i] - ref_corner)))
+                worst_corners = max(
+                    worst_corners, float(np.linalg.norm(arr[i] - ref_corner))
+                )
 
         for p_m, p_s in pairs:
             i_m, i_s = at(p_m), at(p_s)
@@ -398,8 +448,12 @@ def _measure_periodic_residuals(solve_loadcase, V, total_strain: float) -> dict:
     }
 
 
-def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: Path,
-                        verification: dict | None = None) -> None:
+def _render_typst_table(
+    problem: RVEProblem,
+    c_eff_npz: Path | None,
+    out_path: Path,
+    verification: dict | None = None,
+) -> None:
     rows_in = [["material / geometry", "values"]]
     for name, m in problem.materials.items():
         ec = engineering_constants_transverse_iso(m.stiffness)
@@ -407,19 +461,21 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
             [
                 f"{name}",
                 (
-                    f"E_L={ec['e_l']/1e9:.1f} GPa, E_T={ec['e_t']/1e9:.1f} GPa, "
-                    f"G_LT={ec['g_lt']/1e9:.2f} GPa, nu_LT={ec['nu_lt']:.2f}, nu_TT={ec['nu_tt']:.2f}"
+                    f"E_L={ec['e_l'] / 1e9:.1f} GPa, E_T={ec['e_t'] / 1e9:.1f} GPa, "
+                    f"G_LT={ec['g_lt'] / 1e9:.2f} GPa, nu_LT={ec['nu_lt']:.2f}, nu_TT={ec['nu_tt']:.2f}"
                 ),
             ]
         )
     f = problem.field
     if hasattr(f, "radius"):
-        vf = float(np.pi * f.radius ** 2 / (problem.size[1] * problem.size[2]))
-        rows_in.append([
-            "yarn cylinder",
-            f"r={f.radius}, vf={vf:.3f}, axis=({float(f.axis_direction[0]):.1f},"
-            f"{float(f.axis_direction[1]):.1f},{float(f.axis_direction[2]):.1f})",
-        ])
+        vf = float(np.pi * f.radius**2 / (problem.size[1] * problem.size[2]))
+        rows_in.append(
+            [
+                "yarn cylinder",
+                f"r={f.radius}, vf={vf:.3f}, axis=({float(f.axis_direction[0]):.1f},"
+                f"{float(f.axis_direction[1]):.1f},{float(f.axis_direction[2]):.1f})",
+            ]
+        )
     rows_in.append(["mesh", f"{tuple(problem.mesh_resolution)} (tetrahedron)"])
 
     rows_out = [["effective constant", "value"]]
@@ -428,10 +484,25 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         data = np.load(c_eff_npz)
         C = data["effective_stiffness"]
         S = np.linalg.inv(C)
-        rows_out.append(["E_x, E_y, E_z [GPa]", f"{1/S[0,0]/1e9:.1f}, {1/S[1,1]/1e9:.1f}, {1/S[2,2]/1e9:.1f}"])
-        rows_out.append(["nu_xy, nu_xz, nu_yz", f"{-S[0,1]/S[0,0]:.3f}, {-S[0,2]/S[0,0]:.3f}, {-S[1,2]/S[1,1]:.3f}"])
-        rows_out.append(["G_xy, G_xz, G_yz [GPa]", f"{1/S[5,5]/1e9:.2f}, {1/S[4,4]/1e9:.2f}, {1/S[3,3]/1e9:.2f}"])
-        rows_out.append(["max diag [GPa]", f"{np.max(np.diag(C))/1e9:.2f}"])
+        rows_out.append(
+            [
+                "E_x, E_y, E_z [GPa]",
+                f"{1 / S[0, 0] / 1e9:.1f}, {1 / S[1, 1] / 1e9:.1f}, {1 / S[2, 2] / 1e9:.1f}",
+            ]
+        )
+        rows_out.append(
+            [
+                "nu_xy, nu_xz, nu_yz",
+                f"{-S[0, 1] / S[0, 0]:.3f}, {-S[0, 2] / S[0, 0]:.3f}, {-S[1, 2] / S[1, 1]:.3f}",
+            ]
+        )
+        rows_out.append(
+            [
+                "G_xy, G_xz, G_yz [GPa]",
+                f"{1 / S[5, 5] / 1e9:.2f}, {1 / S[4, 4] / 1e9:.2f}, {1 / S[3, 3] / 1e9:.2f}",
+            ]
+        )
+        rows_out.append(["max diag [GPa]", f"{np.max(np.diag(C)) / 1e9:.2f}"])
         labels = ["", "11", "22", "33", "23", "13", "12"]
         rows_matrix.append(labels)
         for i in range(6):
@@ -443,20 +514,26 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         rows_out.append(["(run b3-tex solve first)", "—"])
 
     rows_bc = [["where", "boundary condition"]]
-    rows_bc.append([
-        "this figure (visualization)",
-        "Periodic: u(x) = eps_total * E_k . x + u_tilde(x), u_tilde periodic on opposite faces, "
-        "non-overlapping slave masks per axis (axis 0 excludes y=L,z=L sub-edges; "
-        "axis 1 excludes z=L; axis 2 takes rest), 3 sub-space pins at the geometric centre",
-    ])
-    rows_bc.append([
-        "homogenization solver (b3-tex solve --backend periodic)",
-        "Same periodic BC, 6 unit Voigt strains; effective stiffness = volume-averaged stress per loadcase",
-    ])
-    rows_bc.append([
-        "KUBC alternative (b3-tex solve --backend kubc)",
-        "u = E_k . x on the entire boundary; gives an upper bound for C_eff",
-    ])
+    rows_bc.append(
+        [
+            "this figure (visualization)",
+            "Periodic: u(x) = eps_total * E_k . x + u_tilde(x), u_tilde periodic on opposite faces, "
+            "non-overlapping slave masks per axis (axis 0 excludes y=L,z=L sub-edges; "
+            "axis 1 excludes z=L; axis 2 takes rest), 3 sub-space pins at the geometric centre",
+        ]
+    )
+    rows_bc.append(
+        [
+            "homogenization solver (b3-tex solve --backend periodic)",
+            "Same periodic BC, 6 unit Voigt strains; effective stiffness = volume-averaged stress per loadcase",
+        ]
+    )
+    rows_bc.append(
+        [
+            "KUBC alternative (b3-tex solve --backend kubc)",
+            "u = E_k . x on the entire boundary; gives an upper bound for C_eff",
+        ]
+    )
 
     rows_verify: list[list[str]] = []
     if verification is not None:
@@ -466,12 +543,13 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
 
     def render_table(header_text: str, rows: list[list[str]], n_cols: int = 2) -> str:
         cells = ", ".join(
-            f'[#text(size: 9pt)[{_typst_escape(c)}]]'
-            for row in rows for c in row
+            f"[#text(size: 9pt)[{_typst_escape(c)}]]" for row in rows for c in row
         )
-        cols_spec = "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
+        cols_spec = (
+            "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
+        )
         return (
-            f"#text(weight: \"bold\", size: 12pt)[{header_text}]\n"
+            f'#text(weight: "bold", size: 12pt)[{header_text}]\n'
             "#v(2pt)\n"
             "#table(\n"
             f"  columns: {cols_spec},\n"
@@ -482,16 +560,24 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
             ")\n"
         )
 
-    matrix_block = render_table(
-        "FULL C_eff [GPa]  (Voigt order 11,22,33,23,13,12)", rows_matrix, n_cols=7
-    ) if rows_matrix else ""
-    verify_block = render_table(
-        "PERIODIC-BC VERIFICATION  (machine-precision residuals over all 6 loadcases)",
-        rows_verify,
-    ) if rows_verify else ""
+    matrix_block = (
+        render_table(
+            "FULL C_eff [GPa]  (Voigt order 11,22,33,23,13,12)", rows_matrix, n_cols=7
+        )
+        if rows_matrix
+        else ""
+    )
+    verify_block = (
+        render_table(
+            "PERIODIC-BC VERIFICATION  (machine-precision residuals over all 6 loadcases)",
+            rows_verify,
+        )
+        if rows_verify
+        else ""
+    )
     typst_doc = (
         "#set page(width: 36cm, height: 19cm, margin: (x: 0.6cm, y: 0.4cm))\n"
-        "#set text(size: 10pt, font: \"Liberation Sans\")\n"
+        '#set text(size: 10pt, font: "Liberation Sans")\n'
         "#stack(\n"
         "  spacing: 0.4cm,\n"
         "  grid(\n"
@@ -513,8 +599,14 @@ def _render_typst_table(problem: RVEProblem, c_eff_npz: Path | None, out_path: P
         png_pattern = tdir / "table-{p}.png"
         subprocess.run(
             [
-                "typst", "compile", "--format", "png", "--ppi", "150",
-                str(src), str(png_pattern),
+                "typst",
+                "compile",
+                "--format",
+                "png",
+                "--ppi",
+                "150",
+                str(src),
+                str(png_pattern),
             ],
             check=True,
             capture_output=True,
@@ -565,7 +657,9 @@ def main():
     overall_vm = []
     centroids = _cell_centroids(_mesh_ref)
     samples = problem.field.sample(centroids)
-    yarn_name = problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    yarn_name = (
+        problem.field.yarn_material if hasattr(problem.field, "yarn_material") else None
+    )
     phase = np.array([1.0 if s.material == yarn_name else 0.0 for s in samples])
     for k, (label, kind) in enumerate(_LOADCASE_LABELS):
         mesh, V, u_sol, C_func = solve_loadcase(k, total_strain)
@@ -593,7 +687,9 @@ def main():
     _render_mesh_panel(problem, mesh_png)
     _render_fiber_panel(problem, fiber_png)
     _render_3d_grid(panels, vm_clim, exaggeration, loadcases_png)
-    _render_typst_table(problem, results_dir / "C_eff.npz", table_png, verification=verification)
+    _render_typst_table(
+        problem, results_dir / "C_eff.npz", table_png, verification=verification
+    )
     _composite([mesh_png, fiber_png, loadcases_png, table_png], final_png)
     print(f"wrote {final_png}")
     for k, v in verification.items():

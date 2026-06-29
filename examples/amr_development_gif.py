@@ -49,6 +49,7 @@ from b3_tex.amr import (
     refine_flagged_cells_mfem,
 )
 from b3_tex.problem import RVEProblem
+from b3_tex.viz.theme import panel_rc
 
 EXAMPLES = Path(__file__).resolve().parent
 OUT_DIR = EXAMPLES.parent / "results"
@@ -84,8 +85,9 @@ def hex_slice_rectangles(mesh, z0: float):
         v = _mfem_cell_vertex_array(mesh, c)  # (8, 3)
         if v[:, 2].min() - 1e-9 <= z0 <= v[:, 2].max() + 1e-9:
             xmin, ymin = v[:, 0].min(), v[:, 1].min()
-            rects.append(Rectangle((xmin, ymin), v[:, 0].max() - xmin,
-                                   v[:, 1].max() - ymin))
+            rects.append(
+                Rectangle((xmin, ymin), v[:, 0].max() - xmin, v[:, 1].max() - ymin)
+            )
             idx.append(c)
     return rects, np.asarray(idx, dtype=int)
 
@@ -109,16 +111,17 @@ def bundle_cell_directors(mesh, field, z0: float):
     if len(rects) == 0:
         empty = np.empty(0)
         return empty, empty, empty, empty, empty
-    centers = np.array([(r.get_x() + r.get_width() / 2,
-                         r.get_y() + r.get_height() / 2) for r in rects])
+    centers = np.array(
+        [(r.get_x() + r.get_width() / 2, r.get_y() + r.get_height() / 2) for r in rects]
+    )
     pts = np.column_stack([centers, np.full(len(centers), z0)])
     ids, rot = field.sample_arrays(pts)
     bundle = ids == 1
     cx, cy = centers[bundle, 0], centers[bundle, 1]
-    e1 = rot[bundle, :, 0]                    # local 1-axis (fibre direction)
+    e1 = rot[bundle, :, 0]  # local 1-axis (fibre direction)
     mag = np.hypot(e1[:, 0], e1[:, 1])
     mag = np.where(mag > 1e-9, mag, 1.0)
-    u, v = e1[:, 0] / mag, e1[:, 1] / mag     # in-plane unit director
+    u, v = e1[:, 0] / mag, e1[:, 1] / mag  # in-plane unit director
     sampler = getattr(field, "sample_local_vf", None)
     if sampler is not None and bundle.any():
         vf = np.asarray(sampler(pts[bundle]), dtype=float)
@@ -129,62 +132,77 @@ def bundle_cell_directors(mesh, field, z0: float):
 
 def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size, dpi):
     rects, idx = hex_slice_rectangles(mesh, z0)
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=size, dpi=dpi)
     xs, ys, ind = tow_outline(field, problem, z0)
+    with plt.rc_context(panel_rc()):
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=size, dpi=dpi)
 
-    # --- left: AMR mesh slice coloured by heterogeneity score ---
-    pc = PatchCollection(rects, cmap="viridis", edgecolor="black", linewidth=0.4)
-    pc.set_array(metric[idx])
-    pc.set_clim(0.0, 0.5)
-    ax.add_collection(pc)
-    ax.contour(xs, ys, ind, levels=[0.5], colors="white", linewidths=1.6)
-    cbar = fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("per-cell heterogeneity score")
-    flag_txt = "converged" if n_flag == 0 else f"{n_flag} cells flagged → refine"
-    ax.set_title(f"AMR mesh   |   {len(idx)} cells in slice   |   {flag_txt}")
+        # --- left: AMR mesh slice coloured by heterogeneity score ---
+        pc = PatchCollection(rects, cmap="viridis", edgecolor="#cfd3d9", linewidth=0.3)
+        pc.set_array(metric[idx])
+        pc.set_clim(0.0, 0.5)
+        ax.add_collection(pc)
+        ax.contour(xs, ys, ind, levels=[0.5], colors="white", linewidths=1.6)
+        cbar = fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("per-cell heterogeneity score")
+        flag_txt = "converged" if n_flag == 0 else f"{n_flag} cells flagged → refine"
+        ax.set_title(f"AMR mesh   |   {len(idx)} cells in slice   |   {flag_txt}")
 
-    # --- right: line-quiver of the fibre director at bundle cells only ---
-    cx, cy, u, v, vf = bundle_cell_directors(mesh, field, z0)
-    ax2.contour(xs, ys, ind, levels=[0.5], colors="0.6", linewidths=1.0)
-    if cx.size:
-        q = ax2.quiver(
-            cx, cy, u, v, vf, cmap="inferno", clim=(vmin, vmax),
-            angles="xy", scale_units="xy", scale=26.0, width=0.005,
-            headwidth=0, headlength=0, headaxislength=0, pivot="mid",
-        )
-        cb2 = fig.colorbar(q, ax=ax2, fraction=0.046, pad=0.04)
-        cb2.set_label("local in-tow fibre volume fraction $V_f$")
-    ax2.set_title(f"fibre director at bundle cells   |   {cx.size} sticks")
+        # --- right: line-quiver of the fibre director at bundle cells only ---
+        cx, cy, u, v, vf = bundle_cell_directors(mesh, field, z0)
+        ax2.contour(xs, ys, ind, levels=[0.5], colors="0.8", linewidths=1.0)
+        if cx.size:
+            q = ax2.quiver(
+                cx,
+                cy,
+                u,
+                v,
+                vf,
+                cmap="inferno",
+                clim=(vmin, vmax),
+                angles="xy",
+                scale_units="xy",
+                scale=26.0,
+                width=0.005,
+                headwidth=0,
+                headlength=0,
+                headaxislength=0,
+                pivot="mid",
+            )
+            cb2 = fig.colorbar(q, ax=ax2, fraction=0.046, pad=0.04)
+            cb2.set_label("local in-tow fibre volume fraction $V_f$")
+        ax2.set_title(f"fibre director at bundle cells   |   {cx.size} sticks")
 
-    for a in (ax, ax2):
-        a.set_xlim(0, problem.size[0])
-        a.set_ylim(0, problem.size[1])
-        a.set_aspect("equal")
-        a.set_xlabel("x")
-        a.set_ylabel("y")
-    fig.suptitle(f"AMR iteration {it}", fontsize=13)
-    fig.tight_layout()
-    fig.canvas.draw()
-    buf = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
-    plt.close(fig)
+        for a in (ax, ax2):
+            a.set_xlim(0, problem.size[0])
+            a.set_ylim(0, problem.size[1])
+            a.set_aspect("equal")
+            a.set_xlabel("x")
+            a.set_ylabel("y")
+        fig.suptitle(f"AMR iteration {it}", fontsize=13)
+        fig.tight_layout()
+        fig.canvas.draw()
+        buf = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
+        plt.close(fig)
     return buf
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml"))
-    ap.add_argument("--base", type=int, nargs=3, default=(10, 10, 3),
-                    metavar=("NX", "NY", "NZ"), help="coarse base hex mesh")
-    ap.add_argument("--threshold", type=float, default=0.15)
-    ap.add_argument("--iters", type=int, default=4, help="max refinement iterations")
-    ap.add_argument("--seconds", type=float, default=0.9,
-                    help="seconds each AMR level is shown in the GIF")
-    ap.add_argument("--out", default=str(OUT_DIR / "amr_development.gif"))
-    args = ap.parse_args()
+def make_amr_gif(
+    config_path: Path | str,
+    out_path: Path | str,
+    *,
+    base: tuple[int, int, int] = (10, 10, 3),
+    threshold: float = 0.15,
+    iters: int = 4,
+    seconds: float = 0.9,
+) -> Path:
+    """Render the AMR-development GIF (+ a final-mesh still) for ``config_path``.
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    cfg = _load(Path(args.config))
-    cfg["domain"]["mesh_resolution"] = list(args.base)
+    Returns the GIF path. This is the importable core; ``main`` is a thin CLI
+    wrapper around it (and the gallery driver calls it directly)."""
+    config_path, out = Path(config_path), Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cfg = _load(config_path)
+    cfg["domain"]["mesh_resolution"] = list(base)
     problem = RVEProblem.from_config(cfg)
     field = problem.field
     z0 = 0.5 * float(problem.size[2])
@@ -192,39 +210,74 @@ def main() -> None:
     import mfem.ser as mfem
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
-    nx, ny, nz = args.base
+    nx, ny, nz = base
     mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
 
     vmin, vmax = vf_limits(field, problem)
     frames: list[np.ndarray] = []
     size, dpi = (12.6, 5.8), 110
-    for it in range(args.iters + 1):
+    for it in range(iters + 1):
         metric = cell_heterogeneity_metric_mfem(
             mesh, problem, n_samples_per_cell=_METRIC_SAMPLES
         )
-        flagged = flag_cells_for_refinement(metric, args.threshold)
+        flagged = flag_cells_for_refinement(metric, threshold)
         n_flag = int(flagged.sum())
         print(f"  iter {it}: {mesh.GetNE()} cells, {n_flag} flagged")
         frames.append(
-            render_frame(mesh, metric, field, problem, z0, it, n_flag,
-                         vmin, vmax, size, dpi)
+            render_frame(
+                mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size, dpi
+            )
         )
-        if it == args.iters or n_flag == 0:
+        if it == iters or n_flag == 0:
             break
         refine_flagged_cells_mfem(mesh, flagged)
 
     # One frame per AMR level; hold each for `seconds` (imageio GIF duration is in
     # milliseconds), lingering 2x on the final mesh.
-    ms = max(1, round(args.seconds * 1000))
+    ms = max(1, round(seconds * 1000))
     durations = [ms] * len(frames)
     durations[-1] *= 2
-    out = Path(args.out)
     imageio.mimsave(out, frames, duration=durations, loop=0)
     print(f"Wrote {out}  ({len(frames)} AMR levels)")
 
     still = out.with_name(out.stem + "_final.png")
     imageio.imwrite(still, frames[-1])
     print(f"Wrote {still}")
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml")
+    )
+    ap.add_argument(
+        "--base",
+        type=int,
+        nargs=3,
+        default=(10, 10, 3),
+        metavar=("NX", "NY", "NZ"),
+        help="coarse base hex mesh",
+    )
+    ap.add_argument("--threshold", type=float, default=0.15)
+    ap.add_argument("--iters", type=int, default=4, help="max refinement iterations")
+    ap.add_argument(
+        "--seconds",
+        type=float,
+        default=0.9,
+        help="seconds each AMR level is shown in the GIF",
+    )
+    ap.add_argument("--out", default=str(OUT_DIR / "amr_development.gif"))
+    args = ap.parse_args()
+
+    make_amr_gif(
+        args.config,
+        args.out,
+        base=tuple(args.base),
+        threshold=args.threshold,
+        iters=args.iters,
+        seconds=args.seconds,
+    )
 
 
 if __name__ == "__main__":

@@ -33,9 +33,13 @@ OUT_DIR = EXAMPLES.parent / "results"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml"))
+    ap.add_argument(
+        "--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml")
+    )
     ap.add_argument("--out", default=str(OUT_DIR / "weave_overview.png"))
-    ap.add_argument("--res", type=int, default=72, help="volume grid resolution (longest axis)")
+    ap.add_argument(
+        "--res", type=int, default=72, help="volume grid resolution (longest axis)"
+    )
     args = ap.parse_args()
 
     problem = RVEProblem.from_yaml(args.config)

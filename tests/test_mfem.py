@@ -24,10 +24,17 @@ def _homogeneous_isotropic_config(
     n_uniform_refines: int = 0,
 ) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
-            {"name": "matrix", "type": "isotropic",
-             "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
         ],
         "field": {
             "type": "cylinder_yarn",
@@ -45,20 +52,38 @@ def _homogeneous_isotropic_config(
     }
 
 
-def _ud_tow_config(mesh_n: int = 6, radius: float = 0.4, cell_type: str = "tetrahedron") -> dict:
+def _ud_tow_config(
+    mesh_n: int = 6, radius: float = 0.4, cell_type: str = "tetrahedron"
+) -> dict:
     """The same UD-tow config used by the DOLFINx KUBC tests."""
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
-            {"name": "matrix", "type": "isotropic",
-             "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-            {"name": "yarn", "type": "transverse_isotropic",
-             "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "yarn",
+                "type": "transverse_isotropic",
+                "e_l": 140e9,
+                "e_t": 10e9,
+                "g_lt": 5e9,
+                "nu_lt": 0.28,
+                "nu_tt": 0.40,
+            },
         ],
         "field": {
             "type": "cylinder_yarn",
-            "matrix_material": "matrix", "yarn_material": "yarn",
-            "axis_point": [0.5, 0.5, 0.5], "axis_direction": [1.0, 0.0, 0.0],
+            "matrix_material": "matrix",
+            "yarn_material": "yarn",
+            "axis_point": [0.5, 0.5, 0.5],
+            "axis_direction": [1.0, 0.0, 0.0],
             "radius": radius,
         },
         "solver": {"backend": "mfem", "cell_type": cell_type},
@@ -78,8 +103,8 @@ def test_mfem_periodic_mesh_smoke():
     ]
     v2v = base.CreatePeriodicVertexMapping(translations)
     periodic = mfem.Mesh.MakePeriodic(base, v2v)
-    assert periodic.GetNV() == n ** 3
-    assert periodic.GetNE() == n ** 3
+    assert periodic.GetNV() == n**3
+    assert periodic.GetNE() == n**3
 
 
 @pytest.mark.parametrize("cell_type", ["hexahedron", "tetrahedron"])
@@ -95,7 +120,9 @@ def test_mfem_homogeneous_recovers_isotropic_stiffness(cell_type):
     expected = Material.isotropic(
         "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
     ).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 def test_mfem_homogeneous_transverse_isotropic_recovers_input_stiffness():
@@ -104,8 +131,15 @@ def test_mfem_homogeneous_transverse_isotropic_recovers_input_stiffness():
     that the anisotropic integrator is actually plumbed correctly."""
     cfg = _homogeneous_isotropic_config(mesh_n=3)
     cfg["materials"] = [
-        {"name": "yarn", "type": "transverse_isotropic",
-         "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+        {
+            "name": "yarn",
+            "type": "transverse_isotropic",
+            "e_l": 140e9,
+            "e_t": 10e9,
+            "g_lt": 5e9,
+            "nu_lt": 0.28,
+            "nu_tt": 0.40,
+        },
     ]
     cfg["field"]["matrix_material"] = "yarn"
     cfg["field"]["yarn_material"] = "yarn"
@@ -115,9 +149,16 @@ def test_mfem_homogeneous_transverse_isotropic_recovers_input_stiffness():
 
     result = solve(problem)
     expected = Material.transverse_isotropic(
-        "yarn", e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40,
+        "yarn",
+        e_l=140e9,
+        e_t=10e9,
+        g_lt=5e9,
+        nu_lt=0.28,
+        nu_tt=0.40,
     ).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 def test_mfem_ud_tow_is_symmetric_and_positive_definite():
@@ -130,7 +171,8 @@ def test_mfem_ud_tow_is_symmetric_and_positive_definite():
 
     result = solve(problem)
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T,
+        result.effective_stiffness,
+        result.effective_stiffness.T,
         atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigs = np.linalg.eigvalsh(result.effective_stiffness)
@@ -149,12 +191,15 @@ def test_mfem_and_dolfinx_kubc_agree_on_ud_tow():
     from b3_tex.backends.dolfinx_backend import solve as solve_dolfinx
 
     cfg_mfem = {**cfg, "solver": {**cfg["solver"], "backend": "mfem"}}
-    cfg_dolfinx = {**cfg, "solver": {
-        "backend": "dolfinx_kubc",
-        "stiffness_sampling": "quadrature",
-        "quadrature_degree": 2,
-        "cell_type": "tetrahedron",
-    }}
+    cfg_dolfinx = {
+        **cfg,
+        "solver": {
+            "backend": "dolfinx_kubc",
+            "stiffness_sampling": "quadrature",
+            "quadrature_degree": 2,
+            "cell_type": "tetrahedron",
+        },
+    }
 
     C_mfem = solve_mfem(RVEProblem.from_config(cfg_mfem)).effective_stiffness
     C_dolfinx = solve_dolfinx(RVEProblem.from_config(cfg_dolfinx)).effective_stiffness
@@ -162,10 +207,7 @@ def test_mfem_and_dolfinx_kubc_agree_on_ud_tow():
     # Both backends use the same per-GP stiffness lookup at q=2 GPs per tet.
     # KUBC, same mesh resolution, same BCs -> the difference should be at the
     # level of solver/numerical noise (CG vs MUMPS), well under 1%.
-    rel_err = (
-        np.linalg.norm(C_mfem - C_dolfinx)
-        / np.linalg.norm(C_dolfinx)
-    )
+    rel_err = np.linalg.norm(C_mfem - C_dolfinx) / np.linalg.norm(C_dolfinx)
     assert rel_err < 1e-2, f"MFEM vs DOLFINx KUBC disagreement: rel_err = {rel_err:.3e}"
 
 
@@ -184,7 +226,9 @@ def test_mfem_uniform_refinement_keeps_homogeneous_result():
     expected = Material.isotropic(
         "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
     ).stiffness
-    np.testing.assert_allclose(r_refined.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(
+        r_refined.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 @pytest.mark.parametrize("cell_type", ["hexahedron", "tetrahedron"])
@@ -201,7 +245,9 @@ def test_mfem_periodic_homogeneous_recovers_isotropic_stiffness(cell_type):
     expected = Material.isotropic(
         "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
     ).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 def test_mfem_periodic_homogeneous_transverse_isotropic():
@@ -209,8 +255,15 @@ def test_mfem_periodic_homogeneous_transverse_isotropic():
     recovers the input stiffness exactly."""
     cfg = _homogeneous_isotropic_config(mesh_n=3)
     cfg["materials"] = [
-        {"name": "yarn", "type": "transverse_isotropic",
-         "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+        {
+            "name": "yarn",
+            "type": "transverse_isotropic",
+            "e_l": 140e9,
+            "e_t": 10e9,
+            "g_lt": 5e9,
+            "nu_lt": 0.28,
+            "nu_tt": 0.40,
+        },
     ]
     cfg["field"]["matrix_material"] = "yarn"
     cfg["field"]["yarn_material"] = "yarn"
@@ -220,9 +273,16 @@ def test_mfem_periodic_homogeneous_transverse_isotropic():
 
     result = solve_periodic(problem)
     expected = Material.transverse_isotropic(
-        "yarn", e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40,
+        "yarn",
+        e_l=140e9,
+        e_t=10e9,
+        g_lt=5e9,
+        nu_lt=0.28,
+        nu_tt=0.40,
     ).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 def test_mfem_periodic_ud_tow_is_symmetric_and_positive_definite():
@@ -233,7 +293,8 @@ def test_mfem_periodic_ud_tow_is_symmetric_and_positive_definite():
 
     result = solve_periodic(problem)
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T,
+        result.effective_stiffness,
+        result.effective_stiffness.T,
         atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigs = np.linalg.eigvalsh(result.effective_stiffness)
@@ -270,18 +331,23 @@ def test_mfem_and_dolfinx_periodic_agree_on_ud_tow():
     from b3_tex.backends.dolfinx_periodic_backend import solve as solve_dolfinx
 
     cfg_mfem = {**cfg, "solver": {**cfg["solver"], "backend": "mfem_periodic"}}
-    cfg_dolfinx = {**cfg, "solver": {
-        "backend": "dolfinx_periodic",
-        "stiffness_sampling": "quadrature",
-        "quadrature_degree": 2,
-        "cell_type": "tetrahedron",
-    }}
+    cfg_dolfinx = {
+        **cfg,
+        "solver": {
+            "backend": "dolfinx_periodic",
+            "stiffness_sampling": "quadrature",
+            "quadrature_degree": 2,
+            "cell_type": "tetrahedron",
+        },
+    }
 
     C_mfem = solve_mfem(RVEProblem.from_config(cfg_mfem)).effective_stiffness
     C_dolfinx = solve_dolfinx(RVEProblem.from_config(cfg_dolfinx)).effective_stiffness
 
     rel_err = np.linalg.norm(C_mfem - C_dolfinx) / np.linalg.norm(C_dolfinx)
-    assert rel_err < 2e-2, f"MFEM vs DOLFINx periodic disagreement: rel_err = {rel_err:.3e}"
+    assert rel_err < 2e-2, (
+        f"MFEM vs DOLFINx periodic disagreement: rel_err = {rel_err:.3e}"
+    )
 
 
 def _tet_volumes_dolfinx(mesh) -> np.ndarray:
@@ -330,8 +396,11 @@ def test_mfem_hex_amr_grows_mesh_and_reduces_heterogeneity():
     n_cells_before = mesh.GetNE()
 
     iteratively_refine_mfem(
-        mesh, problem,
-        threshold=0.15, max_iterations=2, dof_budget=10**9,
+        mesh,
+        problem,
+        threshold=0.15,
+        max_iterations=2,
+        dof_budget=10**9,
     )
     metric_after = cell_heterogeneity_metric_mfem(mesh, problem)
     vols_after = _mfem_cell_volumes_axis_aligned(mesh)
@@ -347,7 +416,9 @@ def test_mfem_periodic_amr_end_to_end_produces_spd_stiffness():
     and returns a symmetric, positive-definite C_eff."""
     cfg = _ud_tow_config(mesh_n=4, radius=0.4, cell_type="hexahedron")
     cfg["solver"]["amr"] = {
-        "enabled": True, "threshold": 0.15, "max_iterations": 1,
+        "enabled": True,
+        "threshold": 0.15,
+        "max_iterations": 1,
     }
     problem = RVEProblem.from_config(cfg)
 
@@ -356,7 +427,8 @@ def test_mfem_periodic_amr_end_to_end_produces_spd_stiffness():
     result = solve_periodic(problem)
     assert result.metadata["cell_type"] == "hexahedron"
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T,
+        result.effective_stiffness,
+        result.effective_stiffness.T,
         atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigs = np.linalg.eigvalsh(result.effective_stiffness)
@@ -367,7 +439,9 @@ def test_mfem_kubc_amr_end_to_end_produces_spd_stiffness():
     """Same end-to-end check on KUBC."""
     cfg = _ud_tow_config(mesh_n=4, radius=0.4, cell_type="hexahedron")
     cfg["solver"]["amr"] = {
-        "enabled": True, "threshold": 0.15, "max_iterations": 1,
+        "enabled": True,
+        "threshold": 0.15,
+        "max_iterations": 1,
     }
     problem = RVEProblem.from_config(cfg)
 

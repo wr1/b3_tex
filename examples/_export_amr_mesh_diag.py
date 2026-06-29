@@ -24,19 +24,36 @@ OUT_DIR = Path(__file__).resolve().parent.parent / "results"
 CFG = {
     "domain": {"size": [1.0, 1.0, 0.16], "mesh_resolution": [10, 10, 3]},
     "materials": [
-        {"name": "matrix", "type": "isotropic",
-         "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-        {"name": "fibre", "type": "transverse_isotropic",
-         "e_l": 70.0e9, "e_t": 15.0e9, "g_lt": 24.0e9,
-         "nu_lt": 0.20, "nu_tt": 0.30},
-        {"name": "yarn", "type": "chamis",
-         "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.70},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
+        {
+            "name": "fibre",
+            "type": "transverse_isotropic",
+            "e_l": 70.0e9,
+            "e_t": 15.0e9,
+            "g_lt": 24.0e9,
+            "nu_lt": 0.20,
+            "nu_tt": 0.30,
+        },
+        {
+            "name": "yarn",
+            "type": "chamis",
+            "matrix": "matrix",
+            "fibre": "fibre",
+            "fibre_volume_fraction": 0.70,
+        },
     ],
     "field": {
         "type": "plain_weave",
-        "matrix_material": "matrix", "yarn_material": "yarn",
+        "matrix_material": "matrix",
+        "yarn_material": "yarn",
         "domain_size": [1.0, 1.0, 0.16],
-        "n_warp": 2, "n_weft": 2,
+        "n_warp": 2,
+        "n_weft": 2,
         "yarn_half_width": 0.245,
         "yarn_half_height": 0.038,
         "amplitude": 0.040,
@@ -57,9 +74,13 @@ def mfem_mesh_to_pv(mesh, metric=None):
         verts = mesh.GetElement(e).GetVerticesArray()
         n = len(verts)
         if n == 8:
-            cells_list.append(8); cells_list.extend(int(v) for v in verts); cell_types.append(12)
+            cells_list.append(8)
+            cells_list.extend(int(v) for v in verts)
+            cell_types.append(12)
         elif n == 4:
-            cells_list.append(4); cells_list.extend(int(v) for v in verts); cell_types.append(10)
+            cells_list.append(4)
+            cells_list.extend(int(v) for v in verts)
+            cell_types.append(10)
     grid = pyvista.UnstructuredGrid(
         np.asarray(cells_list, dtype=np.int64),
         np.asarray(cell_types, dtype=np.uint8),
@@ -89,25 +110,37 @@ def main():
     ]
     v2v = base.CreatePeriodicVertexMapping(trans)
     pmesh = mfem.Mesh.MakePeriodic(base, v2v)
-    iteratively_refine_mfem(pmesh, problem,
-                            threshold=0.20, max_iterations=2,
-                            dof_budget=10**7, n_samples_per_cell=8)
+    iteratively_refine_mfem(
+        pmesh,
+        problem,
+        threshold=0.20,
+        max_iterations=2,
+        dof_budget=10**7,
+        n_samples_per_cell=8,
+    )
     pmetric = cell_heterogeneity_metric_mfem(pmesh, problem)
     pv_periodic = mfem_mesh_to_pv(pmesh, pmetric)
     periodic_path = OUT_DIR / "mfem_weave_mesh_periodic_iter2.vtk"
     pv_periodic.save(str(periodic_path))
     print(f"  periodic: {pmesh.GetNE()} cells -> {periodic_path}")
-    print(f"  periodic NV {pmesh.GetNV()}, point range x: "
-          f"[{pv_periodic.points[:,0].min():.3f}, {pv_periodic.points[:,0].max():.3f}], "
-          f"y: [{pv_periodic.points[:,1].min():.3f}, {pv_periodic.points[:,1].max():.3f}], "
-          f"z: [{pv_periodic.points[:,2].min():.3f}, {pv_periodic.points[:,2].max():.3f}]")
+    print(
+        f"  periodic NV {pmesh.GetNV()}, point range x: "
+        f"[{pv_periodic.points[:, 0].min():.3f}, {pv_periodic.points[:, 0].max():.3f}], "
+        f"y: [{pv_periodic.points[:, 1].min():.3f}, {pv_periodic.points[:, 1].max():.3f}], "
+        f"z: [{pv_periodic.points[:, 2].min():.3f}, {pv_periodic.points[:, 2].max():.3f}]"
+    )
 
     # === Non-periodic mesh (visually interpretable) ===
     print("Building non-periodic + AMR mesh (same threshold)...")
     npmesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
-    iteratively_refine_mfem(npmesh, problem,
-                            threshold=0.20, max_iterations=2,
-                            dof_budget=10**7, n_samples_per_cell=8)
+    iteratively_refine_mfem(
+        npmesh,
+        problem,
+        threshold=0.20,
+        max_iterations=2,
+        dof_budget=10**7,
+        n_samples_per_cell=8,
+    )
     npmetric = cell_heterogeneity_metric_mfem(npmesh, problem)
     pv_np = mfem_mesh_to_pv(npmesh, npmetric)
     np_path = OUT_DIR / "mfem_weave_mesh_nonperiodic_iter2.vtk"
@@ -126,7 +159,9 @@ def main():
             if spread > 0.7 * L:
                 weird += 1
                 break
-    print(f"  periodic cells with > 0.7 L spread along any axis: {weird} / {pmesh.GetNE()}")
+    print(
+        f"  periodic cells with > 0.7 L spread along any axis: {weird} / {pmesh.GetNE()}"
+    )
     print()
     print("Open both in ParaView with:")
     print(f"  anno para new {periodic_path} {np_path}")

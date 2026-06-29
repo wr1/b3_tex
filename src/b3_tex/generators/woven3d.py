@@ -87,7 +87,9 @@ def _cfg(config: dict[str, Any], defaults: dict[str, Any], key: str) -> Any:
     return defaults[key]
 
 
-def _layer_centres(n_layers: int, height: float, gap: float, z_mid: float) -> NDArray[np.float64]:
+def _layer_centres(
+    n_layers: int, height: float, gap: float, z_mid: float
+) -> NDArray[np.float64]:
     """Evenly stacked layer z-centres (pitch = height + gap), centred on ``z_mid``."""
     pitch = height + gap
     offsets = (np.arange(n_layers) - 0.5 * (n_layers - 1)) * pitch
@@ -123,6 +125,7 @@ def _straight_tow(
 # --------------------------------------------------------------------------
 # orthogonal
 # --------------------------------------------------------------------------
+
 
 def orthogonal_yarns(
     *,
@@ -228,7 +231,9 @@ def orthogonal_yarns(
             half_height=0.5 * binder_height,
             power=power,
         )
-        yarns.append(ParametricYarn(centre, section, nominal_vf=nominal_vf, max_vf=max_vf))
+        yarns.append(
+            ParametricYarn(centre, section, nominal_vf=nominal_vf, max_vf=max_vf)
+        )
 
     return tuple(yarns)
 
@@ -286,7 +291,10 @@ def build_orthogonal(
 # layer-to-layer (decoupled angle-interlock)
 # --------------------------------------------------------------------------
 
-def _default_binder_sequence(n_binder: int, n_levels: int, n_pick: int) -> list[list[int]]:
+
+def _default_binder_sequence(
+    n_binder: int, n_levels: int, n_pick: int
+) -> list[list[int]]:
     """Diagonal layer-index sequence for each binder, one entry per weft pick.
 
     Each binder sweeps from the bottom level up to the top and back, offset
@@ -407,7 +415,9 @@ def layer_to_layer_yarns(
             half_height=0.5 * binder_height,
             power=power,
         )
-        yarns.append(ParametricYarn(centre, section, nominal_vf=nominal_vf, max_vf=max_vf))
+        yarns.append(
+            ParametricYarn(centre, section, nominal_vf=nominal_vf, max_vf=max_vf)
+        )
 
     return tuple(yarns)
 

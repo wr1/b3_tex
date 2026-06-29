@@ -41,3 +41,14 @@ markers = [
   "fenicsx: requires a working DOLFINx and dolfinx_mpc installation",
   "mfem: requires a working PyMFEM (mfem) installation (now a core dependency)",
 ]
+
+[tool.ruff.lint]
+# E741: single-letter names (l, n, m, k) match geometry / micromechanics notation.
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Examples manipulate sys.path before importing; some tests guard FE imports.
+"examples/*" = ["E402"]
+"tests/test_dolfinx_periodic_solve.py" = ["E402"]
+"tests/test_dolfinx_solve.py" = ["E402"]
+"tests/test_mfem.py" = ["E402"]

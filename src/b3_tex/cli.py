@@ -40,7 +40,11 @@ def _estimate_yarn_volume_fraction(problem: RVEProblem, n: int = 40) -> float:
     grid = np.linspace(0.5 / n, 1 - 0.5 / n, n)
     xs, ys, zs = np.meshgrid(grid, grid, grid, indexing="ij")
     pts = np.stack(
-        [xs.ravel() * problem.size[0], ys.ravel() * problem.size[1], zs.ravel() * problem.size[2]],
+        [
+            xs.ravel() * problem.size[0],
+            ys.ravel() * problem.size[1],
+            zs.ravel() * problem.size[2],
+        ],
         axis=1,
     )
     samples = problem.field.sample(pts)
@@ -100,15 +104,19 @@ def _import_backend(canonical: str):
     try:
         if canonical == "dolfinx-periodic":
             from b3_tex.backends.dolfinx_periodic_backend import solve as f
+
             return f, "DOLFINx + dolfinx_mpc"
         if canonical == "dolfinx-kubc":
             from b3_tex.backends.dolfinx_backend import solve as f
+
             return f, "DOLFINx"
         if canonical == "mfem-periodic":
             from b3_tex.backends.mfem_backend import solve_periodic as f
+
             return f, "PyMFEM"
         if canonical == "mfem-kubc":
             from b3_tex.backends.mfem_backend import solve as f
+
             return f, "PyMFEM"
         raise AssertionError(canonical)
     except ImportError as exc:
@@ -184,8 +192,10 @@ def _solve_cmd(
             "max_iterations": amr_iterations,
             "threshold": amr_threshold,
         }
-        if (canonical.startswith("dolfinx")
-                and solver.get("cell_type", "tetrahedron") != "tetrahedron"):
+        if (
+            canonical.startswith("dolfinx")
+            and solver.get("cell_type", "tetrahedron") != "tetrahedron"
+        ):
             print(
                 "AMR with DOLFINx requires cell_type='tetrahedron' "
                 "(refine_plaza is tet-only in 0.10).",
@@ -207,7 +217,9 @@ def _solve_cmd(
     out_dir.mkdir(parents=True, exist_ok=True)
     result.save_npz(out_dir / "C_eff.npz")
     np.set_printoptions(precision=4, suppress=True)
-    print(f"Effective stiffness ({canonical}, {solver.get('cell_type', 'tetrahedron')}):")
+    print(
+        f"Effective stiffness ({canonical}, {solver.get('cell_type', 'tetrahedron')}):"
+    )
     print(result.effective_stiffness)
     print(f"Saved to {out_dir / 'C_eff.npz'}")
 
@@ -297,7 +309,7 @@ _app = cli(
                     default="mfem-periodic",
                     choices=list(_BACKEND_CHOICES) + list(_BACKEND_ALIASES),
                     help="Solver backend. mfem-periodic (default) is recommended for hex AMR "
-                         "and efficiency. dolfinx-* backends are excellent for tets.",
+                    "and efficiency. dolfinx-* backends are excellent for tets.",
                 ),
                 option(
                     flags=["--cell-type", "-c"],
@@ -305,8 +317,8 @@ _app = cli(
                     default="",
                     choices=["", "tetrahedron", "hexahedron"],
                     help="FE cell type (overrides solver.cell_type from the YAML; default = empty "
-                         "means use whatever is in the YAML, or tetrahedron). hex requires an "
-                         "mfem-* backend if combined with AMR.",
+                    "means use whatever is in the YAML, or tetrahedron). hex requires an "
+                    "mfem-* backend if combined with AMR.",
                 ),
                 option(
                     flags=["--amr-iterations"],

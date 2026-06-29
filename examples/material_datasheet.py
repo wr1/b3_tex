@@ -43,17 +43,24 @@ def main() -> None:
     )
     ap.add_argument("--axis", choices=("x", "y", "z"), default="z")
     ap.add_argument(
-        "--amr-iterations", type=int, default=2,
+        "--amr-iterations",
+        type=int,
+        default=2,
         help="Refinement passes for the AMR illustration panel (coarse 10x10x3 base).",
     )
     ap.add_argument(
-        "--solve-amr-iterations", type=int, default=0,
+        "--solve-amr-iterations",
+        type=int,
+        default=0,
         help="AMR passes during homogenization (0 = uniform YAML mesh; can be very slow).",
     )
     ap.add_argument("--amr-threshold", type=float, default=0.20)
-    ap.add_argument("--c-eff", default="", help="Optional C_eff.npz to skip the FE solve.")
     ap.add_argument(
-        "--full-mesh", action="store_true",
+        "--c-eff", default="", help="Optional C_eff.npz to skip the FE solve."
+    )
+    ap.add_argument(
+        "--full-mesh",
+        action="store_true",
         help="Homogenize on the YAML mesh_resolution (slow; default uses 24x24x8).",
     )
     ap.add_argument("--skip-solve", action="store_true")
@@ -80,8 +87,8 @@ def main() -> None:
     if spec.engineering_constants:
         ec = spec.engineering_constants
         print(
-            f"  E_x = {ec['E_x']/1e9:.2f} GPa, E_y = {ec['E_y']/1e9:.2f} GPa, "
-            f"E_z = {ec['E_z']/1e9:.2f} GPa"
+            f"  E_x = {ec['E_x'] / 1e9:.2f} GPa, E_y = {ec['E_y'] / 1e9:.2f} GPa, "
+            f"E_z = {ec['E_z'] / 1e9:.2f} GPa"
         )
 
 

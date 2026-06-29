@@ -63,7 +63,12 @@ def test_rotated_returns_symmetric_stiffness():
 
 def test_from_config_isotropic():
     m = Material.from_config(
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35}
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        }
     )
     np.testing.assert_allclose(m.stiffness, isotropic_stiffness(3.0e9, 0.35))
 
@@ -73,12 +78,18 @@ def test_from_config_transverse_isotropic():
         {
             "name": "yarn",
             "type": "transverse_isotropic",
-            "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
+            "e_l": 140e9,
+            "e_t": 10e9,
+            "g_lt": 5e9,
+            "nu_lt": 0.28,
+            "nu_tt": 0.40,
         }
     )
     np.testing.assert_allclose(
         m.stiffness,
-        transverse_isotropic_stiffness(e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40),
+        transverse_isotropic_stiffness(
+            e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40
+        ),
     )
 
 
@@ -87,9 +98,15 @@ def test_from_config_orthotropic():
         {
             "name": "ortho",
             "type": "orthotropic",
-            "e1": 100e9, "e2": 10e9, "e3": 10e9,
-            "nu12": 0.3, "nu13": 0.3, "nu23": 0.4,
-            "g12": 5e9, "g13": 5e9, "g23": 3.5e9,
+            "e1": 100e9,
+            "e2": 10e9,
+            "e3": 10e9,
+            "nu12": 0.3,
+            "nu13": 0.3,
+            "nu23": 0.4,
+            "g12": 5e9,
+            "g13": 5e9,
+            "g23": 3.5e9,
         }
     )
     assert m.stiffness.shape == (6, 6)

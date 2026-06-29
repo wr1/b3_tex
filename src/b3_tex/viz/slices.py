@@ -23,9 +23,9 @@ _AXIS_NAME = {0: "x", 1: "y", 2: "z"}
 
 # ortho AMR snapshot: slice normal axis -> (a-axis horizontal, b-axis vertical, xlabel, ylabel)
 _SLICE_PANELS = {
-    0: (2, 1, "z", "y"),   # plane x = const  (side: y vertical, z horizontal)
-    1: (0, 2, "x", "z"),   # plane y = const  (top)
-    2: (0, 1, "x", "y"),   # plane z = const  (plan)
+    0: (2, 1, "z", "y"),  # plane x = const  (side: y vertical, z horizontal)
+    1: (0, 2, "x", "z"),  # plane y = const  (top)
+    2: (0, 1, "x", "y"),  # plane z = const  (plan)
 }
 
 
@@ -71,13 +71,23 @@ def render_midplane_field(
     vmin, vmax = vf_clim(problem) if sampler is not None else (0.0, 1.0)
 
     s = quiver_step
-    plt.rcParams.update({"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5})
+    plt.rcParams.update(
+        {"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5}
+    )
     scale = 2.85 / max(float(Lu), float(Lv))
     fig, ax = plt.subplots(figsize=(float(Lu) * scale, float(Lv) * scale))
-    mesh = ax.pcolormesh(u, v, vf, cmap=theme.cmap_vf, vmin=vmin, vmax=vmax, shading="nearest")
+    mesh = ax.pcolormesh(
+        u, v, vf, cmap=theme.cmap_vf, vmin=vmin, vmax=vmax, shading="nearest"
+    )
     ax.quiver(
-        U[::s, ::s], V[::s, ::s], eu[::s, ::s], ev[::s, ::s],
-        color=theme.fibre_color, scale=22, width=0.0045, pivot="mid",
+        U[::s, ::s],
+        V[::s, ::s],
+        eu[::s, ::s],
+        ev[::s, ::s],
+        color=theme.fibre_color,
+        scale=22,
+        width=0.0045,
+        pivot="mid",
     )
     fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
     ax.set_xlabel(_AXIS_NAME[u_ax])
@@ -104,7 +114,9 @@ def _hex_slice_rectangles(mesh, axis: int, pos: float, *, tol: float = 1e-9):
         if v[:, axis].min() - tol <= pos <= v[:, axis].max() + tol:
             xmin, ymin = v[:, a_ax].min(), v[:, b_ax].min()
             rects.append(
-                Rectangle((xmin, ymin), v[:, a_ax].max() - xmin, v[:, b_ax].max() - ymin)
+                Rectangle(
+                    (xmin, ymin), v[:, a_ax].max() - xmin, v[:, b_ax].max() - ymin
+                )
             )
             idx.append(c)
     return rects, np.asarray(idx, dtype=int)
@@ -139,13 +151,25 @@ def _yarn_vf_on_slice(field, problem, axis: int, pos: float, *, grid_n: int = 16
     ids, _ = field.sample_arrays(pts)
     inside = (np.asarray(ids) != 0).reshape(shape)
     sampler = getattr(field, "sample_local_vf", None)
-    vf = np.asarray(sampler(pts), dtype=float).reshape(shape) if sampler else np.ones(shape)
+    vf = (
+        np.asarray(sampler(pts), dtype=float).reshape(shape)
+        if sampler
+        else np.ones(shape)
+    )
     return a, b, np.where(inside, vf, np.nan)
 
 
 def _draw_amr_slice_panel(
-    ax, mesh, metric, field, problem, axis: int, pos: float,
-    *, theme: Theme = DEFAULT_THEME, shade: str = "vf",
+    ax,
+    mesh,
+    metric,
+    field,
+    problem,
+    axis: int,
+    pos: float,
+    *,
+    theme: Theme = DEFAULT_THEME,
+    shade: str = "vf",
     vf_clim: tuple[float, float] = (0.0, 1.0),
 ):
     """One ortho panel: AMR cells by het. score, in-tow region Vf-shaded, tow outline."""
@@ -156,7 +180,10 @@ def _draw_amr_slice_panel(
     rects, idx = _hex_slice_rectangles(mesh, axis, pos)
     het_alpha = 0.5 if shade == "vf" else 1.0
     pc = PatchCollection(
-        rects, cmap=theme.cmap_het, edgecolor=theme.edge_color, linewidth=0.25,
+        rects,
+        cmap=theme.cmap_het,
+        edgecolor=theme.edge_color,
+        linewidth=0.25,
         alpha=het_alpha,
     )
     if idx.size:
@@ -166,16 +193,28 @@ def _draw_amr_slice_panel(
     if shade == "vf":
         sa, sb, svf = _yarn_vf_on_slice(field, problem, axis, pos)
         ax.pcolormesh(
-            sa, sb, svf, cmap=theme.cmap_vf, vmin=vf_clim[0], vmax=vf_clim[1],
-            shading="nearest", zorder=2,
+            sa,
+            sb,
+            svf,
+            cmap=theme.cmap_vf,
+            vmin=vf_clim[0],
+            vmax=vf_clim[1],
+            shading="nearest",
+            zorder=2,
         )
         # re-draw the AMR cell edges on top so the (refined) gridlines stay visible
         # over the Vf shading — the Vf fill would otherwise hide the mesh.
         edge_rects, _ = _hex_slice_rectangles(mesh, axis, pos)
-        ax.add_collection(PatchCollection(
-            edge_rects, facecolor="none", edgecolor=theme.edge_color,
-            linewidth=0.3, alpha=0.6, zorder=2.5,
-        ))
+        ax.add_collection(
+            PatchCollection(
+                edge_rects,
+                facecolor="none",
+                edgecolor=theme.edge_color,
+                linewidth=0.3,
+                alpha=0.6,
+                zorder=2.5,
+            )
+        )
     a, b, ind = _yarn_outline_on_slice(field, problem, axis, pos)
     ax.contour(a, b, ind, levels=[0.5], colors="white", linewidths=0.9, zorder=3)
     ax.set_xlim(0, L[a_ax])
@@ -192,8 +231,12 @@ def _annotate_cut_plane_locations(ax_plan, ax_top, ax_side, *, x0, y0, z0, Lx, L
     ax_plan.axhline(y0, **cut)
     ax_plan.axvline(x0, **cut)
     ax_plan.plot(x0, y0, "+", color=cut["color"], ms=5, mew=0.9)
-    ax_plan.text(0.02, y0 + 0.02, "top cut", color=cut["color"], fontsize=5, va="bottom")
-    ax_plan.text(x0 + 0.02, Ly - 0.02, "side cut", color=cut["color"], fontsize=5, va="top")
+    ax_plan.text(
+        0.02, y0 + 0.02, "top cut", color=cut["color"], fontsize=5, va="bottom"
+    )
+    ax_plan.text(
+        x0 + 0.02, Ly - 0.02, "side cut", color=cut["color"], fontsize=5, va="top"
+    )
     ax_top.axvline(x0, **cut)
     ax_top.plot(x0, z0, "+", color=cut["color"], ms=4, mew=0.8)
     ax_side.axhline(y0, **cut)
@@ -238,7 +281,9 @@ def render_amr_snapshot(
         refine_flagged_cells_mfem(mesh, flagged)
 
     clim = vf_clim(problem) if shade == "vf" else (0.0, 1.0)
-    plt.rcParams.update({"font.size": 5.5, "axes.titlesize": 5.5, "axes.labelsize": 5.5})
+    plt.rcParams.update(
+        {"font.size": 5.5, "axes.titlesize": 5.5, "axes.labelsize": 5.5}
+    )
     total_w, total_h = Lz + Lx, Lz + Ly
     scale = 2.85 / max(total_w, total_h)
     fig = plt.figure(figsize=(total_w * scale, total_h * scale))
@@ -257,7 +302,9 @@ def render_amr_snapshot(
     ax_side.set_title(f"side  x={x0:.2f}", pad=0.8)
     _draw_amr_slice_panel(ax_plan, mesh, metric, field, problem, 2, z0, **common)
     ax_plan.set_title(f"plan  z={z0:.2f}  ({mesh.GetNE()} cells)", pad=0.8)
-    _annotate_cut_plane_locations(ax_plan, ax_top, ax_side, x0=x0, y0=y0, z0=z0, Lx=Lx, Ly=Ly)
+    _annotate_cut_plane_locations(
+        ax_plan, ax_top, ax_side, x0=x0, y0=y0, z0=z0, Lx=Lx, Ly=Ly
+    )
 
     fig.subplots_adjust(left=0.06, right=0.995, top=0.95, bottom=0.135)
     cax = fig.add_axes([0.12, 0.035, 0.78, 0.026])

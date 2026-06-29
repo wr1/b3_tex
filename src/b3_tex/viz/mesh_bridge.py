@@ -16,8 +16,9 @@ def _is_mfem(mesh) -> bool:
     return hasattr(mesh, "GetNE") and hasattr(mesh, "GetVertexArray")
 
 
-def to_pyvista_grid(mesh, *, metric: NDArray[np.float64] | None = None,
-                    metric_name: str = "het_metric"):
+def to_pyvista_grid(
+    mesh, *, metric: NDArray[np.float64] | None = None, metric_name: str = "het_metric"
+):
     """Convert an FE mesh to a ``pyvista.UnstructuredGrid``.
 
     ``metric`` (per-cell) is attached as ``cell_data[metric_name]`` when given.

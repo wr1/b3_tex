@@ -17,8 +17,14 @@ from b3_tex.problem import RVEProblem
 
 def test_sinusoidal_yarn_centerline_returns_yarn():
     yarn = SinusoidalYarn(
-        axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
+        axis="x",
+        inplane_position=0.5,
+        z_mid=0.2,
+        amplitude=0.05,
+        period=1.0,
+        phase=0.0,
+        half_width=0.05,
+        half_height=0.05,
     )
     pts = np.array([[0.25, 0.5, 0.2 + 0.05 * np.sin(2 * np.pi * 0.25)]])
     assert yarn.contains(pts)[0]
@@ -26,8 +32,14 @@ def test_sinusoidal_yarn_centerline_returns_yarn():
 
 def test_sinusoidal_yarn_off_centerline_outside():
     yarn = SinusoidalYarn(
-        axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
+        axis="x",
+        inplane_position=0.5,
+        z_mid=0.2,
+        amplitude=0.05,
+        period=1.0,
+        phase=0.0,
+        half_width=0.05,
+        half_height=0.05,
     )
     pts = np.array([[0.25, 0.5, 0.5]])  # well above centerline
     assert not yarn.contains(pts)[0]
@@ -35,10 +47,18 @@ def test_sinusoidal_yarn_off_centerline_outside():
 
 def test_sinusoidal_yarn_local_tangent_has_z_slope_nonzero():
     yarn = SinusoidalYarn(
-        axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.0, half_width=0.05, half_height=0.05,
+        axis="x",
+        inplane_position=0.5,
+        z_mid=0.2,
+        amplitude=0.05,
+        period=1.0,
+        phase=0.0,
+        half_width=0.05,
+        half_height=0.05,
     )
-    pts = np.array([[0.0, 0.5, 0.2]])  # centerline at x=0; tangent slope = amp*2pi/period * cos(0) > 0
+    pts = np.array(
+        [[0.0, 0.5, 0.2]]
+    )  # centerline at x=0; tangent slope = amp*2pi/period * cos(0) > 0
     R = yarn.rotation_at(pts)
     e1 = R[0, :, 0]
     assert e1[0] > 0  # mostly along x
@@ -47,8 +67,14 @@ def test_sinusoidal_yarn_local_tangent_has_z_slope_nonzero():
 
 def test_sinusoidal_yarn_rotation_is_orthonormal():
     yarn = SinusoidalYarn(
-        axis="y", inplane_position=0.3, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.5, half_width=0.05, half_height=0.05,
+        axis="y",
+        inplane_position=0.3,
+        z_mid=0.2,
+        amplitude=0.05,
+        period=1.0,
+        phase=0.5,
+        half_width=0.05,
+        half_height=0.05,
     )
     pts = np.array([[0.3, 0.4, 0.2]])
     R = yarn.rotation_at(pts)[0]
@@ -58,8 +84,11 @@ def test_sinusoidal_yarn_rotation_is_orthonormal():
 def test_plain_weave_yarns_count():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.05,
+        yarn_half_height=0.05,
+        amplitude=0.05,
     )
     assert len(yarns) == 4
     assert sum(1 for y in yarns if y.axis == "x") == 2
@@ -69,8 +98,11 @@ def test_plain_weave_yarns_count():
 def test_plain_weave_warp_phases_alternate():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.05,
+        yarn_half_height=0.05,
+        amplitude=0.05,
     )
     warps = [y for y in yarns if y.axis == "x"]
     assert abs(warps[0].phase - 0.0) < 1e-12
@@ -80,8 +112,11 @@ def test_plain_weave_warp_phases_alternate():
 def test_weave_field_classifies_yarn_at_centerline_intersection():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.075, yarn_half_height=0.075, amplitude=0.08,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.075,
+        yarn_half_height=0.075,
+        amplitude=0.08,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
     # Plain weave: at crossing (x=0.25, y=0.25), warp j=0 (phase 0) sits at +amp
@@ -100,8 +135,11 @@ def test_plain_weave_yarns_cross_at_offset_z():
     """
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.075, yarn_half_height=0.05, amplitude=0.08,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.075,
+        yarn_half_height=0.05,
+        amplitude=0.08,
     )
     warps = [y for y in yarns if y.axis == "x"]
     wefts = [y for y in yarns if y.axis == "y"]
@@ -122,8 +160,11 @@ def test_plain_weave_warp_weft_volume_fractions_match():
     """
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.16),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.235, yarn_half_height=0.035, amplitude=0.04,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.235,
+        yarn_half_height=0.035,
+        amplitude=0.04,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
     N = 40
@@ -141,14 +182,19 @@ def test_plain_weave_warp_weft_volume_fractions_match():
     warp_vf = is_warp.mean()
     weft_vf = is_weft.mean()
     rel = abs(warp_vf - weft_vf) / max(warp_vf, weft_vf)
-    assert rel < 0.01, f"warp/weft VF imbalance {rel:.4f}; warp={warp_vf}, weft={weft_vf}"
+    assert rel < 0.01, (
+        f"warp/weft VF imbalance {rel:.4f}; warp={warp_vf}, weft={weft_vf}"
+    )
 
 
 def test_weave_field_matrix_outside_yarns():
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.4),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.05, yarn_half_height=0.05, amplitude=0.05,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.05,
+        yarn_half_height=0.05,
+        amplitude=0.05,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
     samples = field.sample(np.array([[0.0, 0.0, 0.0]]))
@@ -159,19 +205,39 @@ def test_problem_from_config_plain_weave():
     cfg = {
         "domain": {"size": [1.0, 1.0, 0.4], "mesh_resolution": [8, 8, 4]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70e9, "e_t": 70e9, "g_lt": 28e9, "nu_lt": 0.25, "nu_tt": 0.25},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.65},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70e9,
+                "e_t": 70e9,
+                "g_lt": 28e9,
+                "nu_lt": 0.25,
+                "nu_tt": 0.25,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.65,
+            },
         ],
         "field": {
             "type": "plain_weave",
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "domain_size": [1.0, 1.0, 0.4],
-            "n_warp": 2, "n_weft": 2,
-            "yarn_half_width": 0.20, "yarn_half_height": 0.07, "amplitude": 0.08,
+            "n_warp": 2,
+            "n_weft": 2,
+            "yarn_half_width": 0.20,
+            "yarn_half_height": 0.07,
+            "amplitude": 0.08,
         },
     }
     problem = RVEProblem.from_config(cfg)
@@ -184,23 +250,54 @@ def test_problem_from_config_weave_explicit_yarns():
     cfg = {
         "domain": {"size": [1.0, 1.0, 0.4], "mesh_resolution": [4, 4, 4]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70e9, "e_t": 70e9, "g_lt": 28e9, "nu_lt": 0.25, "nu_tt": 0.25},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.65},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70e9,
+                "e_t": 70e9,
+                "g_lt": 28e9,
+                "nu_lt": 0.25,
+                "nu_tt": 0.25,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.65,
+            },
         ],
         "field": {
             "type": "weave",
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "yarns": [
-                {"axis": "x", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 0.5, "phase": 0.0,
-                 "half_width": 0.20, "half_height": 0.07},
-                {"axis": "y", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 0.5, "phase": np.pi,
-                 "half_width": 0.20, "half_height": 0.07},
+                {
+                    "axis": "x",
+                    "inplane_position": 0.25,
+                    "z_mid": 0.2,
+                    "amplitude": 0.08,
+                    "period": 0.5,
+                    "phase": 0.0,
+                    "half_width": 0.20,
+                    "half_height": 0.07,
+                },
+                {
+                    "axis": "y",
+                    "inplane_position": 0.25,
+                    "z_mid": 0.2,
+                    "amplitude": 0.08,
+                    "period": 0.5,
+                    "phase": np.pi,
+                    "half_width": 0.20,
+                    "half_height": 0.07,
+                },
             ],
         },
     }
@@ -216,8 +313,14 @@ def test_sinusoidal_yarn_default_power_is_two_is_ellipse():
     """Regression pin: default `power` reproduces the pre-super-ellipse formula."""
     rng = np.random.default_rng(42)
     yarn = SinusoidalYarn(
-        axis="x", inplane_position=0.5, z_mid=0.2,
-        amplitude=0.05, period=1.0, phase=0.3, half_width=0.08, half_height=0.04,
+        axis="x",
+        inplane_position=0.5,
+        z_mid=0.2,
+        amplitude=0.05,
+        period=1.0,
+        phase=0.3,
+        half_width=0.08,
+        half_height=0.04,
     )
     assert yarn.power == 2.0
     pts = rng.uniform([0, 0, 0], [1, 1, 0.4], size=(1000, 3))
@@ -239,17 +342,22 @@ def test_super_ellipse_p4_fills_corners():
     hw, hh = 0.10, 0.05
     # Straight horizontal warp (amplitude 0) so tangent = +x and perp_z = |dz|.
     common = dict(
-        axis="x", inplane_position=0.0, z_mid=0.0,
-        amplitude=0.0, period=1.0, phase=0.0,
-        half_width=hw, half_height=hh,
+        axis="x",
+        inplane_position=0.0,
+        z_mid=0.0,
+        amplitude=0.0,
+        period=1.0,
+        phase=0.0,
+        half_width=hw,
+        half_height=hh,
     )
     p2 = SinusoidalYarn(power=2.0, **common)
     p4 = SinusoidalYarn(power=4.0, **common)
     pt = np.array([[0.5, 0.8 * hw, 0.8 * hh]])
     v2 = p2.ellipse_value(pt)[0]
     v4 = p4.ellipse_value(pt)[0]
-    assert v2 > 1.0   # 0.64 + 0.64 = 1.28 -> outside the ellipse
-    assert v4 < 1.0   # 0.4096 + 0.4096 = 0.8192 -> inside the super-ellipse
+    assert v2 > 1.0  # 0.64 + 0.64 = 1.28 -> outside the ellipse
+    assert v4 < 1.0  # 0.4096 + 0.4096 = 0.8192 -> inside the super-ellipse
     assert not p2.contains(pt)[0]
     assert p4.contains(pt)[0]
 
@@ -262,17 +370,25 @@ def test_super_ellipse_area_matches_gamma_formula():
     p = 4.0
     # Straight warp at amplitude 0, so the cross-section is just |dy|^p / hw^p + |dz|^p / hh^p <= 1.
     yarn = SinusoidalYarn(
-        axis="x", inplane_position=0.0, z_mid=0.0,
-        amplitude=0.0, period=1.0, phase=0.0,
-        half_width=hw, half_height=hh, power=p,
+        axis="x",
+        inplane_position=0.0,
+        z_mid=0.0,
+        amplitude=0.0,
+        period=1.0,
+        phase=0.0,
+        half_width=hw,
+        half_height=hh,
+        power=p,
     )
     rng = np.random.default_rng(0)
     n = 50_000
-    pts = np.column_stack([
-        np.full(n, 0.5),
-        rng.uniform(-hw, hw, n),
-        rng.uniform(-hh, hh, n),
-    ])
+    pts = np.column_stack(
+        [
+            np.full(n, 0.5),
+            rng.uniform(-hw, hw, n),
+            rng.uniform(-hh, hh, n),
+        ]
+    )
     hit = yarn.contains(pts).mean()
     box_area = (2 * hw) * (2 * hh)
     mc_area = hit * box_area
@@ -283,9 +399,15 @@ def test_super_ellipse_area_matches_gamma_formula():
 def test_sinusoidal_yarn_rejects_power_below_one():
     with pytest.raises(ValueError, match="power"):
         SinusoidalYarn(
-            axis="x", inplane_position=0.0, z_mid=0.0,
-            amplitude=0.0, period=1.0, phase=0.0,
-            half_width=0.1, half_height=0.05, power=0.5,
+            axis="x",
+            inplane_position=0.0,
+            z_mid=0.0,
+            amplitude=0.0,
+            period=1.0,
+            phase=0.0,
+            half_width=0.1,
+            half_height=0.05,
+            power=0.5,
         )
 
 
@@ -293,8 +415,11 @@ def test_plain_weave_yarn_volume_fraction_increases_with_power():
     """Same geometry, higher power -> tower cross-section area -> higher bundle Vf."""
     cfg = dict(
         domain_size=(1.0, 1.0, 0.16),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.235, yarn_half_height=0.035, amplitude=0.04,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.235,
+        yarn_half_height=0.035,
+        amplitude=0.04,
     )
     N = 40
     g = np.linspace(0.5 / N, 1 - 0.5 / N, N)
@@ -314,8 +439,11 @@ def test_plain_weave_warp_weft_symmetric_at_power_4():
     """The symmetric argmin tie-break must keep x<->y symmetry at higher p."""
     yarns = plain_weave_yarns(
         domain_size=(1.0, 1.0, 0.16),
-        n_warp=2, n_weft=2,
-        yarn_half_width=0.235, yarn_half_height=0.035, amplitude=0.04,
+        n_warp=2,
+        n_weft=2,
+        yarn_half_width=0.235,
+        yarn_half_height=0.035,
+        amplitude=0.04,
         power=4.0,
     )
     field = WeaveField(matrix_material="m", yarn_material="y", yarns=yarns)
@@ -332,26 +460,48 @@ def test_plain_weave_warp_weft_symmetric_at_power_4():
     warp_vf = is_warp.mean()
     weft_vf = is_weft.mean()
     rel = abs(warp_vf - weft_vf) / max(warp_vf, weft_vf)
-    assert rel < 0.01, f"warp/weft VF imbalance at p=4: {rel:.4f} ({warp_vf} vs {weft_vf})"
+    assert rel < 0.01, (
+        f"warp/weft VF imbalance at p=4: {rel:.4f} ({warp_vf} vs {weft_vf})"
+    )
 
 
 def test_problem_from_config_plain_weave_with_power():
     cfg = {
         "domain": {"size": [1.0, 1.0, 0.16], "mesh_resolution": [8, 8, 4]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70e9, "e_t": 15e9, "g_lt": 24e9, "nu_lt": 0.20, "nu_tt": 0.30},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.70},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70e9,
+                "e_t": 15e9,
+                "g_lt": 24e9,
+                "nu_lt": 0.20,
+                "nu_tt": 0.30,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.70,
+            },
         ],
         "field": {
             "type": "plain_weave",
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "domain_size": [1.0, 1.0, 0.16],
-            "n_warp": 2, "n_weft": 2,
-            "yarn_half_width": 0.245, "yarn_half_height": 0.038, "amplitude": 0.04,
+            "n_warp": 2,
+            "n_weft": 2,
+            "yarn_half_width": 0.245,
+            "yarn_half_height": 0.038,
+            "amplitude": 0.04,
             "power": 4.0,
         },
     }
@@ -446,7 +596,9 @@ def test_stitched_biaxial_warp_weft_volume_fractions_match():
     warp_vf = is_warp.mean()
     weft_vf = is_weft.mean()
     rel = abs(warp_vf - weft_vf) / max(warp_vf, weft_vf)
-    assert rel < 0.02, f"warp/weft VF imbalance {rel:.4f}: warp={warp_vf}, weft={weft_vf}"
+    assert rel < 0.02, (
+        f"warp/weft VF imbalance {rel:.4f}: warp={warp_vf}, weft={weft_vf}"
+    )
 
 
 def test_stitched_biaxial_stitch_volume_fraction_present_and_small():
@@ -485,11 +637,28 @@ def test_problem_from_config_stitched_biaxial():
     cfg = {
         "domain": {"size": [1.0, 1.0, 0.3], "mesh_resolution": [8, 8, 6]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70e9, "e_t": 15e9, "g_lt": 24e9, "nu_lt": 0.20, "nu_tt": 0.30},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.65},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70e9,
+                "e_t": 15e9,
+                "g_lt": 24e9,
+                "nu_lt": 0.20,
+                "nu_tt": 0.30,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.65,
+            },
         ],
         "field": {
             "type": "stitched_biaxial",
@@ -497,9 +666,11 @@ def test_problem_from_config_stitched_biaxial():
             "yarn_material": "yarn",
             "domain_size": [1.0, 1.0, 0.3],
             "ply_z_centers": [0.1, 0.2],
-            "n_warp": 4, "n_weft": 4,
+            "n_warp": 4,
+            "n_weft": 4,
             "tow_radius": 0.06,
-            "n_stitches_x": 2, "n_stitches_y": 2,
+            "n_stitches_x": 2,
+            "n_stitches_y": 2,
             "stitch_radius": 0.015,
         },
     }
@@ -513,23 +684,55 @@ def test_problem_from_config_weave_per_yarn_power():
     cfg = {
         "domain": {"size": [1.0, 1.0, 0.4], "mesh_resolution": [4, 4, 4]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70e9, "e_t": 70e9, "g_lt": 28e9, "nu_lt": 0.25, "nu_tt": 0.25},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.65},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70e9,
+                "e_t": 70e9,
+                "g_lt": 28e9,
+                "nu_lt": 0.25,
+                "nu_tt": 0.25,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.65,
+            },
         ],
         "field": {
             "type": "weave",
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "yarns": [
-                {"axis": "x", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 1.0, "phase": 0.0,
-                 "half_width": 0.20, "half_height": 0.07, "power": 4.0},
-                {"axis": "y", "inplane_position": 0.25, "z_mid": 0.2,
-                 "amplitude": 0.08, "period": 1.0, "phase": np.pi,
-                 "half_width": 0.20, "half_height": 0.07},   # power defaults to 2
+                {
+                    "axis": "x",
+                    "inplane_position": 0.25,
+                    "z_mid": 0.2,
+                    "amplitude": 0.08,
+                    "period": 1.0,
+                    "phase": 0.0,
+                    "half_width": 0.20,
+                    "half_height": 0.07,
+                    "power": 4.0,
+                },
+                {
+                    "axis": "y",
+                    "inplane_position": 0.25,
+                    "z_mid": 0.2,
+                    "amplitude": 0.08,
+                    "period": 1.0,
+                    "phase": np.pi,
+                    "half_width": 0.20,
+                    "half_height": 0.07,
+                },  # power defaults to 2
             ],
         },
     }

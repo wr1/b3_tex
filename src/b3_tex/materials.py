@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -30,15 +30,23 @@ class Material:
         object.__setattr__(self, "stiffness", c)
 
     @classmethod
-    def isotropic(cls, name: str, *, youngs_modulus: float, poisson_ratio: float) -> "Material":
-        return cls(name=name, stiffness=isotropic_stiffness(youngs_modulus, poisson_ratio))
+    def isotropic(
+        cls, name: str, *, youngs_modulus: float, poisson_ratio: float
+    ) -> "Material":
+        return cls(
+            name=name, stiffness=isotropic_stiffness(youngs_modulus, poisson_ratio)
+        )
 
     @classmethod
     def transverse_isotropic(
         cls,
         name: str,
         *,
-        e_l: float, e_t: float, g_lt: float, nu_lt: float, nu_tt: float,
+        e_l: float,
+        e_t: float,
+        g_lt: float,
+        nu_lt: float,
+        nu_tt: float,
     ) -> "Material":
         return cls(
             name=name,
@@ -52,16 +60,28 @@ class Material:
         cls,
         name: str,
         *,
-        e1: float, e2: float, e3: float,
-        nu12: float, nu13: float, nu23: float,
-        g12: float, g13: float, g23: float,
+        e1: float,
+        e2: float,
+        e3: float,
+        nu12: float,
+        nu13: float,
+        nu23: float,
+        g12: float,
+        g13: float,
+        g23: float,
     ) -> "Material":
         return cls(
             name=name,
             stiffness=orthotropic_stiffness(
-                e1=e1, e2=e2, e3=e3,
-                nu12=nu12, nu13=nu13, nu23=nu23,
-                g12=g12, g13=g13, g23=g23,
+                e1=e1,
+                e2=e2,
+                e3=e3,
+                nu12=nu12,
+                nu13=nu13,
+                nu23=nu23,
+                g12=g12,
+                g13=g13,
+                g23=g23,
             ),
         )
 
@@ -86,7 +106,9 @@ class Material:
         )
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], registry: dict[str, "Material"] | None = None) -> "Material":
+    def from_config(
+        cls, config: dict[str, Any], registry: dict[str, "Material"] | None = None
+    ) -> "Material":
         """Build a Material from a YAML/JSON config dict.
 
         ``registry`` is an optional mapping of already-built materials by name,
@@ -108,7 +130,9 @@ class Material:
             keys = ("e1", "e2", "e3", "nu12", "nu13", "nu23", "g12", "g13", "g23")
             return cls.orthotropic(name, **{k: float(config[k]) for k in keys})
         if kind == "stiffness":
-            return cls(name=name, stiffness=np.asarray(config["stiffness"], dtype=float))
+            return cls(
+                name=name, stiffness=np.asarray(config["stiffness"], dtype=float)
+            )
         if kind in ("chamis", "micromechanical"):
             if registry is None:
                 raise ValueError(
@@ -164,6 +188,9 @@ class MicromechanicalMaterial(Material):
     micromodel: object = None
     nominal_vf: float = 0.55
     max_vf: float = 0.9
+    _lut_cache: dict[
+        tuple[int, float, float], tuple[NDArray[np.float64], NDArray[np.float64]]
+    ] = field(default_factory=dict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         Material.__post_init__(self)
@@ -205,19 +232,29 @@ class MicromechanicalMaterial(Material):
         )
 
     def build_lut(
-        self, vf_lo: float, vf_hi: float, n_bins: int = 256
+        self,
+        vf_lo: float | None = None,
+        vf_hi: float | None = None,
+        n_bins: int = 256,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return ``(vf_centers (K,), table (K, 6, 6))`` over ``[vf_lo, vf_hi]``.
 
-        A bin-quantised lookup keeps the micromechanics cost ``O(n_bins)`` no
-        matter how many quadrature/sub-sample points reference this material.
+        Defaults to ``[nominal_vf, max_vf]`` so the bin-centre vector is stable
+        across assembly passes and ``b3_micromech`` batch LUT caches can hit.
+        Results are memoised per ``(n_bins, vf_lo, vf_hi)`` on this material.
         """
-        lo = float(min(vf_lo, vf_hi))
-        hi = float(max(vf_lo, vf_hi))
+        lo = float(self.nominal_vf if vf_lo is None else vf_lo)
+        hi = float(self.max_vf if vf_hi is None else vf_hi)
+        lo, hi = float(min(lo, hi)), float(max(lo, hi))
+        cache_key = (n_bins, lo, hi)
+        if cache_key in self._lut_cache:
+            return self._lut_cache[cache_key]
         if hi - lo < 1e-9:
             hi = lo + 1e-9
         centers = (np.arange(n_bins) + 0.5) / n_bins * (hi - lo) + lo
         table = self.micromodel.stiffness_batch(
             matrix=self.matrix, fibre=self.fibre, vf=centers
         )
-        return centers, table
+        result = (centers, table)
+        self._lut_cache[cache_key] = result
+        return result

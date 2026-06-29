@@ -34,25 +34,44 @@ OUT_DIR = EXAMPLES.parent / "results"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml"))
-    ap.add_argument("--out", default=str(OUT_DIR / "weave_explainer"), help="output stem (no ext)")
+    ap.add_argument(
+        "--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml")
+    )
+    ap.add_argument(
+        "--out", default=str(OUT_DIR / "weave_explainer"), help="output stem (no ext)"
+    )
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--res", type=int, default=72, help="implicit-field grid resolution")
+    ap.add_argument(
+        "--res", type=int, default=72, help="implicit-field grid resolution"
+    )
     ap.add_argument("--size", type=int, default=1080, help="square frame size in px")
     ap.add_argument("--title", default="Implicit AMR modelling of woven composites")
     ap.add_argument("--handle", default=None, help="handle/brand for the end card")
-    ap.add_argument("--c-eff", default=None, help="cached effective_stiffness .npz (skips the solve)")
-    ap.add_argument("--logo", default=str(EXAMPLES.parent / "docs" / "b3_logo.png"),
-                    help="logo image (png/svg) shown top-right; '' to disable")
+    ap.add_argument(
+        "--c-eff",
+        default=None,
+        help="cached effective_stiffness .npz (skips the solve)",
+    )
+    ap.add_argument(
+        "--logo",
+        default=str(EXAMPLES.parent / "docs" / "b3_logo.png"),
+        help="logo image (png/svg) shown top-right; '' to disable",
+    )
     ap.add_argument("--no-captions", action="store_true")
     args = ap.parse_args()
 
     problem = RVEProblem.from_yaml(args.config)
     out = weave_explainer(
-        problem, args.out,
-        seconds=args.seconds, fps=args.fps, res=args.res, window_px=args.size,
-        title=args.title, handle=args.handle, c_eff=args.c_eff,
+        problem,
+        args.out,
+        seconds=args.seconds,
+        fps=args.fps,
+        res=args.res,
+        window_px=args.size,
+        title=args.title,
+        handle=args.handle,
+        c_eff=args.c_eff,
         logo=args.logo or None,
         captions=not args.no_captions,
     )

@@ -54,11 +54,14 @@ class WeaveScene:
 
     # -- layers (fluent) ----------------------------------------------------
     def add_box(self, **kw) -> "WeaveScene":
-        return self._store("box", layers.add_box(self.plotter, self.problem, self.theme, **kw))
+        return self._store(
+            "box", layers.add_box(self.plotter, self.problem, self.theme, **kw)
+        )
 
     def add_vf_volume(self, **kw) -> "WeaveScene":
         return self._store(
-            "vf_volume", layers.add_vf_volume(self.plotter, self.problem, self.theme, **kw)
+            "vf_volume",
+            layers.add_vf_volume(self.plotter, self.problem, self.theme, **kw),
         )
 
     def add_fibre_field(self, **kw) -> "WeaveScene":
@@ -74,11 +77,14 @@ class WeaveScene:
         )
 
     def add_amr(self, **kw) -> "WeaveScene":
-        return self._store("amr", layers.add_amr(self.plotter, self.problem, self.theme, **kw))
+        return self._store(
+            "amr", layers.add_amr(self.plotter, self.problem, self.theme, **kw)
+        )
 
     def add_cut_planes(self, **kw) -> "WeaveScene":
         return self._store(
-            "cut_planes", layers.add_cut_planes(self.plotter, self.problem, self.theme, **kw)
+            "cut_planes",
+            layers.add_cut_planes(self.plotter, self.problem, self.theme, **kw),
         )
 
     def add_sample_cloud(self, **kw) -> "WeaveScene":
@@ -94,10 +100,14 @@ class WeaveScene:
 
     def show(self):
         if self.off_screen:
-            raise RuntimeError("scene is off_screen; use screenshot(), or pass off_screen=False")
+            raise RuntimeError(
+                "scene is off_screen; use screenshot(), or pass off_screen=False"
+            )
         return self.plotter.show()
 
-    def screenshot(self, path: str | Path, *, transparent: bool = False, scale: int = 1):
+    def screenshot(
+        self, path: str | Path, *, transparent: bool = False, scale: int = 1
+    ):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.plotter.screenshot(
@@ -131,7 +141,9 @@ class WeaveScene:
 
         if kind == "orbit":
             return presets.orbit(self, path, **kw)
-        raise ValueError(f"unknown scene animation {kind!r}; use presets.{kind} directly")
+        raise ValueError(
+            f"unknown scene animation {kind!r}; use presets.{kind} directly"
+        )
 
     def close(self) -> None:
         if self._plotter is not None:

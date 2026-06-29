@@ -14,8 +14,20 @@ from b3_tex.problem import RVEProblem
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "ncf_tricot_stitched.yaml"
 _DOMAIN = (0.004, 0.004, 0.001)
 _PLIES_0_90 = [
-    {"angle_deg": 0, "z_center": 0.0002, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
-    {"angle_deg": 90, "z_center": 0.0006, "width": 0.00095, "height": 0.0002, "spacing": 0.001},
+    {
+        "angle_deg": 0,
+        "z_center": 0.0002,
+        "width": 0.00095,
+        "height": 0.0002,
+        "spacing": 0.001,
+    },
+    {
+        "angle_deg": 90,
+        "z_center": 0.0006,
+        "width": 0.00095,
+        "height": 0.0002,
+        "spacing": 0.001,
+    },
 ]
 
 
@@ -30,10 +42,18 @@ def test_inlay_ply_fibre_directions():
         -45: np.array([0.70710678, -0.70710678, 0.0]),
     }
     for angle, exp in expected.items():
-        yarns = ncf_yarns(domain_size=_DOMAIN, plies=[
-            {"angle_deg": angle, "z_center": 0.0002, "width": 0.00095,
-             "height": 0.0002, "spacing": 0.001}
-        ])
+        yarns = ncf_yarns(
+            domain_size=_DOMAIN,
+            plies=[
+                {
+                    "angle_deg": angle,
+                    "z_center": 0.0002,
+                    "width": 0.00095,
+                    "height": 0.0002,
+                    "spacing": 0.001,
+                }
+            ],
+        )
         col0 = yarns[0].rotation_at(centre)[0, :, 0]
         # The fibre direction is a signless axis; align signs before comparing.
         if np.dot(col0, exp) < 0:
@@ -43,8 +63,13 @@ def test_inlay_ply_fibre_directions():
 
 def test_stitch_pierces_the_stack():
     """The stitch yarn contains points both above the top ply and below the bottom."""
-    stitch = {"pattern": "pillar", "n_x": 1, "n_y": 4,
-              "radius": 5.0e-5, "z_span": [0.00005, 0.00095]}
+    stitch = {
+        "pattern": "pillar",
+        "n_x": 1,
+        "n_y": 4,
+        "radius": 5.0e-5,
+        "z_span": [0.00005, 0.00095],
+    }
     yarns = ncf_yarns(domain_size=_DOMAIN, plies=_PLIES_0_90, stitch=stitch)
     stitch_yarn = yarns[-1]  # stitch appended last
 
@@ -66,10 +91,12 @@ def test_stitch_pierces_the_stack():
 def test_tricot_stitch_zigzags_in_x():
     """A tricot stitch shifts laterally in x; a pillar does not."""
     common = {"n_x": 1, "n_y": 4, "radius": 2.5e-5, "z_span": [0.00005, 0.00095]}
-    tricot = ncf_yarns(domain_size=_DOMAIN, plies=_PLIES_0_90,
-                       stitch={"pattern": "tricot", **common})[-1]
-    pillar = ncf_yarns(domain_size=_DOMAIN, plies=_PLIES_0_90,
-                       stitch={"pattern": "pillar", **common})[-1]
+    tricot = ncf_yarns(
+        domain_size=_DOMAIN, plies=_PLIES_0_90, stitch={"pattern": "tricot", **common}
+    )[-1]
+    pillar = ncf_yarns(
+        domain_size=_DOMAIN, plies=_PLIES_0_90, stitch={"pattern": "pillar", **common}
+    )[-1]
     s_grid = np.linspace(0.0, 1.0, 201)
     x_tricot = tricot.centerline.position(s_grid)[:, 0]
     x_pillar = pillar.centerline.position(s_grid)[:, 0]

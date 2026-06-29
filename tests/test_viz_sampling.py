@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from b3_tex.problem import RVEProblem
-from b3_tex.viz.sampling import sample_plane, sample_volume, vf_clim
+from b3_tex.viz.sampling import sample_plane, sample_volume, tow_ids, vf_clim
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 COMPACTED = EXAMPLES / "plain_weave_compacted_high_vf.yaml"
@@ -107,3 +107,29 @@ def test_plane_sample_consistent_with_volume(problem):
 def test_vf_clim_within_unit_and_ordered(problem):
     lo, hi = vf_clim(problem)
     assert 0.0 <= lo < hi <= 1.0
+
+
+def test_tow_ids_partition_matches_inside_and_winner(problem):
+    """tow_ids = -1 exactly where outside, and the in-tow id is the argmin yarn."""
+    vs = sample_volume(problem, res=32)
+    pts = vs.coords()
+    ids = tow_ids(problem.field, pts)
+    assert ids.shape == (vs.n_points,)
+    # -1 outside every tow coincides with the field's inside mask.
+    np.testing.assert_array_equal(ids >= 0, vs.inside)
+    # in-tow ids index a real yarn and equal the smallest-ellipse_value winner.
+    n_yarns = len(problem.field.yarns)
+    inside = vs.inside
+    assert ids[inside].min() >= 0 and ids[inside].max() < n_yarns
+    ev = np.column_stack(
+        [np.asarray(y.ellipse_value(pts[inside]), float) for y in problem.field.yarns]
+    )
+    np.testing.assert_array_equal(ids[inside], ev.argmin(axis=1))
+
+
+def test_tow_ids_all_negative_without_yarns():
+    class _NoYarns:
+        yarns = ()
+
+    pts = np.zeros((5, 3))
+    np.testing.assert_array_equal(tow_ids(_NoYarns(), pts), np.full(5, -1))

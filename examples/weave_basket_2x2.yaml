@@ -2,8 +2,10 @@
 # WeavePattern.basket(n=2): plain weave of 2-yarn groups.  TexGen mm -> m.
 
 domain:
-  size: [0.02, 0.02, 0.0024]      # 4 x 4 tows (two 2x2 groups) at 5 mm pitch
-  mesh_resolution: [48, 48, 10]
+  size: [0.02, 0.02, 0.0012]      # 4 x 4 tows (two 2x2 groups) at 5 mm pitch;
+                                  # thickness fits the nested tows (touching both
+                                  # faces) so there is no neat-resin skin top/bottom
+  mesh_resolution: [48, 48, 6]
 
 periodic_tolerance: 1.0e-8
 
@@ -17,7 +19,7 @@ field:
   type: woven
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [0.02, 0.02, 0.0024]
+  domain_size: [0.02, 0.02, 0.0012]
   pattern: {kind: basket, n: 2}
   warp_width: 0.004
   warp_height: 0.0008

@@ -114,7 +114,7 @@ class UndulatingCenterline:
     component. Projection is exact along the running direction (graph convention).
     """
 
-    origin: NDArray[np.float64]        # (3,)
+    origin: NDArray[np.float64]  # (3,)
     in_plane_dir: NDArray[np.float64]  # (3,), z component ignored/zeroed
     amplitude: float
     period: float
@@ -145,8 +145,10 @@ class UndulatingCenterline:
 
     def tangent(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
         s = np.asarray(s, dtype=float)
-        slope = self.amplitude * (2 * np.pi / self.period) * np.cos(
-            2 * np.pi * s / self.period + self.phase
+        slope = (
+            self.amplitude
+            * (2 * np.pi / self.period)
+            * np.cos(2 * np.pi * s / self.period + self.phase)
         )
         t = np.broadcast_to(self.in_plane_dir, (s.shape[0], 3)).copy()
         t[:, 2] = slope
@@ -231,15 +233,17 @@ class PiecewiseLinearCenterline:
     def project(
         self, points: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        a = self.points[:-1]            # (S, 3) segment starts
-        b = self.points[1:]             # (S, 3) segment ends
-        ab = b - a                      # (S, 3)
+        a = self.points[:-1]  # (S, 3) segment starts
+        b = self.points[1:]  # (S, 3) segment ends
+        ab = b - a  # (S, 3)
         ab2 = np.einsum("sd,sd->s", ab, ab)
-        rel = points[:, None, :] - a[None, :, :]            # (N, S, 3)
+        rel = points[:, None, :] - a[None, :, :]  # (N, S, 3)
         t = np.einsum("nsd,sd->ns", rel, ab) / ab2[None, :]  # (N, S)
         t = np.clip(t, 0.0, 1.0)
         foot = a[None, :, :] + t[:, :, None] * ab[None, :, :]  # (N, S, 3)
-        d2 = np.einsum("nsd,nsd->ns", points[:, None, :] - foot, points[:, None, :] - foot)
+        d2 = np.einsum(
+            "nsd,nsd->ns", points[:, None, :] - foot, points[:, None, :] - foot
+        )
         seg = np.argmin(d2, axis=1)
         n = points.shape[0]
         rows = np.arange(n)
@@ -288,7 +292,5 @@ class SplineCenterline:
         d = np.asarray(self._spl.derivative()(s), dtype=float)
         return d / np.linalg.norm(d, axis=1, keepdims=True)
 
-    def project(
-        self, points: NDArray[np.float64]
-    ) -> None:
+    def project(self, points: NDArray[np.float64]) -> None:
         return None

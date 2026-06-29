@@ -12,16 +12,33 @@ pytestmark = pytest.mark.fenicsx
 
 def _ud_tow_config(mesh_n: int = 8, radius: float = 0.4) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
-            {"name": "matrix", "type": "isotropic",
-             "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-            {"name": "yarn", "type": "transverse_isotropic",
-             "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "yarn",
+                "type": "transverse_isotropic",
+                "e_l": 140e9,
+                "e_t": 10e9,
+                "g_lt": 5e9,
+                "nu_lt": 0.28,
+                "nu_tt": 0.40,
+            },
         ],
         "field": {
-            "type": "cylinder_yarn", "matrix_material": "matrix", "yarn_material": "yarn",
-            "axis_point": [0.5, 0.5, 0.5], "axis_direction": [1.0, 0.0, 0.0],
+            "type": "cylinder_yarn",
+            "matrix_material": "matrix",
+            "yarn_material": "yarn",
+            "axis_point": [0.5, 0.5, 0.5],
+            "axis_direction": [1.0, 0.0, 0.0],
             "radius": radius,
         },
         "solver": {"backend": "dolfinx_periodic"},
@@ -42,7 +59,9 @@ def test_heterogeneity_metric_zero_on_homogeneous_field():
     problem = RVEProblem.from_config(cfg)
 
     mesh = dolfinx.mesh.create_box(
-        MPI.COMM_WORLD, [np.zeros(3), np.ones(3)], [4, 4, 4],
+        MPI.COMM_WORLD,
+        [np.zeros(3), np.ones(3)],
+        [4, 4, 4],
         cell_type=dolfinx.mesh.CellType.tetrahedron,
     )
     metric = cell_heterogeneity_metric(mesh, problem)
@@ -59,7 +78,9 @@ def test_heterogeneity_metric_flags_interface_cells_on_ud_tow():
 
     problem = RVEProblem.from_config(_ud_tow_config(mesh_n=12, radius=0.4))
     mesh = dolfinx.mesh.create_box(
-        MPI.COMM_WORLD, [np.zeros(3), np.ones(3)], [12, 12, 12],
+        MPI.COMM_WORLD,
+        [np.zeros(3), np.ones(3)],
+        [12, 12, 12],
         cell_type=dolfinx.mesh.CellType.tetrahedron,
     )
     metric = cell_heterogeneity_metric(mesh, problem)
@@ -92,10 +113,14 @@ def test_iteratively_refine_reduces_volume_weighted_heterogeneity():
 
     problem = RVEProblem.from_config(_ud_tow_config(mesh_n=8, radius=0.4))
     mesh = dolfinx.mesh.create_box(
-        MPI.COMM_WORLD, [np.zeros(3), np.ones(3)], [8, 8, 8],
+        MPI.COMM_WORLD,
+        [np.zeros(3), np.ones(3)],
+        [8, 8, 8],
         cell_type=dolfinx.mesh.CellType.tetrahedron,
     )
-    before = float((cell_heterogeneity_metric(mesh, problem) * _tet_volumes(mesh)).sum())
+    before = float(
+        (cell_heterogeneity_metric(mesh, problem) * _tet_volumes(mesh)).sum()
+    )
     refined = iteratively_refine(
         mesh, problem, threshold=0.15, max_iterations=1, dof_budget=10**9
     )
@@ -116,11 +141,64 @@ def test_amr_backend_integration_runs_end_to_end():
     result = solve(problem)
     assert result.effective_stiffness.shape == (6, 6)
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T,
+        result.effective_stiffness,
+        result.effective_stiffness.T,
         atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigs = np.linalg.eigvalsh(result.effective_stiffness)
     assert np.all(eigs > 0)
+
+
+def test_presence_floor_refines_thin_tow_metric_alone_under_flags():
+    """On a coarse mesh a thin tow scores below threshold in interface cells the
+    metric alone would skip. The geometry-aware presence floor (auto-derived
+    feature size) flags strictly more cells and grows the mesh — exercising the
+    real-mesh signal extraction (_signals_dolfinx) end to end."""
+    import dolfinx
+    from mpi4py import MPI
+    from b3_tex.amr import (
+        _signals_dolfinx,
+        cell_heterogeneity_metric,
+        flag_cells_for_refinement,
+        iteratively_refine,
+    )
+
+    cfg = _ud_tow_config(mesh_n=4, radius=0.05)  # thin tow, very coarse grid
+    problem = RVEProblem.from_config(cfg)
+    mesh = dolfinx.mesh.create_box(
+        MPI.COMM_WORLD,
+        [np.zeros(3), np.ones(3)],
+        [4, 4, 4],
+        cell_type=dolfinx.mesh.CellType.tetrahedron,
+    )
+
+    metric_only = flag_cells_for_refinement(
+        cell_heterogeneity_metric(mesh, problem), threshold=0.15
+    ).sum()
+
+    mfs = problem.field.min_feature_size()  # = 2 * radius = 0.1
+    metric, present, h_cell = _signals_dolfinx(
+        mesh,
+        problem.field,
+        default_n=1000,
+        min_feature_size=mfs,
+        max_sub_samples=32768,
+        band=0.0,
+        want_proximity=True,
+    )
+    guarded = flag_cells_for_refinement(
+        metric,
+        threshold=0.15,
+        interface_present=present,
+        h_cell=h_cell,
+        h_min=mfs / 4.0,
+    ).sum()
+    assert guarded > metric_only
+
+    refined = iteratively_refine(
+        mesh, problem, threshold=0.15, max_iterations=1, dof_budget=10**9
+    )
+    assert refined.geometry.x.shape[0] > mesh.geometry.x.shape[0]
 
 
 def test_amr_with_hex_cell_type_raises_clear_error():

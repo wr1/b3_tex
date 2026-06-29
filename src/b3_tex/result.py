@@ -49,7 +49,13 @@ class HomogenizationResult:
         g_xz = 1.0 / S[4, 4]
         g_xy = 1.0 / S[5, 5]
         return {
-            "e_x": float(e_x), "e_y": float(e_y), "e_z": float(e_z),
-            "nu_xy": float(nu_xy), "nu_xz": float(nu_xz), "nu_yz": float(nu_yz),
-            "g_yz": float(g_yz), "g_xz": float(g_xz), "g_xy": float(g_xy),
+            "e_x": float(e_x),
+            "e_y": float(e_y),
+            "e_z": float(e_z),
+            "nu_xy": float(nu_xy),
+            "nu_xz": float(nu_xz),
+            "nu_yz": float(nu_yz),
+            "g_yz": float(g_yz),
+            "g_xz": float(g_xz),
+            "g_xy": float(g_xy),
         }

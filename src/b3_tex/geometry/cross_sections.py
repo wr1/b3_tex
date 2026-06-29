@@ -19,7 +19,9 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import gamma as _gamma
 
-ParamLike = Union[float, Callable[[NDArray[np.float64]], NDArray[np.float64]], ArrayLike]
+ParamLike = Union[
+    float, Callable[[NDArray[np.float64]], NDArray[np.float64]], ArrayLike
+]
 
 
 def _resolve_param(p: ParamLike, s: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -35,6 +37,18 @@ def _resolve_param(p: ParamLike, s: NDArray[np.float64]) -> NDArray[np.float64]:
             f"expected {s.shape} (aligned with s)"
         )
     return arr
+
+
+def _min_half_extent(
+    half_width: ParamLike, half_height: ParamLike, s: NDArray[np.float64]
+) -> float:
+    """Smallest in-plane / out-of-plane semi-axis over the curve parameters ``s``.
+
+    The thinnest perpendicular semi-axis sets the feature size the mesh must
+    resolve; doubling it gives the smallest through-thickness of the tow."""
+    a = _resolve_param(half_width, s)
+    b = _resolve_param(half_height, s)
+    return float(min(np.min(a), np.min(b)))
 
 
 class CrossSection(Protocol):
@@ -75,6 +89,9 @@ class SuperellipseSection:
         b = _resolve_param(self.half_height, s)
         p = _resolve_param(self.power, s)
         return 4.0 * a * b * _gamma(1.0 + 1.0 / p) ** 2 / _gamma(1.0 + 2.0 / p)
+
+    def min_half_extent(self, s: NDArray[np.float64]) -> float:
+        return _min_half_extent(self.half_width, self.half_height, s)
 
 
 @dataclass(frozen=True)
@@ -117,6 +134,9 @@ class PowerEllipseSection:
         p = _resolve_param(self.power, s)
         return 4.0 * a * b * p / (p + 1.0)
 
+    def min_half_extent(self, s: NDArray[np.float64]) -> float:
+        return _min_half_extent(self.half_width, self.half_height, s)
+
 
 @dataclass(frozen=True)
 class LenticularSection:
@@ -139,3 +159,6 @@ class LenticularSection:
 
     def area(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
         return self._delegate().area(s)
+
+    def min_half_extent(self, s: NDArray[np.float64]) -> float:
+        return _min_half_extent(self.half_width, self.half_height, s)

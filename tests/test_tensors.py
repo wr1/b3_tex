@@ -94,9 +94,15 @@ def test_stiffness_tensor_minor_symmetries():
 
 def test_rotate_with_identity_is_no_op():
     C = orthotropic_stiffness(
-        e1=140e9, e2=10e9, e3=10e9,
-        nu12=0.28, nu13=0.28, nu23=0.40,
-        g12=5e9, g13=5e9, g23=3.6e9,
+        e1=140e9,
+        e2=10e9,
+        e3=10e9,
+        nu12=0.28,
+        nu13=0.28,
+        nu23=0.40,
+        g12=5e9,
+        g13=5e9,
+        g23=3.6e9,
     )
     C_rot = rotate_stiffness(C, np.eye(3))
     np.testing.assert_allclose(C_rot, C, atol=1e-10)
@@ -110,7 +116,9 @@ def test_rotating_isotropic_is_invariant():
 
 
 def test_rotating_transverse_iso_about_its_axis_is_invariant():
-    C = transverse_isotropic_stiffness(e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40)
+    C = transverse_isotropic_stiffness(
+        e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40
+    )
     for theta in (0.1, 0.7, 1.3, np.pi / 2):
         R = _rotation_about_axis(0, theta)
         np.testing.assert_allclose(rotate_stiffness(C, R), C, atol=1e-3, rtol=1e-6)
@@ -152,7 +160,15 @@ def test_voigt_stress_to_tensor_no_scaling():
 def test_orthotropic_rejects_negative_modulus():
     with pytest.raises(ValueError):
         orthotropic_stiffness(
-            e1=-1.0, e2=1.0, e3=1.0, nu12=0.3, nu13=0.3, nu23=0.3, g12=1.0, g13=1.0, g23=1.0
+            e1=-1.0,
+            e2=1.0,
+            e3=1.0,
+            nu12=0.3,
+            nu13=0.3,
+            nu23=0.3,
+            g12=1.0,
+            g13=1.0,
+            g23=1.0,
         )
 
 
@@ -171,7 +187,9 @@ def test_rotate_stiffness_batch_matches_loop_for_isotropic_stiffness():
 
 
 def test_rotate_stiffness_batch_matches_loop_for_transverse_isotropic():
-    c = transverse_isotropic_stiffness(e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40)
+    c = transverse_isotropic_stiffness(
+        e_l=140e9, e_t=10e9, g_lt=5e9, nu_lt=0.28, nu_tt=0.40
+    )
     rng = np.random.default_rng(0)
     R_batch = np.stack([np.linalg.qr(rng.standard_normal((3, 3)))[0] for _ in range(5)])
     for i in range(R_batch.shape[0]):
@@ -204,12 +222,12 @@ def test_voigt_b_matrix_recovers_identity_strain_for_affine_displacement():
     # 4-node linear tet with the standard reference shape function derivatives
     # at any point: dN/dxi = [-1,-1,-1; 1,0,0; 0,1,0; 0,0,1] for unit tet.
     # Use unit tet vertices in physical space so the Jacobian is identity.
-    nodes = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
-                      [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-    dshape = np.array([[-1.0, -1.0, -1.0],
-                       [1.0, 0.0, 0.0],
-                       [0.0, 1.0, 0.0],
-                       [0.0, 0.0, 1.0]])
+    nodes = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    dshape = np.array(
+        [[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
     rng = np.random.default_rng(0)
     E = rng.standard_normal((3, 3))
     E_sym = 0.5 * (E + E.T)
@@ -228,6 +246,7 @@ def test_voigt_b_matrix_recovers_identity_strain_for_affine_displacement():
 
 def test_voigt_b_matrix_rejects_wrong_shape_or_ordering():
     from b3_tex.tensors import voigt_b_matrix
+
     with pytest.raises(ValueError, match="shape"):
         voigt_b_matrix(np.zeros(3))
     with pytest.raises(ValueError, match="ordering"):

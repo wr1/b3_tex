@@ -27,14 +27,28 @@ from b3_tex.problem import RVEProblem
 CFG = {
     "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [8, 8, 8]},
     "materials": [
-        {"name": "matrix", "type": "isotropic",
-         "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-        {"name": "yarn", "type": "transverse_isotropic",
-         "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
+        {
+            "name": "yarn",
+            "type": "transverse_isotropic",
+            "e_l": 140e9,
+            "e_t": 10e9,
+            "g_lt": 5e9,
+            "nu_lt": 0.28,
+            "nu_tt": 0.40,
+        },
     ],
     "field": {
-        "type": "cylinder_yarn", "matrix_material": "matrix", "yarn_material": "yarn",
-        "axis_point": [0.5, 0.5, 0.5], "axis_direction": [1.0, 0.0, 0.0],
+        "type": "cylinder_yarn",
+        "matrix_material": "matrix",
+        "yarn_material": "yarn",
+        "axis_point": [0.5, 0.5, 0.5],
+        "axis_direction": [1.0, 0.0, 0.0],
         "radius": 0.4,
     },
     "solver": {"backend": "dolfinx_periodic"},
@@ -55,7 +69,9 @@ def _tet_volumes(mesh) -> np.ndarray:
     return np.abs(np.einsum("ij,ij->i", a, np.cross(b, c))) / 6.0
 
 
-def render_slice(mesh, metric, out_path: Path, title: str, slice_x: float = 0.5) -> None:
+def render_slice(
+    mesh, metric, out_path: Path, title: str, slice_x: float = 0.5
+) -> None:
     """Render a slice perpendicular to x at slice_x, coloured by per-cell metric."""
     import dolfinx.plot
     import pyvista
@@ -71,8 +87,13 @@ def render_slice(mesh, metric, out_path: Path, title: str, slice_x: float = 0.5)
 
     p = pyvista.Plotter(off_screen=True, window_size=(720, 720))
     p.add_mesh(
-        sliced, scalars="heterogeneity", show_edges=True, edge_color="black",
-        line_width=0.6, cmap="viridis", clim=[0.0, 0.5],
+        sliced,
+        scalars="heterogeneity",
+        show_edges=True,
+        edge_color="black",
+        line_width=0.6,
+        cmap="viridis",
+        clim=[0.0, 0.5],
         scalar_bar_args={"title": "heterogeneity score", "n_labels": 3, "fmt": "%.2f"},
     )
     p.add_title(title, font_size=10)
@@ -108,15 +129,24 @@ def main() -> None:
         n_dofs = 3 * mesh.geometry.x.shape[0]
         flagged = flag_cells_for_refinement(metric, THRESHOLD)
         n_flagged = int(flagged.sum())
-        history.append({
-            "it": it, "n_cells": n_cells, "n_dofs": n_dofs,
-            "total_heterogeneity": total_h, "n_flagged": n_flagged,
-        })
-        print(f"iter {it}: cells={n_cells:6d}  dofs={n_dofs:6d}  "
-              f"flagged={n_flagged:5d}  total_h={total_h:.4f}")
+        history.append(
+            {
+                "it": it,
+                "n_cells": n_cells,
+                "n_dofs": n_dofs,
+                "total_heterogeneity": total_h,
+                "n_flagged": n_flagged,
+            }
+        )
+        print(
+            f"iter {it}: cells={n_cells:6d}  dofs={n_dofs:6d}  "
+            f"flagged={n_flagged:5d}  total_h={total_h:.4f}"
+        )
 
         render_slice(
-            mesh, metric, OUT_DIR / f"amr_mesh_iter{it}.png",
+            mesh,
+            metric,
+            OUT_DIR / f"amr_mesh_iter{it}.png",
             f"AMR iteration {it}: {n_cells} tets, {n_flagged} flagged "
             f"(threshold={THRESHOLD})",
         )
@@ -133,10 +163,17 @@ def main() -> None:
 
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.4))
 
-    axes[0].plot(its, cells, marker="o", linestyle="-",
-                 color="#1b9e77", label="total tet cells")
-    axes[0].plot(its, flagged_n, marker="s", linestyle="--",
-                 color="#d95f02", label="flagged (heterogeneous) cells")
+    axes[0].plot(
+        its, cells, marker="o", linestyle="-", color="#1b9e77", label="total tet cells"
+    )
+    axes[0].plot(
+        its,
+        flagged_n,
+        marker="s",
+        linestyle="--",
+        color="#d95f02",
+        label="flagged (heterogeneous) cells",
+    )
     axes[0].set_xlabel("AMR iteration")
     axes[0].set_ylabel("number of cells")
     axes[0].set_title("Mesh growth and remaining heterogeneous cells")
@@ -154,7 +191,7 @@ def main() -> None:
     fig.savefig(OUT_DIR / "amr_convergence.png", dpi=180)
     plt.close(fig)
 
-    print(f"wrote amr_mesh_iter0..{len(history)-1}.png and amr_convergence.png")
+    print(f"wrote amr_mesh_iter0..{len(history) - 1}.png and amr_convergence.png")
 
 
 if __name__ == "__main__":

@@ -78,6 +78,7 @@ from b3_tex.tensors import voigt_b_matrix, voigt_strain_to_tensor
 # small helpers
 # ---------------------------------------------------------------------------
 
+
 def _grad_to_voigt_strain_batch(grad_u: NDArray[np.float64]) -> NDArray[np.float64]:
     """(N, 3, 3) grad(u) -> (N, 6) Voigt strain with engineering shear."""
     eps = 0.5 * (grad_u + np.transpose(grad_u, (0, 2, 1)))
@@ -95,14 +96,18 @@ def _grad_to_voigt_strain_batch(grad_u: NDArray[np.float64]) -> NDArray[np.float
 # mesh constructors
 # ---------------------------------------------------------------------------
 
+
 def _resolve_cell_type(problem: RVEProblem):
     import mfem.ser as mfem
+
     name = str(problem.solver.get("cell_type", "hexahedron"))
     if name == "hexahedron":
         return mfem.Element.HEXAHEDRON, name
     if name == "tetrahedron":
         return mfem.Element.TETRAHEDRON, name
-    raise ValueError(f"unknown cell_type {name!r}; expected 'hexahedron' or 'tetrahedron'")
+    raise ValueError(
+        f"unknown cell_type {name!r}; expected 'hexahedron' or 'tetrahedron'"
+    )
 
 
 def _apply_optional_refinement(mesh, problem: RVEProblem):
@@ -114,19 +119,15 @@ def _apply_optional_refinement(mesh, problem: RVEProblem):
     for _ in range(int(amr_cfg.get("n_uniform_refines", 0))):
         mesh.UniformRefinement()
     if amr_cfg.get("enabled", False):
-        from b3_tex.amr import DEFAULT_AMR_SUB_SAMPLES, iteratively_refine_mfem
-        mesh = iteratively_refine_mfem(
-            mesh, problem,
-            threshold=float(amr_cfg.get("threshold", 0.15)),
-            max_iterations=int(amr_cfg.get("max_iterations", 4)),
-            dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
-            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)),
-        )
+        from b3_tex.amr import amr_loop_kwargs, iteratively_refine_mfem
+
+        mesh = iteratively_refine_mfem(mesh, problem, **amr_loop_kwargs(amr_cfg))
     return mesh
 
 
 def _build_mesh(problem: RVEProblem):
     import mfem.ser as mfem
+
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
     mfem_cell, _ = _resolve_cell_type(problem)
@@ -164,16 +165,22 @@ def _build_cell_vertices_mfem(mesh) -> np.ndarray:
     verts = np.zeros((n_elem, n_verts, 3), dtype=float)
     for e in range(n_elem):
         el = mesh.GetElement(e)
-        vids = el.GetVerticesArray()          # modern PyMFEM API (returns array of vertex indices)
+        vids = (
+            el.GetVerticesArray()
+        )  # modern PyMFEM API (returns array of vertex indices)
         for v in range(n_verts):
             vidx = int(vids[v])
-            pos = mesh.GetVertexArray(vidx)          # returns a usable array (not raw SwigPyObject)
+            pos = mesh.GetVertexArray(
+                vidx
+            )  # returns a usable array (not raw SwigPyObject)
             verts[e, v] = [pos[0], pos[1], pos[2]]
     return verts
 
 
 def _periodic_vertex_master_map(
-    mesh, domain_size: tuple[float, float, float], tol: float = 1e-9,
+    mesh,
+    domain_size: tuple[float, float, float],
+    tol: float = 1e-9,
 ) -> NDArray[np.intp]:
     """For each mesh vertex, return the index of its periodic master.
 
@@ -211,6 +218,7 @@ def _periodic_vertex_master_map(
 # ---------------------------------------------------------------------------
 # batched pre-pass: collect every element's GP data in one walk
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class _ElementGPData:
@@ -275,7 +283,9 @@ def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
             raise NotImplementedError(
                 "mfem_backend assumes uniform element type across the mesh"
             )
-        elem_vdofs[e] = np.asarray(fespace.GetElementVDofs(e), dtype=np.intp).reshape(3, nd)
+        elem_vdofs[e] = np.asarray(fespace.GetElementVDofs(e), dtype=np.intp).reshape(
+            3, nd
+        )
         for q in range(nq):
             ip = ir.IntPoint(q)
             T.SetIntPoint(ip)
@@ -288,18 +298,26 @@ def _collect_element_gp_data(mesh, fespace) -> _ElementGPData:
             gp_weights[idx] = ip.weight * T.Weight()
 
     return _ElementGPData(
-        gp_coords=gp_coords, gp_dshapes=gp_dshapes, gp_weights=gp_weights,
-        elem_vdofs=elem_vdofs, n_elem=n_elem, nq=nq, nd=nd, dim=dim,
+        gp_coords=gp_coords,
+        gp_dshapes=gp_dshapes,
+        gp_weights=gp_weights,
+        elem_vdofs=elem_vdofs,
+        n_elem=n_elem,
+        nq=nq,
+        nd=nd,
+        dim=dim,
     )
 
 
-def _collect_u_gradient_at_gps(u_array: NDArray[np.float64], data: _ElementGPData) -> NDArray[np.float64]:
+def _collect_u_gradient_at_gps(
+    u_array: NDArray[np.float64], data: _ElementGPData
+) -> NDArray[np.float64]:
     """grad(u) at every GP, vectorised via the cached per-element vdofs and
     physical-space dshapes. Returns (n_elem * nq, 3, 3) in the same order
     as ``data.gp_coords``."""
-    u_elem = u_array[data.elem_vdofs]                         # (n_elem, 3, nd)
+    u_elem = u_array[data.elem_vdofs]  # (n_elem, 3, nd)
     dsh = data.gp_dshapes.reshape(data.n_elem, data.nq, data.nd, 3)
-    grad = np.einsum("ein,eqnj->eqij", u_elem, dsh)           # (n_elem, nq, 3, 3)
+    grad = np.einsum("ein,eqnj->eqij", u_elem, dsh)  # (n_elem, nq, 3, 3)
     return grad.reshape(data.n_elem * data.nq, 3, 3)
 
 
@@ -307,8 +325,10 @@ def _collect_u_gradient_at_gps(u_array: NDArray[np.float64], data: _ElementGPDat
 # pre-computed integrators (read from numpy arrays via T.ElementNo)
 # ---------------------------------------------------------------------------
 
+
 def _make_precomputed_integrator(
-    c_per_gp: NDArray[np.float64], data: _ElementGPData,
+    c_per_gp: NDArray[np.float64],
+    data: _ElementGPData,
 ):
     """PyBilinearFormIntegrator that reads pre-computed C(x_q), dshape,
     and weights via T.ElementNo. No global_stiffness_at_points calls
@@ -340,7 +360,8 @@ def _make_precomputed_integrator(
 
 
 def _make_precomputed_rhs_integrator(
-    sigma_macro_per_gp: NDArray[np.float64], data: _ElementGPData,
+    sigma_macro_per_gp: NDArray[np.float64],
+    data: _ElementGPData,
 ):
     """PyLinearFormIntegrator that reads pre-computed macro stress
     sigma_macro = C @ E_voigt at every GP and assembles the periodic RHS."""
@@ -373,6 +394,7 @@ def _make_precomputed_rhs_integrator(
 # batched stress recovery (one pass through mesh + numpy einsum)
 # ---------------------------------------------------------------------------
 
+
 def _volume_averaged_stress(
     c_per_gp: NDArray[np.float64],
     grad_u_per_gp: NDArray[np.float64],
@@ -392,6 +414,7 @@ def _volume_averaged_stress(
 # ---------------------------------------------------------------------------
 # public solvers
 # ---------------------------------------------------------------------------
+
 
 def solve(problem: RVEProblem) -> HomogenizationResult:
     """KUBC: u = E @ x on the boundary."""
@@ -466,7 +489,9 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         a.RecoverFEMSolution(X, b, u)
 
         grad_u = _collect_u_gradient_at_gps(np.asarray(u.GetDataArray()), data)
-        loadcase_stresses[:, k] = _volume_averaged_stress(c_per_gp, grad_u, data.gp_weights)
+        loadcase_stresses[:, k] = _volume_averaged_stress(
+            c_per_gp, grad_u, data.gp_weights
+        )
 
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 
@@ -573,8 +598,7 @@ class MfemPeriodicSession:
         for d in range(3):
             add_row(P_NC.getrow(0 + d * n_scalar_L))
 
-        C = sp.coo_matrix((vals, (rows, cols)),
-                          shape=(n_constraints, n_T)).tocsr()
+        C = sp.coo_matrix((vals, (rows, cols)), shape=(n_constraints, n_T)).tocsr()
         Z = sp.csr_matrix((n_constraints, n_constraints))
         A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
 
@@ -634,27 +658,26 @@ class MfemPeriodicSession:
 
         sigma_macro = np.einsum("nij,j->ni", c_per_gp, E_voigt)
         b_lf = mfem.LinearForm(self.fespace)
-        b_lf.AddDomainIntegrator(
-            _make_precomputed_rhs_integrator(sigma_macro, data)
-        )
+        b_lf.AddDomainIntegrator(_make_precomputed_rhs_integrator(sigma_macro, data))
         b_lf.Assemble()
         b_L = np.asarray(b_lf.GetDataArray()).copy()
         b_T = P_NC.T @ b_L
         b_aug = np.concatenate([b_T, np.zeros(self._n_constraints)])
         sol = self._lu.solve(b_aug)
-        u_L = P_NC @ sol[:self._n_T]
+        u_L = P_NC @ sol[: self._n_T]
 
         grad_u = _collect_u_gradient_at_gps(u_L, data)
         eps_per_gp = _grad_to_voigt_strain_batch(grad_u) + E_voigt[None, :]
         sigma_per_gp = np.einsum("nij,nj->ni", c_per_gp, eps_per_gp)
 
         # Vertex displacements (byNODES: u[v + d*Ns] is component d at vertex v).
-        u_at_vertices = np.column_stack([
-            u_L[d * n_scalar_L: d * n_scalar_L + nv] for d in range(3)
-        ])
+        u_at_vertices = np.column_stack(
+            [u_L[d * n_scalar_L : d * n_scalar_L + nv] for d in range(3)]
+        )
 
-        macro_stress = (data.gp_weights[:, None] * sigma_per_gp
-                        ).sum(axis=0) / data.gp_weights.sum()
+        macro_stress = (data.gp_weights[:, None] * sigma_per_gp).sum(
+            axis=0
+        ) / data.gp_weights.sum()
 
         return LoadcaseSolveResult(
             u_at_vertices=u_at_vertices,
@@ -690,11 +713,11 @@ def mfem_mesh_to_pyvista_grid(mesh):
         if n == 8:
             cells_list.append(8)
             cells_list.extend(int(v) for v in verts)
-            cell_types.append(12)        # VTK_HEXAHEDRON
+            cell_types.append(12)  # VTK_HEXAHEDRON
         elif n == 4:
             cells_list.append(4)
             cells_list.extend(int(v) for v in verts)
-            cell_types.append(10)        # VTK_TETRA
+            cell_types.append(10)  # VTK_TETRA
         else:
             raise NotImplementedError(f"unsupported cell with {n} vertices")
     return pyvista.UnstructuredGrid(
@@ -710,9 +733,9 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
     loadcase_strains = np.eye(6)
     loadcase_stresses = np.zeros((6, 6))
     for k in range(6):
-        loadcase_stresses[:, k] = (
-            session.solve_macro_strain(loadcase_strains[k]).macro_stress
-        )
+        loadcase_stresses[:, k] = session.solve_macro_strain(
+            loadcase_strains[k]
+        ).macro_stress
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 
     return HomogenizationResult(

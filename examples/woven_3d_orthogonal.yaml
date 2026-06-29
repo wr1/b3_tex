@@ -3,8 +3,10 @@
 # Stacked straight warp + weft layers locked by through-thickness binder warps.
 
 domain:
-  size: [0.0228, 0.0112, 0.0014]      # n_warp*warp_spacing x n_weft*weft_spacing x thickness
-  mesh_resolution: [48, 24, 14]
+  size: [0.0112, 0.0228, 0.0014]      # x = n_weft*weft_spacing (wefts run in y,
+                                      # tiled across x); y = n_warp*warp_spacing
+                                      # (warps run in x, tiled across y); z = thickness
+  mesh_resolution: [24, 48, 14]
 
 periodic_tolerance: 1.0e-8
 
@@ -18,7 +20,7 @@ field:
   type: orthogonal
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [0.0228, 0.0112, 0.0014]
+  domain_size: [0.0112, 0.0228, 0.0014]
   n_warp: 6
   n_weft: 4
   warp_layers: 2

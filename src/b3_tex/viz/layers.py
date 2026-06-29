@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from b3_tex.viz.sampling import sample_volume, vf_clim
+from b3_tex.viz.sampling import sample_volume, tow_ids, vf_clim
 from b3_tex.viz.theme import DEFAULT_THEME, Theme, classify_family
 
 
@@ -117,16 +117,42 @@ def add_tow_isosurface(
     clim: tuple[float, float] | None = None,
     opacity: float = 1.0,
     scalar_bar: bool = True,
+    color_by: str = "vf",
 ):
-    """Level-set isosurface of the sampled implicit indicator, coloured by local Vf.
+    """Level-set isosurface of the sampled implicit indicator (marching cubes).
 
     ``image.contour([level], scalars="phi")`` is a *rendering of the field's level
-    set* (marching cubes on the voxel grid) — not constructed tow geometry. Vf is
-    re-probed on the surface so the boundary colours faithfully.
+    set* — not constructed tow geometry. ``color_by`` selects the surface scalar:
+
+    * ``"vf"`` (default) — local fibre volume fraction, re-probed on the surface so
+      the boundary colours faithfully (the original behaviour).
+    * ``"tow"`` — each individual yarn a distinct colour (``tow_ids`` re-probed on
+      the surface, cycled through ``theme.tow_palette``). Makes the discrete tows of
+      a complex 3D textile legible where the near-constant Vf would be uniform.
     """
-    clim = clim or vf_clim(problem)
     vs = sample_volume(problem, res=res)
     surf = vs.to_image_data().contour([level], scalars="phi")
+
+    if color_by == "tow":
+        palette = theme.tow_cmap()
+        # Tow id per *cell* (sampled at triangle centroids) so each face is a flat
+        # single colour — point data would interpolate ids across tow boundaries and
+        # smear the categorical palette into rainbow bands.
+        centers = surf.cell_centers().points if surf.n_cells else np.empty((0, 3))
+        ids = tow_ids(problem.field, centers)
+        surf.cell_data["tow"] = np.where(ids >= 0, ids % len(palette), 0).astype(float)
+        return plotter.add_mesh(
+            surf,
+            scalars="tow",
+            cmap=palette,
+            n_colors=len(palette),
+            clim=(0, len(palette) - 1),
+            opacity=opacity,
+            smooth_shading=True,
+            show_scalar_bar=False,
+        )
+
+    clim = clim or vf_clim(problem)
     sampler = getattr(problem.field, "sample_local_vf", None)
     if sampler is not None and surf.n_points:
         vf = np.asarray(sampler(surf.points), dtype=float)
@@ -198,7 +224,9 @@ def add_amr(
     from b3_tex.viz.mesh_bridge import to_pyvista_grid
 
     if mesh is None:
-        mesh, metric = build_amr_mesh(problem, base=base, iters=iters, threshold=threshold)
+        mesh, metric = build_amr_mesh(
+            problem, base=base, iters=iters, threshold=threshold
+        )
     grid = to_pyvista_grid(mesh, metric=metric)
     if clip is not None:
         grid = grid.clip(normal=clip, crinkle=True)
@@ -246,7 +274,10 @@ def add_cut_planes(
             continue
         actors.append(
             plotter.add_mesh(
-                sl, scalars="local_vf", cmap=theme.cmap_vf, clim=clim,
+                sl,
+                scalars="local_vf",
+                cmap=theme.cmap_vf,
+                clim=clim,
                 show_scalar_bar=False,
             )
         )
@@ -298,11 +329,11 @@ def add_sample_cloud(
     sample_pts, gp_pts, seg = [], [], []
     for v in crossing:
         mn, mx = v.min(0), v.max(0)
-        phys = mn + ref_pts * (mx - mn)        # (M, 3)
-        gp = v.mean(0)                          # GP proxy (cell centroid)
+        phys = mn + ref_pts * (mx - mn)  # (M, 3)
+        gp = v.mean(0)  # GP proxy (cell centroid)
         sample_pts.append(phys)
         gp_pts.append(gp)
-        for p in phys:                          # IDW links GP -> each sample
+        for p in phys:  # IDW links GP -> each sample
             seg.append(gp)
             seg.append(p)
 
@@ -310,7 +341,11 @@ def add_sample_cloud(
     gp_pts = np.asarray(gp_pts)
     sampler = getattr(problem.field, "sample_local_vf", None)
     vf = (
-        np.where(np.isfinite(s := np.asarray(sampler(sample_pts), float)), s, vf_clim(problem)[0])
+        np.where(
+            np.isfinite(s := np.asarray(sampler(sample_pts), float)),
+            s,
+            vf_clim(problem)[0],
+        )
         if sampler is not None
         else np.zeros(len(sample_pts))
     )
@@ -318,20 +353,35 @@ def add_sample_cloud(
     spacing = (mx - mn).min()
     sph = pv.PolyData(sample_pts)
     sph["local_vf"] = vf
-    actors = [plotter.add_mesh(
-        sph.glyph(geom=pv.Sphere(radius=0.06 * spacing), scale=False, orient=False),
-        scalars="local_vf", cmap=theme.cmap_vf, clim=vf_clim(problem),
-        show_scalar_bar=False,
-    )]
-    actors.append(plotter.add_mesh(
-        pv.PolyData(gp_pts).glyph(geom=pv.Sphere(radius=0.14 * spacing), scale=False, orient=False),
-        color=theme.fibre_color, show_scalar_bar=False,
-    ))
+    actors = [
+        plotter.add_mesh(
+            sph.glyph(geom=pv.Sphere(radius=0.06 * spacing), scale=False, orient=False),
+            scalars="local_vf",
+            cmap=theme.cmap_vf,
+            clim=vf_clim(problem),
+            show_scalar_bar=False,
+        )
+    ]
+    actors.append(
+        plotter.add_mesh(
+            pv.PolyData(gp_pts).glyph(
+                geom=pv.Sphere(radius=0.14 * spacing), scale=False, orient=False
+            ),
+            color=theme.fibre_color,
+            show_scalar_bar=False,
+        )
+    )
     if seg:
         seg = np.asarray(seg)
         lines = pv.PolyData(seg)
         lines.lines = np.column_stack(
-            [np.full(len(seg) // 2, 2), np.arange(0, len(seg), 2), np.arange(1, len(seg), 2)]
+            [
+                np.full(len(seg) // 2, 2),
+                np.arange(0, len(seg), 2),
+                np.arange(1, len(seg), 2),
+            ]
         ).ravel()
-        actors.append(plotter.add_mesh(lines, color="#888888", line_width=0.6, opacity=0.5))
+        actors.append(
+            plotter.add_mesh(lines, color="#888888", line_width=0.6, opacity=0.5)
+        )
     return actors

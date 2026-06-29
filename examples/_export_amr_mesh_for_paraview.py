@@ -41,19 +41,36 @@ OUT_DIR = Path(__file__).resolve().parent.parent / "results"
 CFG = {
     "domain": {"size": [1.0, 1.0, 0.16], "mesh_resolution": [10, 10, 3]},
     "materials": [
-        {"name": "matrix", "type": "isotropic",
-         "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-        {"name": "fibre", "type": "transverse_isotropic",
-         "e_l": 70.0e9, "e_t": 15.0e9, "g_lt": 24.0e9,
-         "nu_lt": 0.20, "nu_tt": 0.30},
-        {"name": "yarn", "type": "chamis",
-         "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.70},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
+        {
+            "name": "fibre",
+            "type": "transverse_isotropic",
+            "e_l": 70.0e9,
+            "e_t": 15.0e9,
+            "g_lt": 24.0e9,
+            "nu_lt": 0.20,
+            "nu_tt": 0.30,
+        },
+        {
+            "name": "yarn",
+            "type": "chamis",
+            "matrix": "matrix",
+            "fibre": "fibre",
+            "fibre_volume_fraction": 0.70,
+        },
     ],
     "field": {
         "type": "plain_weave",
-        "matrix_material": "matrix", "yarn_material": "yarn",
+        "matrix_material": "matrix",
+        "yarn_material": "yarn",
         "domain_size": [1.0, 1.0, 0.16],
-        "n_warp": 2, "n_weft": 2,
+        "n_warp": 2,
+        "n_weft": 2,
         "yarn_half_width": 0.245,
         "yarn_half_height": 0.038,
         "amplitude": 0.040,
@@ -109,8 +126,10 @@ def main():
         grid.cell_data["material_majority"] = material_majority_per_cell(mesh, problem)
         path = OUT_DIR / f"mfem_weave_amr_mesh_iter{it}.vtk"
         grid.save(str(path))
-        print(f"  iter {it}: cells={mesh.GetNE():>5}  vertices={mesh.GetNV():>5}  "
-              f"max heterogeneity={metric.max():.3f}  ->  {path.name}")
+        print(
+            f"  iter {it}: cells={mesh.GetNE():>5}  vertices={mesh.GetNV():>5}  "
+            f"max heterogeneity={metric.max():.3f}  ->  {path.name}"
+        )
         written.append(path)
         flagged = flag_cells_for_refinement(metric, THRESHOLD)
         if not flagged.any():
@@ -127,16 +146,22 @@ def main():
     grid = mfem_mesh_to_pyvista_grid(session.mesh)
     metric_final = cell_heterogeneity_metric_mfem(session.mesh, problem)
     grid.cell_data["heterogeneity"] = metric_final.astype(float)
-    grid.cell_data["material_majority"] = material_majority_per_cell(session.mesh, problem)
+    grid.cell_data["material_majority"] = material_majority_per_cell(
+        session.mesh, problem
+    )
     attach_homogenization_fields(session, grid, strain_amp=STRAIN_AMP)
     path = OUT_DIR / f"mfem_weave_amr_mesh_iter{N_ITERS}.vtk"
     grid.save(str(path))
-    print(f"  iter {N_ITERS}: cells={session.mesh.GetNE():>5}  "
-          f"vertices={session.n_vertices:>5}  ->  {path.name}")
+    print(
+        f"  iter {N_ITERS}: cells={session.mesh.GetNE():>5}  "
+        f"vertices={session.n_vertices:>5}  ->  {path.name}"
+    )
     written.append(path)
 
     print()
-    print("AMR marker is stiffness-only: frac_majority_disagree + 0.5 * rotation_spread.")
+    print(
+        "AMR marker is stiffness-only: frac_majority_disagree + 0.5 * rotation_spread."
+    )
     print("Loadcase fields come from b3_tex.postprocess (shared with solve_periodic).")
     print()
     print("open all in paraview:")

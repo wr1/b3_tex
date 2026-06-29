@@ -69,19 +69,48 @@ def _phi_min_ellipse(field, pts: NDArray[np.float64], inside: NDArray[np.bool_])
     return np.where(inside, 0.0, 2.0).astype(float)
 
 
+def tow_ids(field, points: NDArray[np.float64]) -> NDArray[np.intp]:
+    """Owning yarn index per point, ``-1`` where outside every tow.
+
+    For each point the winning yarn is the one with the smallest
+    ``ellipse_value`` (``<= 1`` inside), matching the union level set built by
+    :func:`_phi_min_ellipse`. Used to colour a smooth isosurface per individual
+    tow. Returns all ``-1`` if the field exposes no yarns with ``ellipse_value``
+    (e.g. straight cylindrical yarns) — the caller can then fall back to a single
+    colour.
+    """
+    pts = np.asarray(points, dtype=float)
+    yarns = getattr(field, "yarns", None)
+    n = pts.shape[0]
+    if not yarns:
+        return np.full(n, -1, dtype=np.intp)
+    best_phi = np.full(n, np.inf)
+    best_id = np.full(n, -1, dtype=np.intp)
+    for k, yarn in enumerate(yarns):
+        ev = getattr(yarn, "ellipse_value", None)
+        if ev is None:
+            return np.full(n, -1, dtype=np.intp)
+        phi = np.asarray(ev(pts), dtype=float)
+        win = phi < best_phi
+        best_phi[win] = phi[win]
+        best_id[win] = k
+    best_id[best_phi > 1.0] = -1  # outside every tow
+    return best_id
+
+
 @dataclass(frozen=True)
 class VolumeSample:
     """Implicit fields sampled on a regular grid (pyvista-ImageData layout)."""
 
-    origin: NDArray[np.float64]      # (3,)
-    spacing: NDArray[np.float64]     # (3,)
-    dims: tuple[int, int, int]       # points per axis
-    material_id: NDArray[np.intp]    # (N,) index into field.material_names()
-    inside: NDArray[np.bool_]        # (N,) point is inside a tow
-    local_vf: NDArray[np.float64]    # (N,) fibre Vf, nan outside tows
-    phi: NDArray[np.float64]         # (N,) continuous implicit indicator (<=1 inside)
-    fibre_dir: NDArray[np.float64]   # (N, 3) fibre direction (rotation column 0)
-    family: NDArray[np.intp]         # (N,) yarn family (OTHER outside)
+    origin: NDArray[np.float64]  # (3,)
+    spacing: NDArray[np.float64]  # (3,)
+    dims: tuple[int, int, int]  # points per axis
+    material_id: NDArray[np.intp]  # (N,) index into field.material_names()
+    inside: NDArray[np.bool_]  # (N,) point is inside a tow
+    local_vf: NDArray[np.float64]  # (N,) fibre Vf, nan outside tows
+    phi: NDArray[np.float64]  # (N,) continuous implicit indicator (<=1 inside)
+    fibre_dir: NDArray[np.float64]  # (N, 3) fibre direction (rotation column 0)
+    family: NDArray[np.intp]  # (N,) yarn family (OTHER outside)
 
     @property
     def n_points(self) -> int:
@@ -168,16 +197,16 @@ _PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
 class PlaneSample:
     """Implicit fields sampled on an axis-aligned cut plane (2D grids)."""
 
-    axis: int                        # plane-normal axis (0=x,1=y,2=z)
-    pos: float                       # plane position along ``axis``
-    a_ax: int                        # in-plane horizontal axis index
-    b_ax: int                        # in-plane vertical axis index
-    a: NDArray[np.float64]           # (na,) horizontal coords
-    b: NDArray[np.float64]           # (nb,) vertical coords
-    inside: NDArray[np.bool_]        # (nb, na)
-    local_vf: NDArray[np.float64]    # (nb, na) nan outside tows
-    e1a: NDArray[np.float64]         # (nb, na) in-plane fibre comp (a), nan outside
-    e1b: NDArray[np.float64]         # (nb, na) in-plane fibre comp (b), nan outside
+    axis: int  # plane-normal axis (0=x,1=y,2=z)
+    pos: float  # plane position along ``axis``
+    a_ax: int  # in-plane horizontal axis index
+    b_ax: int  # in-plane vertical axis index
+    a: NDArray[np.float64]  # (na,) horizontal coords
+    b: NDArray[np.float64]  # (nb,) vertical coords
+    inside: NDArray[np.bool_]  # (nb, na)
+    local_vf: NDArray[np.float64]  # (nb, na) nan outside tows
+    e1a: NDArray[np.float64]  # (nb, na) in-plane fibre comp (a), nan outside
+    e1b: NDArray[np.float64]  # (nb, na) in-plane fibre comp (b), nan outside
 
 
 def sample_plane(
@@ -219,12 +248,22 @@ def sample_plane(
     e1a = np.where(inside, e1a, np.nan)
     e1b = np.where(inside, e1b, np.nan)
     return PlaneSample(
-        axis=axis, pos=float(pos), a_ax=a_ax, b_ax=b_ax,
-        a=a, b=b, inside=inside, local_vf=vf, e1a=e1a, e1b=e1b,
+        axis=axis,
+        pos=float(pos),
+        a_ax=a_ax,
+        b_ax=b_ax,
+        a=a,
+        b=b,
+        inside=inside,
+        local_vf=vf,
+        e1a=e1a,
+        e1b=e1b,
     )
 
 
-def vf_clim(problem: RVEProblem, *, n: int = 40_000, seed: int = 0) -> tuple[float, float]:
+def vf_clim(
+    problem: RVEProblem, *, n: int = 40_000, seed: int = 0
+) -> tuple[float, float]:
     """Shared Vf colour limits (floor/ceil to 0.01) from a Monte-Carlo in-tow sample.
 
     Mirrors the recipe in ``datasheet.render_midplane_field`` so every panel and

@@ -76,7 +76,9 @@ class ParametricYarn:
         # with finite-difference derivatives of the centerline.
         for _ in range(_NEWTON_ITERS):
             c = self.centerline.position(s)
-            cp = (self.centerline.position(s + h) - self.centerline.position(s - h)) / (2 * h)
+            cp = (self.centerline.position(s + h) - self.centerline.position(s - h)) / (
+                2 * h
+            )
             cpp = (
                 self.centerline.position(s + h)
                 - 2 * c
@@ -110,6 +112,10 @@ class ParametricYarn:
     def rotation_at(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
         s, _ = self.project(points)
         return orthonormal_frame_along_batch(self.centerline.tangent(s))
+
+    def min_half_extent(self) -> float:
+        """Smallest perpendicular semi-axis along the path (feature half-size)."""
+        return float(self.section.min_half_extent(self._s_grid()))
 
     def local_vf(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
         """Local fibre volume fraction at each point (fibre-area conservation)."""

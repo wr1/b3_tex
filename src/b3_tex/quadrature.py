@@ -17,8 +17,9 @@ from b3_tex.tensors import rotate_stiffness_batch, rotate_stiffness_batch_varyin
 if TYPE_CHECKING:
     from b3_tex.problem import RVEProblem
 
-# Number of Vf bins for the per-material micromechanics lookup table. The cost of
-# evaluating the micromodel is O(LUT_BINS), independent of the number of points.
+# Number of Vf bins for the per-material micromechanics lookup table. The
+# micromodel runs once per material (O(LUT_BINS) batch call, then cached on the
+# material and in b3_micromech FEA/surrogate LUT caches).
 LUT_BINS: int = 256
 
 
@@ -66,20 +67,17 @@ def quadrature_point_coords(mesh: Any, degree: int) -> NDArray[np.float64]:
     return x_func.x.array.reshape(-1, 3)
 
 
-def _stiffness_from_lut(
-    material: Any, vf: NDArray[np.float64]
-) -> NDArray[np.float64]:
+def _stiffness_from_lut(material: Any, vf: NDArray[np.float64]) -> NDArray[np.float64]:
     """Per-point ``(M, 6, 6)`` stiffness for a micromechanical material via a
-    bin-quantised Vf lookup table (so the micromodel runs ``O(LUT_BINS)`` times)."""
-    lo = float(np.min(vf))
-    hi = float(np.max(vf))
-    _centers, table = material.build_lut(lo, hi, n_bins=LUT_BINS)
-    if hi - lo < 1e-12:
+    bin-quantised Vf lookup table anchored at ``[nominal_vf, max_vf]``."""
+    lo = float(material.nominal_vf)
+    hi = float(material.max_vf)
+    _centers, table = material.build_lut(n_bins=LUT_BINS)
+    span = hi - lo
+    if span < 1e-12:
         idx = np.zeros(vf.shape[0], dtype=np.intp)
     else:
-        idx = np.clip(
-            ((vf - lo) / (hi - lo) * LUT_BINS).astype(np.intp), 0, LUT_BINS - 1
-        )
+        idx = np.clip(((vf - lo) / span * LUT_BINS).astype(np.intp), 0, LUT_BINS - 1)
     return table[idx]
 
 
@@ -112,9 +110,7 @@ def global_stiffness_at_points(
             if local_vf is None:
                 local_vf = np.asarray(vf_sampler(points), dtype=float)
             vf_masked = local_vf[mask]
-            vf_masked = np.where(
-                np.isfinite(vf_masked), vf_masked, material.nominal_vf
-            )
+            vf_masked = np.where(np.isfinite(vf_masked), vf_masked, material.nominal_vf)
             c_pts = _stiffness_from_lut(material, vf_masked)
             out[mask] = rotate_stiffness_batch_varying(c_pts, rotations[mask])
         else:
@@ -137,6 +133,7 @@ def populate_stiffness_at_quadrature_points(
 # ---------------------------------------------------------------------------
 # Generalized, fully tensorized material sampling across all cells
 # ---------------------------------------------------------------------------
+
 
 def _resolve_material_sampling_spec(solver: dict[str, Any]) -> dict[str, Any]:
     """Parse solver config into a clean sampling spec.
@@ -162,7 +159,9 @@ def _resolve_material_sampling_spec(solver: dict[str, Any]) -> dict[str, Any]:
     return {"strategy": "local_cloud", "resolution": 3, "idw_power": 2.0}
 
 
-def _unit_material_grid(resolution: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+def _unit_material_grid(
+    resolution: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Regular grid in the unit cube [0, 1]^3 together with equal sub-volume weights.
 
     Returns (points: (M, 3), weights: (M,)) with M = resolution**3.
@@ -174,14 +173,14 @@ def _unit_material_grid(resolution: int) -> tuple[NDArray[np.float64], NDArray[n
     ax = (np.arange(resolution) + 0.5) / resolution
     g = np.stack(np.meshgrid(ax, ax, ax, indexing="ij"), axis=-1)  # (res,res,res,3)
     pts = g.reshape(-1, 3)
-    w = np.full(pts.shape[0], 1.0 / float(resolution ** 3), dtype=float)
+    w = np.full(pts.shape[0], 1.0 / float(resolution**3), dtype=float)
     return pts, w
 
 
 def _idw_per_cell(
     gp_coords: NDArray[np.float64],
     gp_cell_ids: NDArray[np.intp],
-    phys_material: NDArray[np.float64],        # (n_cells, M, 3)
+    phys_material: NDArray[np.float64],  # (n_cells, M, 3)
     C_per_cell_material: NDArray[np.float64],  # (n_cells, M, 6, 6)
     power: float = 2.0,
 ) -> NDArray[np.float64]:
@@ -201,7 +200,7 @@ def _idw_per_cell(
     for c in range(n_cells):
         diff = gp_by_cell[c, :, None, :] - phys_material[c, None, :, :]
         dist = np.maximum(np.linalg.norm(diff, axis=-1), 1e-12)  # (nq, M)
-        w = 1.0 / (dist ** power)
+        w = 1.0 / (dist**power)
         w /= w.sum(axis=1, keepdims=True)
         out[c] = np.einsum("qm,mij->qij", w, C_per_cell_material[c])
     return out.reshape(n_gps, 6, 6)
@@ -211,7 +210,7 @@ def effective_stiffnesses_for_gauss_points(
     problem: "RVEProblem",
     gp_coords: NDArray[np.float64],
     gp_cell_ids: NDArray[np.intp],
-    cell_vertices: NDArray[np.float64],   # (n_cells, n_verts, 3)
+    cell_vertices: NDArray[np.float64],  # (n_cells, n_verts, 3)
     spec: dict[str, Any] | None = None,
 ) -> NDArray[np.float64]:
     """(N_gps, 6, 6) effective stiffness per GP. Strategy is one of:
@@ -244,5 +243,3 @@ def effective_stiffnesses_for_gauss_points(
     return _idw_per_cell(
         gp_coords, gp_cell_ids, phys_material, C_per_cell_material, power=idw_power
     )
-
-

@@ -75,23 +75,32 @@ def local_vf_range(problem: RVEProblem, n: int = 120_000):
 def engineering_constants(c_eff: np.ndarray) -> dict[str, float]:
     s = np.linalg.inv(c_eff)
     return {
-        "E_x": 1.0 / s[0, 0], "E_y": 1.0 / s[1, 1], "E_z": 1.0 / s[2, 2],
-        "G_yz": 1.0 / s[3, 3], "G_xz": 1.0 / s[4, 4], "G_xy": 1.0 / s[5, 5],
-        "nu_xy": -s[0, 1] / s[0, 0], "nu_xz": -s[0, 2] / s[0, 0],
+        "E_x": 1.0 / s[0, 0],
+        "E_y": 1.0 / s[1, 1],
+        "E_z": 1.0 / s[2, 2],
+        "G_yz": 1.0 / s[3, 3],
+        "G_xz": 1.0 / s[4, 4],
+        "G_xy": 1.0 / s[5, 5],
+        "nu_xy": -s[0, 1] / s[0, 0],
+        "nu_xz": -s[0, 2] / s[0, 0],
     }
 
 
 def _load_solver(backend: str):
     if "mfem" in backend and "kubc" not in backend:
         from b3_tex.backends.mfem_backend import solve_periodic
+
         return solve_periodic
     if "mfem" in backend:
         from b3_tex.backends.mfem_backend import solve
+
         return solve
     if "dolfinx" in backend and "kubc" not in backend:
         from b3_tex.backends.dolfinx_periodic_backend import solve
+
         return solve
     from b3_tex.backends.dolfinx_backend import solve
+
     return solve
 
 
@@ -103,8 +112,10 @@ def try_solve(problem: RVEProblem, backend: str):
             solve = _load_solver(candidate)
             result = solve(problem)
             if candidate != backend:
-                print(f"    (configured backend {backend!r} unavailable; "
-                      f"used {candidate!r})")
+                print(
+                    f"    (configured backend {backend!r} unavailable; "
+                    f"used {candidate!r})"
+                )
             return result
         except Exception as exc:  # backends are optional at runtime
             print(f"    [skip {candidate}] {type(exc).__name__}: {exc}")
@@ -122,8 +133,10 @@ def main() -> None:
         lvf = local_vf_range(problem)
         print(f"  yarn volume fraction      : {vf:.3f}")
         if lvf is not None:
-            print(f"  in-tow local Vf (min/mean/max): "
-                  f"{lvf['min']:.3f} / {lvf['mean']:.3f} / {lvf['max']:.3f}")
+            print(
+                f"  in-tow local Vf (min/mean/max): "
+                f"{lvf['min']:.3f} / {lvf['mean']:.3f} / {lvf['max']:.3f}"
+            )
         entry = {"yarn_vf": vf, "local_vf": lvf, "config": fname}
 
         backend = problem.solver.get("backend", "mfem-periodic")

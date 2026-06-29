@@ -27,6 +27,5 @@ def global_stiffness_at_cell_centroids(
 def voigt_strain_ufl(u, ufl_module):
     eps = ufl_module.sym(ufl_module.grad(u))
     return ufl_module.as_vector(
-        [eps[0, 0], eps[1, 1], eps[2, 2],
-         2 * eps[1, 2], 2 * eps[0, 2], 2 * eps[0, 1]]
+        [eps[0, 0], eps[1, 1], eps[2, 2], 2 * eps[1, 2], 2 * eps[0, 2], 2 * eps[0, 1]]
     )

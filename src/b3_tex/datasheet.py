@@ -31,9 +31,9 @@ class DatasheetSpec:
     rve_rows: list[tuple[str, str]]
     micro_rows: list[tuple[str, str]]
     analysis_rows: list[tuple[str, str]]
-    yarn_vf: float | None = None        # vf_b: bundle volume / RVE volume
+    yarn_vf: float | None = None  # vf_b: bundle volume / RVE volume
     local_vf: dict[str, float] | None = None  # vf_local: fibre Vf inside the tow
-    vf_avg: float | None = None         # vf_avg: overall RVE fibre Vf = vf_b * mean(vf_local)
+    vf_avg: float | None = None  # vf_avg: overall RVE fibre Vf = vf_b * mean(vf_local)
     engineering_constants: dict[str, float] | None = None
     c_eff_gpa: NDArray[np.float64] | None = None
     mesh_n_cells: int | None = None
@@ -66,12 +66,13 @@ def _render_table(
     head_pt = "7.5pt" if compact else "9pt"
     inset = "1.5pt" if compact else "4pt"
     cells = ", ".join(
-        f'[#text(size: {cell_pt})[{_typst_escape(c)}]]'
-        for a, b in rows for c in (a, b)
+        f"[#text(size: {cell_pt})[{_typst_escape(c)}]]" for a, b in rows for c in (a, b)
     )
-    cols_spec = "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
+    cols_spec = (
+        "(auto, 1fr)" if n_cols == 2 else "(" + ", ".join(["auto"] * n_cols) + ")"
+    )
     return (
-        f"#text(weight: \"bold\", size: {head_pt})[{header}]\n"
+        f'#text(weight: "bold", size: {head_pt})[{header}]\n'
         "#table(\n"
         f"  columns: {cols_spec},\n"
         f"  inset: {inset},\n"
@@ -139,15 +140,26 @@ def _field_geometry_rows(raw_field: dict[str, Any]) -> list[tuple[str, str]]:
     if "pattern" in raw_field:  # unified woven family
         pat = raw_field["pattern"]
         rows.append(("pattern", str(pat.get("kind", ""))))
-        for label, key in (("n_warp", "n_warp"), ("n_weft", "n_weft"), ("n", "n"),
-                           ("shift", "shift"), ("n_over", "n_over"), ("n_under", "n_under")):
+        for label, key in (
+            ("n_warp", "n_warp"),
+            ("n_weft", "n_weft"),
+            ("n", "n"),
+            ("shift", "shift"),
+            ("n_over", "n_over"),
+            ("n_under", "n_under"),
+        ):
             if key in pat:
                 rows.append((label, str(pat[key])))
-        for label, key in (("warp width", "warp_width"), ("warp height", "warp_height"),
-                           ("weft width", "weft_width"), ("weft height", "weft_height"),
-                           ("section power", "power"), ("compaction", "compaction"),
-                           ("nominal Vf", "nominal_fibre_volume_fraction"),
-                           ("max Vf", "max_fibre_volume_fraction")):
+        for label, key in (
+            ("warp width", "warp_width"),
+            ("warp height", "warp_height"),
+            ("weft width", "weft_width"),
+            ("weft height", "weft_height"),
+            ("section power", "power"),
+            ("compaction", "compaction"),
+            ("nominal Vf", "nominal_fibre_volume_fraction"),
+            ("max Vf", "max_fibre_volume_fraction"),
+        ):
             if key in raw_field:
                 rows.append((label, str(raw_field[key])))
         if raw_field.get("nest"):
@@ -175,7 +187,9 @@ def _field_geometry_rows(raw_field: dict[str, Any]) -> list[tuple[str, str]]:
     return rows
 
 
-def _material_rows(materials: dict[str, Material], raw_materials: list[dict]) -> list[tuple[str, str]]:
+def _material_rows(
+    materials: dict[str, Material], raw_materials: list[dict]
+) -> list[tuple[str, str]]:
     from b3_tex.reference import (
         _engineering_constants_isotropic,
         engineering_constants_transverse_iso,
@@ -191,18 +205,22 @@ def _material_rows(materials: dict[str, Material], raw_materials: list[dict]) ->
             rows.append((f"{name} (matrix)", f"E = {_fmt_gpa(e)} GPa, nu = {nu:.2f}"))
         elif kind == "transverse_isotropic":
             c = engineering_constants_transverse_iso(mat.stiffness)
-            rows.append((
-                f"{name} (fibre)",
-                f"E_L = {_fmt_gpa(c['e_l'])}, E_T = {_fmt_gpa(c['e_t'])}, "
-                f"G_LT = {_fmt_gpa(c['g_lt'])}, nu_LT = {c['nu_lt']:.2f}",
-            ))
+            rows.append(
+                (
+                    f"{name} (fibre)",
+                    f"E_L = {_fmt_gpa(c['e_l'])}, E_T = {_fmt_gpa(c['e_t'])}, "
+                    f"G_LT = {_fmt_gpa(c['g_lt'])}, nu_LT = {c['nu_lt']:.2f}",
+                )
+            )
         elif kind == "micromechanical":
             if isinstance(mat, MicromechanicalMaterial):
                 rows.append((f"{name} model", str(cfg.get("micromodel", "chamis"))))
-                rows.append((
-                    f"{name} Vf range",
-                    f"nominal {mat.nominal_vf:.2f}, max {mat.max_vf:.2f}",
-                ))
+                rows.append(
+                    (
+                        f"{name} Vf range",
+                        f"nominal {mat.nominal_vf:.2f}, max {mat.max_vf:.2f}",
+                    )
+                )
     return rows
 
 
@@ -228,23 +246,29 @@ def _build_analysis_rows(
     ]
     if sampling and "resolution" in sampling:
         rows.append(("sampling resolution", str(sampling["resolution"])))
-    rows.append((
-        "periodic tolerance",
-        str(raw_config.get("periodic_tolerance", "1e-8")),
-    ))
+    rows.append(
+        (
+            "periodic tolerance",
+            str(raw_config.get("periodic_tolerance", "1e-8")),
+        )
+    )
     if amr.get("enabled"):
-        rows.extend([
-            ("homogenization AMR", "on"),
-            ("AMR iterations", str(amr.get("max_iterations", ""))),
-            ("AMR threshold", str(amr.get("threshold", ""))),
-            ("AMR dof budget", str(amr.get("dof_budget", "200000"))),
-        ])
+        rows.extend(
+            [
+                ("homogenization AMR", "on"),
+                ("AMR iterations", str(amr.get("max_iterations", ""))),
+                ("AMR threshold", str(amr.get("threshold", ""))),
+                ("AMR dof budget", str(amr.get("dof_budget", "200000"))),
+            ]
+        )
     else:
         rows.append(("homogenization AMR", "off (uniform mesh)"))
-    rows.append((
-        "AMR figure (right)",
-        amr_panel if amr_panel else "not shown",
-    ))
+    rows.append(
+        (
+            "AMR figure (right)",
+            amr_panel if amr_panel else "not shown",
+        )
+    )
     return rows
 
 
@@ -280,7 +304,9 @@ def collect_spec(
         "braid": "Triaxial braid",
     }
     if field_kind == "woven":
-        title = f"{str(raw_field.get('pattern', {}).get('kind', 'plain')).title()} weave"
+        title = (
+            f"{str(raw_field.get('pattern', {}).get('kind', 'plain')).title()} weave"
+        )
     else:
         title = title_map.get(field_kind, field_kind.replace("_", " ").title())
 
@@ -318,11 +344,13 @@ def build_typst(spec: DatasheetSpec) -> str:
     if spec.yarn_vf is not None:
         micro_rows.append(("Vf_b bundle/RVE (MC)", f"{spec.yarn_vf:.3f}"))
     if spec.local_vf:
-        micro_rows.append((
-            "Vf_local in-tow",
-            f"{spec.local_vf['min']:.2f}–{spec.local_vf['max']:.2f} "  # noqa: RUF001
-            f"(μ={spec.local_vf['mean']:.2f})",
-        ))
+        micro_rows.append(
+            (
+                "Vf_local in-tow",
+                f"{spec.local_vf['min']:.2f}–{spec.local_vf['max']:.2f} "  # noqa: RUF001
+                f"(μ={spec.local_vf['mean']:.2f})",
+            )
+        )
     if spec.vf_avg is not None:
         micro_rows.append(("Vf_avg RVE fibre", f"{spec.vf_avg:.3f}"))
     micro = _render_table("Micromechanics", micro_rows)
@@ -334,10 +362,10 @@ def build_typst(spec: DatasheetSpec) -> str:
     if spec.engineering_constants and spec.c_eff_gpa is not None:
         ec = spec.engineering_constants
         eng_block = (
-            "#text(weight: \"bold\", size: 7pt)[Engineering constants]\n"
+            '#text(weight: "bold", size: 7pt)[Engineering constants]\n'
             "#text(size: 6.5pt)["
-            f"$E$ = ({ec['E_x']/1e9:.1f}, {ec['E_y']/1e9:.1f}, {ec['E_z']/1e9:.1f}) GPa; "
-            f"$G$ = ({ec['G_xy']/1e9:.2f}, {ec['G_xz']/1e9:.2f}, {ec['G_yz']/1e9:.2f}); "
+            f"$E$ = ({ec['E_x'] / 1e9:.1f}, {ec['E_y'] / 1e9:.1f}, {ec['E_z'] / 1e9:.1f}) GPa; "
+            f"$G$ = ({ec['G_xy'] / 1e9:.2f}, {ec['G_xz'] / 1e9:.2f}, {ec['G_yz'] / 1e9:.2f}); "
             f"$nu$ = ({ec['nu_xy']:.2f}, {ec['nu_xz']:.2f}, {ec['nu_yz']:.2f})"
             "]\n"
         )
@@ -345,12 +373,9 @@ def build_typst(spec: DatasheetSpec) -> str:
         rows: list[tuple[str, ...]] = []
         c = spec.c_eff_gpa
         for i in range(6):
-            rows.append(
-                (labels[i + 1], *(f"{c[i, j]:.2f}" for j in range(6)))
-            )
+            rows.append((labels[i + 1], *(f"{c[i, j]:.2f}" for j in range(6))))
         cells = ", ".join(
-            f'[#text(size: 6pt)[{_typst_escape(x)}]]'
-            for row in rows for x in row
+            f"[#text(size: 6pt)[{_typst_escape(x)}]]" for row in rows for x in row
         )
         matrix_block = (
             "#table(\n"
@@ -366,12 +391,12 @@ def build_typst(spec: DatasheetSpec) -> str:
             "  column-gutter: 0.25cm,\n"
             "  align: (left + top, left + top),\n"
             f"  [{eng_block}],\n"
-            f"  [#align(left)[#text(weight: \"bold\", size: 7pt)[$C_\"eff\"$ [GPa]] "
+            f'  [#align(left)[#text(weight: "bold", size: 7pt)[$C_"eff"$ [GPa]] '
             f"#v(0.5pt) {matrix_block}]],\n"
             ")\n"
         )
     else:
-        footer = "#text(size: 7pt)[(homogenization skipped — no $C_\"eff\"$)]\n"
+        footer = '#text(size: 7pt)[(homogenization skipped — no $C_"eff"$)]\n'
 
     # Figure panels: present columns adapt to how many images exist so a single
     # panel (e.g. AMR skipped) still spans the full width instead of half.
@@ -384,7 +409,7 @@ def build_typst(spec: DatasheetSpec) -> str:
 
     config_name = Path(spec.config_path).name
     title_block = (
-        f"#align(center)[#text(size: 10pt, weight: \"bold\")[{_typst_escape(spec.title)}]"
+        f'#align(center)[#text(size: 10pt, weight: "bold")[{_typst_escape(spec.title)}]'
         f" #text(size: 6pt)[· {_typst_escape(config_name)} · "
         f"{_typst_escape(spec.version)}]]\n"
         "#v(1pt)\n"
@@ -398,8 +423,8 @@ def build_typst(spec: DatasheetSpec) -> str:
     )
 
     head = (
-        "#set page(paper: \"a4\", flipped: true, margin: (x: 0.32cm, y: 0.2cm))\n"
-        "#set text(size: 7.5pt, font: \"Liberation Sans\")\n"
+        '#set page(paper: "a4", flipped: true, margin: (x: 0.32cm, y: 0.2cm))\n'
+        '#set text(size: 7.5pt, font: "Liberation Sans")\n'
         "#set par(leading: 0.42em)\n"
     )
 
@@ -422,8 +447,7 @@ def build_typst(spec: DatasheetSpec) -> str:
         ")]\n"
     )
     return (
-        head
-        + "#grid(\n"
+        head + "#grid(\n"
         "  rows: (auto, 1fr, auto),\n"
         "  row-gutter: 0.12cm,\n"
         f"  [{title_block}],\n"
@@ -453,15 +477,19 @@ def compile_datasheet(
         text=True,
     )
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"typst compile failed ({proc.returncode}):\n{proc.stderr}"
-        )
+        raise RuntimeError(f"typst compile failed ({proc.returncode}):\n{proc.stderr}")
     if out_png is not None:
         png_pattern = root / "datasheet-{p}.png"
         proc2 = subprocess.run(
             [
-                "typst", "compile", "--format", "png", "--ppi", "150",
-                str(src.name), str(png_pattern.name),
+                "typst",
+                "compile",
+                "--format",
+                "png",
+                "--ppi",
+                "150",
+                str(src.name),
+                str(png_pattern.name),
             ],
             cwd=root,
             capture_output=True,
@@ -557,7 +585,9 @@ def generate(
         spec.c_eff_gpa = c / 1e9
         spec.engineering_constants = engineering_constants_from_S(np.linalg.inv(c))
     elif not skip_solve:
-        print("Homogenizing (this may take several minutes on fine meshes)...", flush=True)
+        print(
+            "Homogenizing (this may take several minutes on fine meshes)...", flush=True
+        )
         result = solve_homogenization(problem)
         spec.c_eff_gpa = result.effective_stiffness / 1e9
         spec.engineering_constants = engineering_constants_from_S(

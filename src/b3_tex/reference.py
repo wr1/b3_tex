@@ -21,7 +21,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from b3_tex.materials import Material
-from b3_tex.tensors import transverse_isotropic_stiffness
+from b3_tex.tensors import (
+    transverse_isotropic_stiffness,
+    transverse_isotropic_stiffness_batch,
+)
 
 
 def _check_volume_fractions(volume_fractions: Sequence[float]) -> NDArray[np.float64]:
@@ -35,7 +38,9 @@ def _check_volume_fractions(volume_fractions: Sequence[float]) -> NDArray[np.flo
     return vf
 
 
-def voigt_bound(materials: Sequence[Material], volume_fractions: Sequence[float]) -> NDArray[np.float64]:
+def voigt_bound(
+    materials: Sequence[Material], volume_fractions: Sequence[float]
+) -> NDArray[np.float64]:
     if len(materials) != len(volume_fractions):
         raise ValueError("materials and volume_fractions must have the same length")
     vf = _check_volume_fractions(volume_fractions)
@@ -45,7 +50,9 @@ def voigt_bound(materials: Sequence[Material], volume_fractions: Sequence[float]
     return C
 
 
-def reuss_bound(materials: Sequence[Material], volume_fractions: Sequence[float]) -> NDArray[np.float64]:
+def reuss_bound(
+    materials: Sequence[Material], volume_fractions: Sequence[float]
+) -> NDArray[np.float64]:
     if len(materials) != len(volume_fractions):
         raise ValueError("materials and volume_fractions must have the same length")
     vf = _check_volume_fractions(volume_fractions)
@@ -55,7 +62,9 @@ def reuss_bound(materials: Sequence[Material], volume_fractions: Sequence[float]
     return np.linalg.inv(S)
 
 
-def engineering_constants_transverse_iso(stiffness: NDArray[np.float64]) -> dict[str, float]:
+def engineering_constants_transverse_iso(
+    stiffness: NDArray[np.float64],
+) -> dict[str, float]:
     """Extract engineering constants from a transverse-isotropic 6x6 stiffness (axis = 1)."""
     C = np.asarray(stiffness, dtype=float)
     if C.shape != (6, 6):
@@ -70,10 +79,19 @@ def engineering_constants_transverse_iso(stiffness: NDArray[np.float64]) -> dict
     g_lt = p
     e_t = 1.0 / (1.0 / (4.0 * k) + 1.0 / (4.0 * m) + nu_lt * nu_lt / e_l)
     nu_tt = (e_t / (2.0 * m)) - 1.0
-    return {"e_l": e_l, "e_t": e_t, "g_lt": g_lt, "nu_lt": nu_lt, "nu_tt": nu_tt, "g_tt": m}
+    return {
+        "e_l": e_l,
+        "e_t": e_t,
+        "g_lt": g_lt,
+        "nu_lt": nu_lt,
+        "nu_tt": nu_tt,
+        "g_tt": m,
+    }
 
 
-def _engineering_constants_isotropic(stiffness: NDArray[np.float64]) -> tuple[float, float]:
+def _engineering_constants_isotropic(
+    stiffness: NDArray[np.float64],
+) -> tuple[float, float]:
     C = np.asarray(stiffness, dtype=float)
     lam_plus_2mu = C[0, 0]
     lam = C[0, 1]
@@ -122,5 +140,45 @@ def mori_tanaka_cylinder(
     nu_tt = vf * nu_tt_f + vm * num
 
     return transverse_isotropic_stiffness(
+        e_l=e_l, e_t=e_t, g_lt=g_lt, nu_lt=nu_lt, nu_tt=nu_tt
+    )
+
+
+def mori_tanaka_cylinder_batch(
+    *,
+    matrix: Material,
+    fibre: Material,
+    vf: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Return ``(K, 6, 6)`` Mori-Tanaka UD stiffness over a Vf vector."""
+    vf_arr = np.asarray(vf, dtype=float).ravel()
+    if np.any(vf_arr < 0.0) or np.any(vf_arr > 1.0):
+        raise ValueError("fibre volume fraction must be in [0, 1]")
+    vm = 1.0 - vf_arr
+
+    em, num = _engineering_constants_isotropic(matrix.stiffness)
+    gm = em / (2.0 * (1.0 + num))
+
+    fibre_consts = engineering_constants_transverse_iso(fibre.stiffness)
+    e_l_f = fibre_consts["e_l"]
+    e_t_f = fibre_consts["e_t"]
+    g_lt_f = fibre_consts["g_lt"]
+    nu_lt_f = fibre_consts["nu_lt"]
+    nu_tt_f = fibre_consts["nu_tt"]
+
+    e_l = vf_arr * e_l_f + vm * em
+    nu_lt = vf_arr * nu_lt_f + vm * num
+
+    xi_e = 2.0
+    eta_e = (e_t_f / em - 1.0) / (e_t_f / em + xi_e)
+    e_t = em * (1.0 + xi_e * eta_e * vf_arr) / (1.0 - eta_e * vf_arr)
+
+    g_lt = (
+        gm * (g_lt_f * (1.0 + vf_arr) + gm * vm) / (g_lt_f * vm + gm * (1.0 + vf_arr))
+    )
+
+    nu_tt = vf_arr * nu_tt_f + vm * num
+
+    return transverse_isotropic_stiffness_batch(
         e_l=e_l, e_t=e_t, g_lt=g_lt, nu_lt=nu_lt, nu_tt=nu_tt
     )

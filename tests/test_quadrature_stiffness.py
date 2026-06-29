@@ -20,12 +20,25 @@ def _ud_tow_config(
     backend: str = "dolfinx_periodic",
 ) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
             {
-                "name": "yarn", "type": "transverse_isotropic",
-                "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "yarn",
+                "type": "transverse_isotropic",
+                "e_l": 140e9,
+                "e_t": 10e9,
+                "g_lt": 5e9,
+                "nu_lt": 0.28,
+                "nu_tt": 0.40,
             },
         ],
         "field": {
@@ -36,7 +49,11 @@ def _ud_tow_config(
             "axis_direction": [1.0, 0.0, 0.0],
             "radius": radius,
         },
-        "solver": {"backend": backend, "stiffness_sampling": sampling, "quadrature_degree": qdeg},
+        "solver": {
+            "backend": backend,
+            "stiffness_sampling": sampling,
+            "quadrature_degree": qdeg,
+        },
     }
 
 
@@ -80,7 +97,12 @@ def test_quadrature_point_coords_lie_inside_their_cells_and_layout_roundtrips():
 def test_quadrature_homogeneous_recovers_isotropic_stiffness_to_machine_precision():
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
     cfg["materials"] = [
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
     ]
     cfg["field"]["yarn_material"] = "matrix"
     problem = RVEProblem.from_config(cfg)
@@ -88,8 +110,12 @@ def test_quadrature_homogeneous_recovers_isotropic_stiffness_to_machine_precisio
     from b3_tex.backends.dolfinx_periodic_backend import solve
 
     result = solve(problem)
-    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    expected = Material.isotropic(
+        "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
+    ).stiffness
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 @pytest.mark.parametrize("cell_type", ["tetrahedron", "hexahedron"])
@@ -98,7 +124,12 @@ def test_homogeneous_recovers_isotropic_stiffness_on_any_cell_type(cell_type):
     the homogeneous matrix stiffness exactly, the same way the tet backend does."""
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
     cfg["materials"] = [
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
     ]
     cfg["field"]["yarn_material"] = "matrix"
     cfg["solver"]["cell_type"] = cell_type
@@ -107,8 +138,12 @@ def test_homogeneous_recovers_isotropic_stiffness_on_any_cell_type(cell_type):
     from b3_tex.backends.dolfinx_periodic_backend import solve
 
     result = solve(problem)
-    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    expected = Material.isotropic(
+        "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
+    ).stiffness
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 @pytest.mark.parametrize("qdeg", [3, 4, 6, 8])
@@ -118,7 +153,12 @@ def test_quadrature_homogeneous_at_higher_degrees(qdeg):
     basix scheme issues at high q."""
     cfg = _ud_tow_config(mesh_n=4, radius=0.001, qdeg=qdeg)
     cfg["materials"] = [
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
     ]
     cfg["field"]["yarn_material"] = "matrix"
     problem = RVEProblem.from_config(cfg)
@@ -126,8 +166,12 @@ def test_quadrature_homogeneous_at_higher_degrees(qdeg):
     from b3_tex.backends.dolfinx_periodic_backend import solve
 
     result = solve(problem)
-    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-6, atol=1e-3)
+    expected = Material.isotropic(
+        "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
+    ).stiffness
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-6, atol=1e-3
+    )
 
 
 def test_quadrature_and_centroid_agree_on_homogeneous_problem():
@@ -137,7 +181,12 @@ def test_quadrature_and_centroid_agree_on_homogeneous_problem():
     cfg_c = _ud_tow_config(mesh_n=4, radius=0.001, sampling="centroid")
     for cfg in (cfg_q, cfg_c):
         cfg["materials"] = [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
         ]
         cfg["field"]["yarn_material"] = "matrix"
 
@@ -156,7 +205,8 @@ def test_quadrature_ud_tow_effective_stiffness_is_symmetric_and_positive_definit
 
     result = solve(problem)
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T,
+        result.effective_stiffness,
+        result.effective_stiffness.T,
         atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigvals = np.linalg.eigvalsh(result.effective_stiffness)
@@ -189,7 +239,7 @@ def test_quadrature_ud_tow_within_voigt_upper_bound():
 
     matrix = problem.materials["matrix"]
     yarn = problem.materials["yarn"]
-    vf = float(np.pi * 0.4 ** 2)
+    vf = float(np.pi * 0.4**2)
     Cv = voigt_bound([matrix, yarn], [1 - vf, vf])
 
     result = solve(problem)

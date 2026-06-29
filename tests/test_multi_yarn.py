@@ -74,19 +74,44 @@ def test_problem_from_config_multi_yarn():
     cfg = {
         "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [4, 4, 4]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 230e9, "e_t": 15e9, "g_lt": 24e9, "nu_lt": 0.20, "nu_tt": 0.30},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.7},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 230e9,
+                "e_t": 15e9,
+                "g_lt": 24e9,
+                "nu_lt": 0.20,
+                "nu_tt": 0.30,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.7,
+            },
         ],
         "field": {
             "type": "multi_straight_yarn",
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "yarns": [
-                {"axis_point": [0.5, 0.5, 0.4], "axis_direction": [1, 0, 0], "radius": 0.15},
-                {"axis_point": [0.5, 0.5, 0.6], "axis_direction": [0, 1, 0], "radius": 0.15},
+                {
+                    "axis_point": [0.5, 0.5, 0.4],
+                    "axis_direction": [1, 0, 0],
+                    "radius": 0.15,
+                },
+                {
+                    "axis_point": [0.5, 0.5, 0.6],
+                    "axis_direction": [0, 1, 0],
+                    "radius": 0.15,
+                },
             ],
         },
     }

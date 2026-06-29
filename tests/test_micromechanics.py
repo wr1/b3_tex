@@ -68,8 +68,13 @@ def test_material_from_chamis_constructor(matrix, fibre):
 def test_material_from_config_chamis(matrix, fibre):
     registry = {"matrix": matrix, "fibre": fibre}
     yarn = Material.from_config(
-        {"name": "yarn", "type": "chamis", "matrix": "matrix", "fibre": "fibre",
-         "fibre_volume_fraction": 0.7},
+        {
+            "name": "yarn",
+            "type": "chamis",
+            "matrix": "matrix",
+            "fibre": "fibre",
+            "fibre_volume_fraction": 0.7,
+        },
         registry=registry,
     )
     np.testing.assert_allclose(
@@ -81,15 +86,25 @@ def test_material_from_config_chamis(matrix, fibre):
 def test_material_from_config_chamis_requires_registry():
     with pytest.raises(ValueError, match="registry"):
         Material.from_config(
-            {"name": "yarn", "type": "chamis", "matrix": "m", "fibre": "f",
-             "fibre_volume_fraction": 0.5}
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "m",
+                "fibre": "f",
+                "fibre_volume_fraction": 0.5,
+            }
         )
 
 
 def test_material_from_config_chamis_rejects_unknown_reference(matrix):
     with pytest.raises(ValueError, match="ghost"):
         Material.from_config(
-            {"name": "yarn", "type": "chamis", "matrix": "matrix", "fibre": "ghost",
-             "fibre_volume_fraction": 0.5},
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "ghost",
+                "fibre_volume_fraction": 0.5,
+            },
             registry={"matrix": matrix},
         )

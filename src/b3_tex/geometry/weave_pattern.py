@@ -50,8 +50,13 @@ class WeavePattern:
 
     @classmethod
     def twill(
-        cls, n_over: int, n_under: int, *, n_warp: int | None = None,
-        n_weft: int | None = None, step: int = 1,
+        cls,
+        n_over: int,
+        n_under: int,
+        *,
+        n_warp: int | None = None,
+        n_weft: int | None = None,
+        step: int = 1,
     ) -> "WeavePattern":
         """``n_over``/``n_under`` twill advancing ``step`` per row (2/2 step1 = classic twill)."""
         period = n_over + n_under
@@ -68,11 +73,13 @@ class WeavePattern:
             raise ValueError(f"satin shift={shift} must be coprime with n={n}")
         i = np.arange(n)[:, None]
         j = np.arange(n)[None, :]
-        interlace = ((j - shift * i) % n) == 0     # the single tie-down per warp row
+        interlace = ((j - shift * i) % n) == 0  # the single tie-down per warp row
         return cls(~interlace if warp_faced else interlace)
 
     @classmethod
-    def basket(cls, n: int, *, n_warp: int | None = None, n_weft: int | None = None) -> "WeavePattern":
+    def basket(
+        cls, n: int, *, n_warp: int | None = None, n_weft: int | None = None
+    ) -> "WeavePattern":
         """``n``x``n`` basket weave (plain weave of n-yarn groups)."""
         n_warp = n_warp if n_warp is not None else 2 * n
         n_weft = n_weft if n_weft is not None else 2 * n

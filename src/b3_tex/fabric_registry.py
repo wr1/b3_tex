@@ -45,7 +45,10 @@ def build_from_registry(
 # helpers
 # --------------------------------------------------------------------------
 
-def _check_materials(config: dict[str, Any], materials: dict[str, Material], keys) -> None:
+
+def _check_materials(
+    config: dict[str, Any], materials: dict[str, Material], keys
+) -> None:
     for key in keys:
         name = str(config[key])
         if name not in materials:
@@ -61,17 +64,27 @@ def _weave_pattern(spec: dict[str, Any]):
 
     kind = str(spec["kind"])
     if kind == "plain":
-        return WeavePattern.plain(int(spec.get("n_warp", 2)), int(spec.get("n_weft", 2)))
+        return WeavePattern.plain(
+            int(spec.get("n_warp", 2)), int(spec.get("n_weft", 2))
+        )
     if kind == "twill":
         return WeavePattern.twill(
-            int(spec["n_over"]), int(spec["n_under"]),
-            n_warp=spec.get("n_warp"), n_weft=spec.get("n_weft"), step=int(spec.get("step", 1)),
+            int(spec["n_over"]),
+            int(spec["n_under"]),
+            n_warp=spec.get("n_warp"),
+            n_weft=spec.get("n_weft"),
+            step=int(spec.get("step", 1)),
         )
     if kind == "satin":
-        return WeavePattern.satin(int(spec["n"]), int(spec["shift"]),
-                                  warp_faced=bool(spec.get("warp_faced", True)))
+        return WeavePattern.satin(
+            int(spec["n"]),
+            int(spec["shift"]),
+            warp_faced=bool(spec.get("warp_faced", True)),
+        )
     if kind == "basket":
-        return WeavePattern.basket(int(spec["n"]), n_warp=spec.get("n_warp"), n_weft=spec.get("n_weft"))
+        return WeavePattern.basket(
+            int(spec["n"]), n_warp=spec.get("n_warp"), n_weft=spec.get("n_weft")
+        )
     if kind == "matrix":
         return WeavePattern.from_matrix(spec["matrix"])
     raise ValueError(f"unknown weave pattern kind {kind!r}")
@@ -94,7 +107,9 @@ def build_woven(config: dict[str, Any], materials: dict[str, Material]) -> Phase
         power=float(config.get("power", 2.0)),
         compaction=float(config.get("compaction", 0.0)),
         nest=bool(config.get("nest", False)),
-        amplitude=(float(config["amplitude"]) if config.get("amplitude") is not None else None),
+        amplitude=(
+            float(config["amplitude"]) if config.get("amplitude") is not None else None
+        ),
         nominal_vf=_vf(config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55),
         max_vf=_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
         smooth=bool(config.get("smooth", False)),

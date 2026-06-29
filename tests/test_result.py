@@ -38,7 +38,9 @@ def test_result_save_npz_round_trip(tmp_path: Path):
     path = tmp_path / "C.npz"
     result.save_npz(path)
     loaded = np.load(path)
-    np.testing.assert_allclose(loaded["effective_stiffness"], result.effective_stiffness)
+    np.testing.assert_allclose(
+        loaded["effective_stiffness"], result.effective_stiffness
+    )
     np.testing.assert_allclose(loaded["loadcase_strains"], result.loadcase_strains)
     np.testing.assert_allclose(loaded["loadcase_stresses"], result.loadcase_stresses)
 

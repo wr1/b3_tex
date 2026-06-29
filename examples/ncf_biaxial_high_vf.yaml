@@ -1,14 +1,17 @@
-# High-Vf stitched biaxial NCF (non-crimp fabric).
+# High-Vf biaxial [0/90] non-crimp fabric (NCF).
 #
-# Two dense, perfectly straight UD plies (0 deg / 90 deg) stacked at distinct z,
-# stitched by a grid of through-thickness yarns. NCFs reach higher Vf and
+# Two dense, perfectly straight UD plies (0 deg / 90 deg) stacked through the
+# thickness and held by a grid of through-thickness pillar stitches. The plies are
+# flat tapes (wide, thin power-ellipse sections) the way real NCF inlays are — not
+# circular rovings — sized so the two plies fill the laminate thickness edge-to-edge
+# (tow bundle ~0.87 of the RVE, no neat-resin skins). NCFs reach higher Vf and
 # stiffness than wovens precisely because the load-bearing tows are *straight*
-# (zero crimp) -- the implicit field captures the ply tows and the piercing
-# stitches cleanly without meshing their mutual intersections.
+# (zero crimp); the implicit field captures the ply tows and the piercing stitches
+# cleanly without meshing their mutual intersections.
 
 domain:
-  size: [1.0, 1.0, 0.36]
-  mesh_resolution: [32, 32, 18]
+  size: [1.0, 1.0, 0.04]              # in-plane unit cell; thickness = 2 ply tapes
+  mesh_resolution: [32, 32, 8]
 
 periodic_tolerance: 1.0e-8
 
@@ -27,23 +30,32 @@ materials:
     nu_tt: 0.30
 
   - name: yarn
-    type: chamis
+    type: micromechanical
     matrix: matrix
     fibre: fibre
-    fibre_volume_fraction: 0.62
+    micromodel: chamis
+    nominal_fibre_volume_fraction: 0.62
+    max_fibre_volume_fraction: 0.90
 
 field:
-  type: stitched_biaxial
+  type: ncf
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [1.0, 1.0, 0.36]
-  ply_z_centers: [0.12, 0.24]
-  n_warp: 6                      # 6 straight tows along x
-  n_weft: 6                      # 6 straight tows along y
-  tow_radius: 0.075
-  n_stitches_x: 2
-  n_stitches_y: 2
-  stitch_radius: 0.018
+  domain_size: [1.0, 1.0, 0.04]
+  power: 8.0                          # flat-tape (near-rectangular) inlay sections
+  nominal_fibre_volume_fraction: 0.62
+  max_fibre_volume_fraction: 0.90
+  plies:                              # flat tapes, width ~ spacing (touch edge-to-edge),
+                                      # height 0.02 x 2 plies = the full 0.04 thickness;
+                                      # aspect width/height = 8 (a realistic flat ribbon)
+    - {angle_deg: 0,  z_center: 0.01, width: 0.16, height: 0.02, spacing: 0.16667}
+    - {angle_deg: 90, z_center: 0.03, width: 0.16, height: 0.02, spacing: 0.16667}
+  stitch:
+    pattern: pillar
+    n_x: 2
+    n_y: 2
+    radius: 0.012
+    z_span: [0.004, 0.036]
 
 solver:
   backend: mfem-periodic

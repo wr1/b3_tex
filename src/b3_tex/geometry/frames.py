@@ -20,7 +20,9 @@ def orthonormal_frame_along(axis: ArrayLike) -> NDArray[np.float64]:
     if n == 0:
         raise ValueError("axis must be non-zero")
     e1 = e1 / n
-    helper = np.array([0.0, 0.0, 1.0]) if abs(e1[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    helper = (
+        np.array([0.0, 0.0, 1.0]) if abs(e1[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    )
     e2 = np.cross(helper, e1)
     e2 /= np.linalg.norm(e2)
     e3 = np.cross(e1, e2)

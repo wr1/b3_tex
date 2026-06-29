@@ -41,11 +41,15 @@ class WeaveGeometry:
 
     @property
     def f_width(self) -> float:
-        return float(self.weft_width if self.weft_width is not None else self.warp_width)
+        return float(
+            self.weft_width if self.weft_width is not None else self.warp_width
+        )
 
     @property
     def f_height(self) -> float:
-        return float(self.weft_height if self.weft_height is not None else self.warp_height)
+        return float(
+            self.weft_height if self.weft_height is not None else self.warp_height
+        )
 
     def amplitude_value(self) -> float:
         if self.amplitude is not None:
@@ -56,4 +60,8 @@ class WeaveGeometry:
         return half * (1.0 - self.compaction) if self.nest else half
 
     def z_mid_value(self) -> float:
-        return float(self.z_mid) if self.z_mid is not None else 0.5 * float(self.domain_size[2])
+        return (
+            float(self.z_mid)
+            if self.z_mid is not None
+            else 0.5 * float(self.domain_size[2])
+        )

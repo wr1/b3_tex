@@ -19,12 +19,25 @@ pytestmark = pytest.mark.fenicsx
 
 def _ud_tow_config(mesh_n: int = 12, radius: float = 0.4) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
             {
-                "name": "yarn", "type": "transverse_isotropic",
-                "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "yarn",
+                "type": "transverse_isotropic",
+                "e_l": 140e9,
+                "e_t": 10e9,
+                "g_lt": 5e9,
+                "nu_lt": 0.28,
+                "nu_tt": 0.40,
             },
         ],
         "field": {
@@ -42,7 +55,12 @@ def _ud_tow_config(mesh_n: int = 12, radius: float = 0.4) -> dict:
 def test_dolfinx_homogeneous_recovers_isotropic_stiffness():
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
     cfg["materials"] = [
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
     ]
     cfg["field"]["yarn_material"] = "matrix"
     problem = RVEProblem.from_config(cfg)
@@ -50,8 +68,12 @@ def test_dolfinx_homogeneous_recovers_isotropic_stiffness():
     from b3_tex.backends.dolfinx_backend import solve
 
     result = solve(problem)
-    expected = Material.isotropic("matrix", youngs_modulus=3.0e9, poisson_ratio=0.35).stiffness
-    np.testing.assert_allclose(result.effective_stiffness, expected, rtol=1e-3, atol=1e-3 * np.max(expected))
+    expected = Material.isotropic(
+        "matrix", youngs_modulus=3.0e9, poisson_ratio=0.35
+    ).stiffness
+    np.testing.assert_allclose(
+        result.effective_stiffness, expected, rtol=1e-3, atol=1e-3 * np.max(expected)
+    )
 
 
 def test_dolfinx_ud_tow_effective_stiffness_is_symmetric_and_positive_definite():
@@ -60,7 +82,9 @@ def test_dolfinx_ud_tow_effective_stiffness_is_symmetric_and_positive_definite()
 
     result = solve(problem)
     np.testing.assert_allclose(
-        result.effective_stiffness, result.effective_stiffness.T, atol=1e-3 * np.max(np.abs(result.effective_stiffness))
+        result.effective_stiffness,
+        result.effective_stiffness.T,
+        atol=1e-3 * np.max(np.abs(result.effective_stiffness)),
     )
     eigvals = np.linalg.eigvalsh(result.effective_stiffness)
     assert np.all(eigvals > 0)
@@ -76,7 +100,7 @@ def test_dolfinx_ud_tow_axial_modulus_close_to_rule_of_mixtures():
     result = solve(problem)
     e_x = result.engineering_constants()["e_x"]
 
-    vf_yarn = float(np.pi * 0.4 ** 2)
+    vf_yarn = float(np.pi * 0.4**2)
     e_l_rom = vf_yarn * 140e9 + (1 - vf_yarn) * 3.0e9
     assert abs(e_x - e_l_rom) / e_l_rom < 0.05
 
@@ -90,7 +114,7 @@ def test_dolfinx_ud_tow_within_voigt_upper_bound():
 
     matrix = problem.materials["matrix"]
     yarn = problem.materials["yarn"]
-    vf = float(np.pi * 0.4 ** 2)
+    vf = float(np.pi * 0.4**2)
     Cv = voigt_bound([matrix, yarn], [1 - vf, vf])
 
     result = solve(problem)
@@ -108,7 +132,7 @@ def test_dolfinx_ud_tow_close_to_mori_tanaka_in_axial_directions():
 
     matrix = problem.materials["matrix"]
     yarn = problem.materials["yarn"]
-    vf = float(np.pi * 0.4 ** 2)
+    vf = float(np.pi * 0.4**2)
     Cmt = mori_tanaka_cylinder(matrix=matrix, fibre=yarn, fibre_volume_fraction=vf)
     mt_consts = engineering_constants_transverse_iso(Cmt)
 

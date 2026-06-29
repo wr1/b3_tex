@@ -23,6 +23,7 @@ from numpy.typing import NDArray
 # easing
 # ----------------------------------------------------------------------------
 
+
 def clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else float(x)
 
@@ -48,7 +49,9 @@ def ramp(t: float, t0: float, t1: float, *, ease=smootherstep) -> float:
     return ease((t - t0) / (t1 - t0))
 
 
-def window(t: float, t0: float, t1: float, *, fade: float = 0.4, ease=smootherstep) -> float:
+def window(
+    t: float, t0: float, t1: float, *, fade: float = 0.4, ease=smootherstep
+) -> float:
     """Eased on-then-off pulse: 0 → 1 over [t0,t0+fade], hold, → 0 over [t1-fade,t1]."""
     return ramp(t, t0, t0 + fade, ease=ease) * (1.0 - ramp(t, t1 - fade, t1, ease=ease))
 
@@ -56,6 +59,7 @@ def window(t: float, t0: float, t1: float, *, fade: float = 0.4, ease=smootherst
 # ----------------------------------------------------------------------------
 # camera
 # ----------------------------------------------------------------------------
+
 
 @dataclass
 class CamKey:
@@ -112,6 +116,7 @@ class CameraTrack:
 # director
 # ----------------------------------------------------------------------------
 
+
 @dataclass
 class Director:
     """Render a timeline: ``update(t)`` sets actor state, ``camera`` flies, ``caption(t)``
@@ -124,8 +129,8 @@ class Director:
     camera: CameraTrack | None = None
     caption: Callable[[float], dict] | None = None
     theme: object = None
-    logo: object = None          # PIL RGBA image, pasted top-right on every frame
-    logo_margin: float = 0.03    # margin as a fraction of frame width
+    logo: object = None  # PIL RGBA image, pasted top-right on every frame
+    logo_margin: float = 0.03  # margin as a fraction of frame width
 
     @property
     def n_frames(self) -> int:
@@ -144,8 +149,12 @@ class Director:
             if self.caption is not None:
                 spec = self.caption(t)
                 if spec:
-                    img = overlay(img, progress=t / max(self.seconds, 1e-9),
-                                  theme=self.theme, **spec)
+                    img = overlay(
+                        img,
+                        progress=t / max(self.seconds, 1e-9),
+                        theme=self.theme,
+                        **spec,
+                    )
             if self.logo is not None:
                 img = paste_logo(img, self.logo, margin=self.logo_margin)
             frames.append(img)
@@ -155,6 +164,7 @@ class Director:
 # ----------------------------------------------------------------------------
 # actor helpers
 # ----------------------------------------------------------------------------
+
 
 def set_opacity(actor, value: float) -> None:
     """Set opacity + visibility on a pyvista actor (or a list of actors)."""
@@ -209,9 +219,17 @@ def load_logo(path, *, width: int):
 
         tmp = Path(tempfile.mkdtemp()) / "logo.png"
         subprocess.run(
-            ["inkscape", str(path), "--export-type=png", f"--export-filename={tmp}",
-             "-w", str(width), "--export-background-opacity=0"],
-            check=True, capture_output=True,
+            [
+                "inkscape",
+                str(path),
+                "--export-type=png",
+                f"--export-filename={tmp}",
+                "-w",
+                str(width),
+                "--export-background-opacity=0",
+            ],
+            check=True,
+            capture_output=True,
         )
         path = tmp
     img = Image.open(path).convert("RGBA")
@@ -221,7 +239,9 @@ def load_logo(path, *, width: int):
     return img
 
 
-def paste_logo(frame: NDArray[np.uint8], logo, *, margin: float = 0.03) -> NDArray[np.uint8]:
+def paste_logo(
+    frame: NDArray[np.uint8], logo, *, margin: float = 0.03
+) -> NDArray[np.uint8]:
     """Alpha-composite an RGBA logo into the top-right corner of an RGB frame."""
     from b3_tex.viz._deps import require_pillow
 
@@ -277,7 +297,9 @@ def overlay(
         draw.text(((W - tw) / 2, H * 0.40), title, font=f_title, fill=(245, 245, 250))
         if sub2:
             sw = draw.textlength(sub2, font=f_sub)
-            draw.text(((W - sw) / 2, H * 0.40 + W * 0.075), sub2, font=f_sub, fill=accent)
+            draw.text(
+                ((W - sw) / 2, H * 0.40 + W * 0.075), sub2, font=f_sub, fill=accent
+            )
         draw.line([(W * 0.34, H * 0.385), (W * 0.66, H * 0.385)], fill=accent, width=3)
 
     if caption is not None:
@@ -289,21 +311,29 @@ def overlay(
         draw.line([(pad, ty - pad), (pad, H - pad)], fill=accent, width=5)
         draw.text((pad + 18, ty), caption, font=f_cap, fill=(245, 245, 250))
         if sub:
-            draw.text((pad + 18, ty + int(W * 0.045)), sub, font=f_sub, fill=(180, 185, 200))
+            draw.text(
+                (pad + 18, ty + int(W * 0.045)), sub, font=f_sub, fill=(180, 185, 200)
+            )
 
     if values:
         f_v = _font(int(W * 0.030))
         x0 = int(W * 0.05)
         y0 = int(H * 0.07)
         for i, (k, v) in enumerate(values):
-            draw.text((x0, y0 + i * int(W * 0.05)), f"{k}", font=f_v, fill=(180, 185, 200))
-            draw.text((x0 + int(W * 0.16), y0 + i * int(W * 0.05)), v, font=f_v, fill=accent)
+            draw.text(
+                (x0, y0 + i * int(W * 0.05)), f"{k}", font=f_v, fill=(180, 185, 200)
+            )
+            draw.text(
+                (x0 + int(W * 0.16), y0 + i * int(W * 0.05)), v, font=f_v, fill=accent
+            )
 
     if legend is not None:
         import matplotlib.cm as cm
 
         n = 256
-        grad = (cm.get_cmap(legend["cmap"])(np.linspace(0, 1, n))[:, :3] * 255).astype(np.uint8)
+        grad = (cm.get_cmap(legend["cmap"])(np.linspace(0, 1, n))[:, :3] * 255).astype(
+            np.uint8
+        )
         bw, bh = int(W * 0.030), int(H * 0.24)
         bx, by = int(W * 0.90), int(H * 0.30)
         strip = Image.fromarray(grad[::-1, None, :].repeat(8, axis=1)).resize((bw, bh))
@@ -312,11 +342,25 @@ def overlay(
         f_lab = _font(int(W * 0.022))
         f_ti = _font(int(W * 0.024))
         title_txt = legend.get("title", "")
-        draw.text((bx + bw + 8, by - int(W * 0.035)), title_txt, font=f_ti, fill=(235, 235, 245))
+        draw.text(
+            (bx + bw + 8, by - int(W * 0.035)),
+            title_txt,
+            font=f_ti,
+            fill=(235, 235, 245),
+        )
         fmt = legend.get("fmt", "{:.2f}")
-        draw.text((bx + bw + 8, by - 4), fmt.format(legend["vmax"]), font=f_lab, fill=(235, 235, 245))
-        draw.text((bx + bw + 8, by + bh - int(W * 0.022)), fmt.format(legend["vmin"]),
-                  font=f_lab, fill=(235, 235, 245))
+        draw.text(
+            (bx + bw + 8, by - 4),
+            fmt.format(legend["vmax"]),
+            font=f_lab,
+            fill=(235, 235, 245),
+        )
+        draw.text(
+            (bx + bw + 8, by + bh - int(W * 0.022)),
+            fmt.format(legend["vmin"]),
+            font=f_lab,
+            fill=(235, 235, 245),
+        )
 
     if progress is not None:
         pw = int(clamp01(progress) * W)
@@ -329,6 +373,7 @@ def overlay(
 # ----------------------------------------------------------------------------
 # encoding (ffmpeg)
 # ----------------------------------------------------------------------------
+
 
 def _ffmpeg() -> str:
     exe = shutil.which("ffmpeg")
@@ -359,17 +404,33 @@ def encode(
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for i, fr in enumerate(frames):
-            Image.fromarray(np.ascontiguousarray(fr[..., :3])).save(tmp / f"f{i:05d}.png")
+            Image.fromarray(np.ascontiguousarray(fr[..., :3])).save(
+                tmp / f"f{i:05d}.png"
+            )
         pattern = str(tmp / "f%05d.png")
 
         if mp4:
             mp4_path = out_stem.with_suffix(".mp4")
             subprocess.run(
-                [ffmpeg, "-y", "-framerate", str(fps), "-i", pattern,
-                 "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                 "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                 "-movflags", "+faststart", str(mp4_path)],
-                check=True, capture_output=True,
+                [
+                    ffmpeg,
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    pattern,
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-movflags",
+                    "+faststart",
+                    str(mp4_path),
+                ],
+                check=True,
+                capture_output=True,
             )
             out["mp4"] = mp4_path
 
@@ -378,14 +439,36 @@ def encode(
             palette = tmp / "palette.png"
             vf = f"fps={gif_fps},scale={gif_width}:-1:flags=lanczos"
             subprocess.run(
-                [ffmpeg, "-y", "-framerate", str(fps), "-i", pattern,
-                 "-vf", f"{vf},palettegen=stats_mode=diff", str(palette)],
-                check=True, capture_output=True,
+                [
+                    ffmpeg,
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    pattern,
+                    "-vf",
+                    f"{vf},palettegen=stats_mode=diff",
+                    str(palette),
+                ],
+                check=True,
+                capture_output=True,
             )
             subprocess.run(
-                [ffmpeg, "-y", "-framerate", str(fps), "-i", pattern, "-i", str(palette),
-                 "-lavfi", f"{vf}[x];[x][1:v]paletteuse=dither=bayer", str(gif_path)],
-                check=True, capture_output=True,
+                [
+                    ffmpeg,
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    pattern,
+                    "-i",
+                    str(palette),
+                    "-lavfi",
+                    f"{vf}[x];[x][1:v]paletteuse=dither=bayer",
+                    str(gif_path),
+                ],
+                check=True,
+                capture_output=True,
             )
             out["gif"] = gif_path
     return out
@@ -395,7 +478,10 @@ def encode(
 # directional Young's modulus surface (finale payoff)
 # ----------------------------------------------------------------------------
 
-def directional_modulus(C_eff: NDArray[np.float64], dirs: NDArray[np.float64]) -> NDArray[np.float64]:
+
+def directional_modulus(
+    C_eff: NDArray[np.float64], dirs: NDArray[np.float64]
+) -> NDArray[np.float64]:
     """Young's modulus E(d) for unit directions ``dirs`` (N,3) from stiffness ``C_eff``.
 
     Uses the orthotropic quartic ``1/E = S11 d1^4 + ... + (2 S12 + S66) d1^2 d2^2 + ...``
@@ -407,7 +493,9 @@ def directional_modulus(C_eff: NDArray[np.float64], dirs: NDArray[np.float64]) -
     d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-30)
     d1, d2, d3 = d[:, 0], d[:, 1], d[:, 2]
     inv_E = (
-        S[0, 0] * d1**4 + S[1, 1] * d2**4 + S[2, 2] * d3**4
+        S[0, 0] * d1**4
+        + S[1, 1] * d2**4
+        + S[2, 2] * d3**4
         + (2 * S[0, 1] + S[5, 5]) * d1**2 * d2**2
         + (2 * S[0, 2] + S[4, 4]) * d1**2 * d3**2
         + (2 * S[1, 2] + S[3, 3]) * d2**2 * d3**2
@@ -420,7 +508,9 @@ def directional_modulus_surface(C_eff, *, resolution: int = 60, scale: float = 1
     from b3_tex.viz._deps import require_pyvista
 
     pv = require_pyvista()
-    sphere = pv.Sphere(theta_resolution=resolution, phi_resolution=resolution, radius=1.0)
+    sphere = pv.Sphere(
+        theta_resolution=resolution, phi_resolution=resolution, radius=1.0
+    )
     dirs = sphere.points / np.linalg.norm(sphere.points, axis=1, keepdims=True)
     E = directional_modulus(C_eff, dirs)
     r = E / E.max()

@@ -1,10 +1,11 @@
-# Run `pre-commit install` once to activate. Hooks run on staged files only.
-# The tree is lint-clean, so CI's `ruff check` is a hard gate; ruff-format here
-# keeps new/changed files formatted (a full-tree format pass hasn't been run).
+# Install once: pre-commit install
+# Run on all files: pre-commit run --all-files
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.4
     hooks:
       - id: ruff-check
         args: [--fix]
+        files: ^(src|tests|examples)/
       - id: ruff-format
+        files: ^(src|tests|examples)/

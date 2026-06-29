@@ -3,8 +3,10 @@
 # WeavePattern.satin(n=4, shift=1).  TexGen mm -> m as in weave_twill_2x2.yaml.
 
 domain:
-  size: [0.02, 0.02, 0.0022]      # 4 x 4 tows at 5 mm pitch
-  mesh_resolution: [48, 48, 10]
+  size: [0.02, 0.02, 0.00128]     # 4 x 4 tows at 5 mm pitch; thickness fits the
+                                  # nested tows (touching both faces) so there is no
+                                  # neat-resin skin above/below the weave
+  mesh_resolution: [48, 48, 6]
 
 periodic_tolerance: 1.0e-8
 
@@ -18,7 +20,7 @@ field:
   type: woven
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [0.02, 0.02, 0.0022]
+  domain_size: [0.02, 0.02, 0.00128]
   pattern: {kind: satin, n: 4, shift: 1}
   warp_width: 0.004
   warp_height: 0.0008

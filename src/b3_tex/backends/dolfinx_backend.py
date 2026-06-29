@@ -72,15 +72,10 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
                 "AMR phase 1 currently requires cell_type='tetrahedron' "
                 f"(got {cell_type_name!r}); dolfinx.mesh.refine is tet-only in 0.10"
             )
-        from b3_tex.amr import DEFAULT_AMR_SUB_SAMPLES, iteratively_refine
+        from b3_tex.amr import amr_loop_kwargs, iteratively_refine
+
         amr_cfg = problem.solver["amr"]
-        mesh = iteratively_refine(
-            mesh, problem,
-            threshold=float(amr_cfg.get("threshold", 0.15)),
-            max_iterations=int(amr_cfg.get("max_iterations", 4)),
-            dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
-            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)),
-        )
+        mesh = iteratively_refine(mesh, problem, **amr_loop_kwargs(amr_cfg))
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
@@ -122,9 +117,12 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
     def on_boundary(x):
         return (
-            np.isclose(x[0], 0.0) | np.isclose(x[0], Lx)
-            | np.isclose(x[1], 0.0) | np.isclose(x[1], Ly)
-            | np.isclose(x[2], 0.0) | np.isclose(x[2], Lz)
+            np.isclose(x[0], 0.0)
+            | np.isclose(x[0], Lx)
+            | np.isclose(x[1], 0.0)
+            | np.isclose(x[1], Ly)
+            | np.isclose(x[2], 0.0)
+            | np.isclose(x[2], Lz)
         )
 
     boundary_dofs = dolfinx.fem.locate_dofs_geometrical(V, on_boundary)
@@ -136,16 +134,12 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     u_sol = dolfinx.fem.Function(V, name="u")
 
     def apply_macro_strain(E_tensor):
-        bc_disp.interpolate(
-            lambda x: np.einsum("ij,jp->ip", E_tensor, x[:3])
-        )
+        bc_disp.interpolate(lambda x: np.einsum("ij,jp->ip", E_tensor, x[:3]))
         bc_disp.x.scatter_forward()
 
     eps_post = _voigt_strain(u_sol, ufl)
     sigma_post = ufl.dot(C_func, eps_post)
-    sigma_component_forms = [
-        dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)
-    ]
+    sigma_component_forms = [dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)]
 
     loadcase_strains = np.eye(6)
     loadcase_stresses = np.zeros((6, 6))
@@ -158,7 +152,10 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     bc = dolfinx.fem.dirichletbc(bc_disp, boundary_dofs)
 
     linear_problem = dolfinx.fem.petsc.LinearProblem(
-        a_form, L_form, u=u_sol, bcs=[bc],
+        a_form,
+        L_form,
+        u=u_sol,
+        bcs=[bc],
         petsc_options_prefix="b3tex_kubc_",
         petsc_options=petsc_options,
     )
@@ -169,7 +166,9 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         linear_problem.solve()
         for a_idx, form in enumerate(sigma_component_forms):
             integral = dolfinx.fem.assemble_scalar(form)
-            loadcase_stresses[a_idx, k] = mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+            loadcase_stresses[a_idx, k] = (
+                mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+            )
 
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 

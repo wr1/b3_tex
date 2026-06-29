@@ -24,6 +24,7 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 # orthogonal
 # --------------------------------------------------------------------------
 
+
 def test_orthogonal_yarn_count() -> None:
     n_warp, n_weft = 6, 4
     warp_layers, weft_layers, n_binder = 2, 3, 2
@@ -52,8 +53,8 @@ def test_orthogonal_binder_pierces_full_thickness() -> None:
 
 def test_orthogonal_warp_weft_orientation() -> None:
     yarns = orthogonal_yarns(n_warp=6, n_weft=4, warp_layers=2, weft_layers=3)
-    warp = yarns[0]            # first warp tow, runs along x
-    weft = yarns[6 * 2]        # first weft tow, runs along y
+    warp = yarns[0]  # first warp tow, runs along x
+    weft = yarns[6 * 2]  # first weft tow, runs along y
     wp = np.array([[0.005, warp.centerline.point[1], warp.centerline.point[2]]])
     fp = np.array([[weft.centerline.point[0], 0.005, weft.centerline.point[2]]])
     assert np.allclose(warp.rotation_at(wp)[0, :, 0], [1.0, 0.0, 0.0], atol=1e-9)
@@ -63,6 +64,7 @@ def test_orthogonal_warp_weft_orientation() -> None:
 # --------------------------------------------------------------------------
 # layer-to-layer
 # --------------------------------------------------------------------------
+
 
 def test_layer_to_layer_yarn_count() -> None:
     n_warp, n_weft = 4, 6
@@ -91,6 +93,7 @@ def test_layer_to_layer_binder_visits_multiple_levels() -> None:
 # YAML -> field
 # --------------------------------------------------------------------------
 
+
 def _build_problem(name: str) -> RVEProblem:
     config = yaml.safe_load((EXAMPLES / name).read_text())
     return RVEProblem.from_config(config)
@@ -102,9 +105,7 @@ def _inside_fraction_on_midplane(problem: RVEProblem) -> tuple[float, np.ndarray
     xs = np.linspace(0.05 * size[0], 0.95 * size[0], nx)
     ys = np.linspace(0.05 * size[1], 0.95 * size[1], ny)
     gx, gy = np.meshgrid(xs, ys, indexing="ij")
-    pts = np.column_stack(
-        [gx.ravel(), gy.ravel(), np.full(gx.size, 0.5 * size[2])]
-    )
+    pts = np.column_stack([gx.ravel(), gy.ravel(), np.full(gx.size, 0.5 * size[2])])
     ids, rotations = problem.field.sample_arrays(pts)
     assert ids.shape == (pts.shape[0],)
     assert rotations.shape == (pts.shape[0], 3, 3)

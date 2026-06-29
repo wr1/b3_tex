@@ -79,11 +79,7 @@ def test_build_typst_contains_sections(compacted_problem):
 def test_compile_minimal_typst(tmp_path):
     from b3_tex.datasheet import compile_datasheet
 
-    doc = (
-        '#set page(paper: "a4", margin: 1cm)\n'
-        '= Datasheet smoke test\n'
-        'Hello.\n'
-    )
+    doc = '#set page(paper: "a4", margin: 1cm)\n= Datasheet smoke test\nHello.\n'
     out = tmp_path / "smoke.pdf"
     compile_datasheet(doc, out)
     assert out.is_file() and out.stat().st_size > 500

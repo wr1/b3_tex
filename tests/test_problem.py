@@ -16,10 +16,20 @@ def _basic_config() -> dict:
     return {
         "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [16, 16, 16]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
             {
-                "name": "yarn", "type": "transverse_isotropic",
-                "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "yarn",
+                "type": "transverse_isotropic",
+                "e_l": 140e9,
+                "e_t": 10e9,
+                "g_lt": 5e9,
+                "nu_lt": 0.28,
+                "nu_tt": 0.40,
             },
         ],
         "field": {

@@ -3,8 +3,10 @@
 # Binders step one weft layer per pick, sweeping diagonally through the thickness.
 
 domain:
-  size: [0.00568, 0.00996, 0.0009]    # n_warp*warp_spacing x n_weft*weft_spacing x thickness
-  mesh_resolution: [24, 40, 12]
+  size: [0.00996, 0.00568, 0.0009]    # x = n_weft*weft_spacing (wefts run in y,
+                                      # tiled across x); y = n_warp*warp_spacing
+                                      # (warps run in x, tiled across y); z = thickness
+  mesh_resolution: [40, 24, 12]
 
 periodic_tolerance: 1.0e-8
 
@@ -18,7 +20,7 @@ field:
   type: layer_to_layer
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [0.00568, 0.00996, 0.0009]
+  domain_size: [0.00996, 0.00568, 0.0009]
   n_warp: 4
   n_weft: 6
   warp_layers: 2

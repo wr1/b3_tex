@@ -29,7 +29,11 @@ def estimate_yarn_volume_fraction(problem, n=40):
     grid = np.linspace(0.5 / n, 1 - 0.5 / n, n)
     xs, ys, zs = np.meshgrid(grid, grid, grid, indexing="ij")
     pts = np.stack(
-        [xs.ravel() * problem.size[0], ys.ravel() * problem.size[1], zs.ravel() * problem.size[2]],
+        [
+            xs.ravel() * problem.size[0],
+            ys.ravel() * problem.size[1],
+            zs.ravel() * problem.size[2],
+        ],
         axis=1,
     )
     samples = problem.field.sample(pts)
@@ -100,9 +104,14 @@ def main():
     n = 40
     grid = np.linspace(0, 1, n)
     Y, Z = np.meshgrid(grid, grid, indexing="ij")
-    pts_xy = np.stack([0.5 * np.ones_like(Y).ravel(), Y.ravel(), Z.ravel()], axis=1) * problem.size
+    pts_xy = (
+        np.stack([0.5 * np.ones_like(Y).ravel(), Y.ravel(), Z.ravel()], axis=1)
+        * problem.size
+    )
     samples = problem.field.sample(pts_xy)
-    is_yarn = np.array([1 if s.material == problem.field.yarn_material else 0 for s in samples])
+    is_yarn = np.array(
+        [1 if s.material == problem.field.yarn_material else 0 for s in samples]
+    )
     field_image = is_yarn.reshape(n, n)
 
     fig, ax = plt.subplots(figsize=(5, 5))
@@ -115,7 +124,9 @@ def main():
     )
     ax.set_xlabel("y")
     ax.set_ylabel("z")
-    ax.set_title(f"Phase field, slice x = 0.5\n(yarn cylinder along x, radius {problem.field.radius})")
+    ax.set_title(
+        f"Phase field, slice x = 0.5\n(yarn cylinder along x, radius {problem.field.radius})"
+    )
     fig.tight_layout()
     out_b = out_dir / "cylinder_geometry.png"
     fig.savefig(out_b, dpi=150)

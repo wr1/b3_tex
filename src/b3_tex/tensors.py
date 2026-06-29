@@ -23,10 +23,15 @@ VOIGT_PAIRS: tuple[tuple[int, int], ...] = (
 )
 
 _PAIR_OF_IJ = {
-    (0, 0): 0, (1, 1): 1, (2, 2): 2,
-    (1, 2): 3, (2, 1): 3,
-    (0, 2): 4, (2, 0): 4,
-    (0, 1): 5, (1, 0): 5,
+    (0, 0): 0,
+    (1, 1): 1,
+    (2, 2): 2,
+    (1, 2): 3,
+    (2, 1): 3,
+    (0, 2): 4,
+    (2, 0): 4,
+    (0, 1): 5,
+    (1, 0): 5,
 }
 
 
@@ -55,7 +60,9 @@ def stiffness_voigt_to_tensor(c_voigt: ArrayLike) -> NDArray[np.float64]:
 def stiffness_tensor_to_voigt(c_tensor: ArrayLike) -> NDArray[np.float64]:
     c = np.asarray(c_tensor, dtype=float)
     if c.shape != (3, 3, 3, 3):
-        raise ValueError(f"stiffness tensor must have shape (3, 3, 3, 3), got {c.shape}")
+        raise ValueError(
+            f"stiffness tensor must have shape (3, 3, 3, 3), got {c.shape}"
+        )
     voigt = np.zeros((6, 6), dtype=float)
     for a, (i, j) in enumerate(VOIGT_PAIRS):
         for b, (k, m) in enumerate(VOIGT_PAIRS):
@@ -99,9 +106,7 @@ def rotate_stiffness_batch(
     if not np.allclose(RtR, eye, atol=1e-8):
         raise ValueError("each rotation must be orthogonal (R^T R = I)")
     c = stiffness_voigt_to_tensor(c_voigt)
-    rotated = np.einsum(
-        "nia,njb,nkc,nld,abcd->nijkl", R, R, R, R, c, optimize=True
-    )
+    rotated = np.einsum("nia,njb,nkc,nld,abcd->nijkl", R, R, R, R, c, optimize=True)
     return stiffness_tensor_to_voigt_batch(rotated)
 
 
@@ -178,30 +183,36 @@ def voigt_b_matrix(
         cy = cx + 1
         cz = cx + 2
     else:
-        raise ValueError(f"unknown ordering {ordering!r}; expected 'byNODES' or 'byVDIM'")
+        raise ValueError(
+            f"unknown ordering {ordering!r}; expected 'byNODES' or 'byVDIM'"
+        )
 
     B = np.zeros((6, nd * 3), dtype=float)
     dx = d[:, 0]
     dy = d[:, 1]
     dz = d[:, 2]
-    B[0, cx] = dx           # eps_xx = du_x/dx
-    B[1, cy] = dy           # eps_yy = du_y/dy
-    B[2, cz] = dz           # eps_zz = du_z/dz
-    B[3, cy] = dz           # 2*eps_yz part 1
-    B[3, cz] = dy           # 2*eps_yz part 2
-    B[4, cx] = dz           # 2*eps_xz part 1
-    B[4, cz] = dx           # 2*eps_xz part 2
-    B[5, cx] = dy           # 2*eps_xy part 1
-    B[5, cy] = dx           # 2*eps_xy part 2
+    B[0, cx] = dx  # eps_xx = du_x/dx
+    B[1, cy] = dy  # eps_yy = du_y/dy
+    B[2, cz] = dz  # eps_zz = du_z/dz
+    B[3, cy] = dz  # 2*eps_yz part 1
+    B[3, cz] = dy  # 2*eps_yz part 2
+    B[4, cx] = dz  # 2*eps_xz part 1
+    B[4, cz] = dx  # 2*eps_xz part 2
+    B[5, cx] = dy  # 2*eps_xy part 1
+    B[5, cy] = dx  # 2*eps_xy part 2
     return B
 
 
-def isotropic_stiffness(youngs_modulus: float, poisson_ratio: float) -> NDArray[np.float64]:
+def isotropic_stiffness(
+    youngs_modulus: float, poisson_ratio: float
+) -> NDArray[np.float64]:
     if youngs_modulus <= 0:
         raise ValueError("youngs_modulus must be positive")
     if not (-1.0 < poisson_ratio < 0.5):
         raise ValueError("poisson_ratio must be in (-1, 0.5)")
-    lam = youngs_modulus * poisson_ratio / ((1 + poisson_ratio) * (1 - 2 * poisson_ratio))
+    lam = (
+        youngs_modulus * poisson_ratio / ((1 + poisson_ratio) * (1 - 2 * poisson_ratio))
+    )
     mu = youngs_modulus / (2 * (1 + poisson_ratio))
     c = np.zeros((6, 6), dtype=float)
     c[0:3, 0:3] = lam
@@ -214,11 +225,24 @@ def isotropic_stiffness(youngs_modulus: float, poisson_ratio: float) -> NDArray[
 
 def orthotropic_stiffness(
     *,
-    e1: float, e2: float, e3: float,
-    nu12: float, nu13: float, nu23: float,
-    g12: float, g13: float, g23: float,
+    e1: float,
+    e2: float,
+    e3: float,
+    nu12: float,
+    nu13: float,
+    nu23: float,
+    g12: float,
+    g13: float,
+    g23: float,
 ) -> NDArray[np.float64]:
-    for name, value in {"e1": e1, "e2": e2, "e3": e3, "g12": g12, "g13": g13, "g23": g23}.items():
+    for name, value in {
+        "e1": e1,
+        "e2": e2,
+        "e3": e3,
+        "g12": g12,
+        "g13": g13,
+        "g23": g23,
+    }.items():
         if value <= 0:
             raise ValueError(f"{name} must be positive")
     nu21 = nu12 * e2 / e1
@@ -240,7 +264,11 @@ def orthotropic_stiffness(
 
 def transverse_isotropic_stiffness(
     *,
-    e_l: float, e_t: float, g_lt: float, nu_lt: float, nu_tt: float,
+    e_l: float,
+    e_t: float,
+    g_lt: float,
+    nu_lt: float,
+    nu_tt: float,
 ) -> NDArray[np.float64]:
     """Build a transverse-isotropic stiffness with the local 1-axis as the symmetry axis.
 
@@ -249,10 +277,44 @@ def transverse_isotropic_stiffness(
     """
     g_tt = e_t / (2 * (1 + nu_tt))
     return orthotropic_stiffness(
-        e1=e_l, e2=e_t, e3=e_t,
-        nu12=nu_lt, nu13=nu_lt, nu23=nu_tt,
-        g12=g_lt, g13=g_lt, g23=g_tt,
+        e1=e_l,
+        e2=e_t,
+        e3=e_t,
+        nu12=nu_lt,
+        nu13=nu_lt,
+        nu23=nu_tt,
+        g12=g_lt,
+        g13=g_lt,
+        g23=g_tt,
     )
+
+
+def transverse_isotropic_stiffness_batch(
+    *,
+    e_l: NDArray[np.float64],
+    e_t: NDArray[np.float64],
+    g_lt: NDArray[np.float64],
+    nu_lt: NDArray[np.float64],
+    nu_tt: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Vectorised transverse-isotropic stiffness; local 1-axis is the symmetry axis."""
+    g_tt = e_t / (2.0 * (1.0 + nu_tt))
+    nu21 = nu_lt * e_t / e_l
+    nu31 = nu_lt * e_t / e_l
+    compliance = np.zeros((e_l.shape[0], 6, 6), dtype=float)
+    compliance[:, 0, 0] = 1.0 / e_l
+    compliance[:, 1, 1] = 1.0 / e_t
+    compliance[:, 2, 2] = 1.0 / e_t
+    compliance[:, 0, 1] = -nu21 / e_t
+    compliance[:, 1, 0] = -nu_lt / e_l
+    compliance[:, 0, 2] = -nu31 / e_t
+    compliance[:, 2, 0] = -nu_lt / e_l
+    compliance[:, 1, 2] = -nu_tt / e_t
+    compliance[:, 2, 1] = -nu_tt / e_t
+    compliance[:, 3, 3] = 1.0 / g_tt
+    compliance[:, 4, 4] = 1.0 / g_lt
+    compliance[:, 5, 5] = 1.0 / g_lt
+    return np.linalg.inv(compliance)
 
 
 def voigt_strain_to_tensor(strain_voigt: ArrayLike) -> NDArray[np.float64]:

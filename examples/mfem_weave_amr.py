@@ -45,6 +45,7 @@ try:
     import b3_tex  # noqa: F401
 except ImportError:
     import sys
+
     print(
         "\n[error] 'b3_tex' (and its mfem dependency) is not importable.\n"
         "        Run this example with:\n"
@@ -67,20 +68,36 @@ def weave_config(amr_iterations: int, cell_type: str = "hexahedron") -> dict:
     return {
         "domain": {"size": DOMAIN_SIZE, "mesh_resolution": list(BASE_MESH)},
         "materials": [
-            {"name": "matrix", "type": "isotropic",
-             "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-            {"name": "fibre", "type": "transverse_isotropic",
-             "e_l": 70.0e9, "e_t": 15.0e9, "g_lt": 24.0e9,
-             "nu_lt": 0.20, "nu_tt": 0.30},
-            {"name": "yarn", "type": "chamis",
-             "matrix": "matrix", "fibre": "fibre",
-             "fibre_volume_fraction": 0.70},
+            {
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
+            },
+            {
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70.0e9,
+                "e_t": 15.0e9,
+                "g_lt": 24.0e9,
+                "nu_lt": 0.20,
+                "nu_tt": 0.30,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.70,
+            },
         ],
         "field": {
             "type": "plain_weave",
-            "matrix_material": "matrix", "yarn_material": "yarn",
+            "matrix_material": "matrix",
+            "yarn_material": "yarn",
             "domain_size": DOMAIN_SIZE,
-            "n_warp": 2, "n_weft": 2,
+            "n_warp": 2,
+            "n_weft": 2,
             "yarn_half_width": 0.245,
             "yarn_half_height": 0.038,
             "amplitude": 0.040,
@@ -154,8 +171,13 @@ def render_slice(mesh, metric, out_path: Path, title: str) -> None:
 
     p = pyvista.Plotter(off_screen=True, window_size=(900, 900))
     p.add_mesh(
-        sliced, scalars="heterogeneity", show_edges=True, edge_color="black",
-        line_width=0.5, cmap="viridis", clim=[0.0, 0.5],
+        sliced,
+        scalars="heterogeneity",
+        show_edges=True,
+        edge_color="black",
+        line_width=0.5,
+        cmap="viridis",
+        clim=[0.0, 0.5],
         scalar_bar_args={"title": "heterogeneity", "n_labels": 3, "fmt": "%.2f"},
     )
     p.add_title(title, font_size=10)
@@ -199,12 +221,15 @@ def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
             "g_xy_GPa": e_const["g_xy"] / 1e9,
         }
         runs.append(rec)
-        print(f"cells={n_cells:5d} GPs={rec['n_gps']:6d} DOFs={rec['n_dofs']:6d}  "
-              f"E_x={rec['e_x_GPa']:5.2f} E_z={rec['e_z_GPa']:5.2f}  t={elapsed:6.1f}s")
+        print(
+            f"cells={n_cells:5d} GPs={rec['n_gps']:6d} DOFs={rec['n_dofs']:6d}  "
+            f"E_x={rec['e_x_GPa']:5.2f} E_z={rec['e_z_GPa']:5.2f}  t={elapsed:6.1f}s"
+        )
 
         if cell_type == "hexahedron":
             render_slice(
-                mesh_for_viz, metric,
+                mesh_for_viz,
+                metric,
                 OUT_DIR / f"mfem_weave_amr_iter{it}.png",
                 f"MFEM hex periodic, AMR iter {it}: {n_cells} cells (8 GPs each = "
                 f"{rec['n_gps']} material samples), {rec['n_dofs']} DOFs",
@@ -238,10 +263,16 @@ def main() -> None:
         return np.array([r[key] for r in records])
 
     style = {
-        "hexahedron": {"marker": "o", "color": "#1b9e77",
-                       "label": "hex (8 GPs/cell, NCMesh octree)"},
-        "tetrahedron": {"marker": "s", "color": "#d95f02",
-                        "label": "tet (4 GPs/cell, Plaza red-green)"},
+        "hexahedron": {
+            "marker": "o",
+            "color": "#1b9e77",
+            "label": "hex (8 GPs/cell, NCMesh octree)",
+        },
+        "tetrahedron": {
+            "marker": "s",
+            "color": "#d95f02",
+            "label": "tet (4 GPs/cell, Plaza red-green)",
+        },
     }
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8.5))
@@ -249,12 +280,23 @@ def main() -> None:
     ax = axes[0, 0]
     for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
         s = style[ct]
-        ax.plot(arr(recs, "n_gps"), arr(recs, "e_x_GPa"),
-                marker=s["marker"], color=s["color"], linestyle="-",
-                label=f"{s['label']}: $E_x$")
-        ax.plot(arr(recs, "n_gps"), arr(recs, "e_z_GPa"),
-                marker=s["marker"], color=s["color"], linestyle="--",
-                alpha=0.6, label=f"{s['label']}: $E_z$")
+        ax.plot(
+            arr(recs, "n_gps"),
+            arr(recs, "e_x_GPa"),
+            marker=s["marker"],
+            color=s["color"],
+            linestyle="-",
+            label=f"{s['label']}: $E_x$",
+        )
+        ax.plot(
+            arr(recs, "n_gps"),
+            arr(recs, "e_z_GPa"),
+            marker=s["marker"],
+            color=s["color"],
+            linestyle="--",
+            alpha=0.6,
+            label=f"{s['label']}: $E_z$",
+        )
     ax.set_xscale("log")
     ax.set_xlabel("# Gauss points = # material samples")
     ax.set_ylabel("modulus [GPa]")
@@ -265,8 +307,13 @@ def main() -> None:
     ax = axes[0, 1]
     for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
         s = style[ct]
-        ax.plot(arr(recs, "n_gps"), arr(recs, "n_dofs"),
-                marker=s["marker"], color=s["color"], label=s["label"])
+        ax.plot(
+            arr(recs, "n_gps"),
+            arr(recs, "n_dofs"),
+            marker=s["marker"],
+            color=s["color"],
+            label=s["label"],
+        )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("# Gauss points = # material samples")
@@ -278,8 +325,13 @@ def main() -> None:
     ax = axes[1, 0]
     for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
         s = style[ct]
-        ax.plot(arr(recs, "n_gps"), arr(recs, "elapsed_s"),
-                marker=s["marker"], color=s["color"], label=s["label"])
+        ax.plot(
+            arr(recs, "n_gps"),
+            arr(recs, "elapsed_s"),
+            marker=s["marker"],
+            color=s["color"],
+            label=s["label"],
+        )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("# Gauss points = # material samples")
@@ -291,8 +343,13 @@ def main() -> None:
     ax = axes[1, 1]
     for ct, recs in (("hexahedron", hex_runs), ("tetrahedron", tet_runs)):
         s = style[ct]
-        ax.plot(arr(recs, "amr_iterations"), arr(recs, "n_gps"),
-                marker=s["marker"], color=s["color"], label=s["label"])
+        ax.plot(
+            arr(recs, "amr_iterations"),
+            arr(recs, "n_gps"),
+            marker=s["marker"],
+            color=s["color"],
+            label=s["label"],
+        )
     ax.set_xlabel("AMR iteration")
     ax.set_ylabel("# Gauss points")
     ax.set_yscale("log")
@@ -311,8 +368,16 @@ def main() -> None:
 
     json_path = OUT_DIR / "mfem_weave_amr_data.json"
     with json_path.open("w") as f:
-        json.dump({"base_mesh": list(BASE_MESH), "threshold": THRESHOLD,
-                   "domain_size": DOMAIN_SIZE, "runs": runs}, f, indent=2)
+        json.dump(
+            {
+                "base_mesh": list(BASE_MESH),
+                "threshold": THRESHOLD,
+                "domain_size": DOMAIN_SIZE,
+                "runs": runs,
+            },
+            f,
+            indent=2,
+        )
     print(f"wrote {json_path}")
     print("wrote mfem_weave_amr_iter{0..3}.png and convergence panel")
 

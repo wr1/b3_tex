@@ -37,6 +37,7 @@ _TITLE = "Implicit AMR modelling of woven composites"
 # C_eff for the finale
 # ----------------------------------------------------------------------------
 
+
 def _resolve_c_eff(problem, c_eff) -> np.ndarray:
     if c_eff is None:
         from b3_tex.datasheet import solve_homogenization
@@ -56,6 +57,7 @@ def _resolve_c_eff(problem, c_eff) -> np.ndarray:
 # actor builders (each datum is the sampled implicit field)
 # ----------------------------------------------------------------------------
 
+
 def _iso_dataset(problem, res, clim):
     """Vf-coloured level-set isosurface of the implicit indicator (the glowing tow)."""
     surf = sample_volume(problem, res=res).to_image_data().contour([1.0], scalars="phi")
@@ -67,7 +69,9 @@ def _iso_dataset(problem, res, clim):
 
 
 def _inside_volume(problem, res):
-    return sample_volume(problem, res=res).to_image_data().threshold(0.5, scalars="inside")
+    return (
+        sample_volume(problem, res=res).to_image_data().threshold(0.5, scalars="inside")
+    )
 
 
 def _cross_section_mesh(yarn, cl, s_val, *, hw, hv, nu=84, nv=44):
@@ -85,7 +89,11 @@ def _cross_section_mesh(yarn, cl, s_val, *, hw, hv, nu=84, nv=44):
     u = np.linspace(-hw, hw, nu)
     v = np.linspace(-hv, hv, nv)
     U, V = np.meshgrid(u, v)
-    pts = foot[None, :] + U.ravel()[:, None] * e2[None, :] + V.ravel()[:, None] * e3[None, :]
+    pts = (
+        foot[None, :]
+        + U.ravel()[:, None] * e2[None, :]
+        + V.ravel()[:, None] * e3[None, :]
+    )
     inside = np.asarray(yarn.ellipse_value(pts), dtype=float) <= 1.0
     if not inside.any():
         return None
@@ -128,10 +136,17 @@ def _loadcase_fibre_strain(problem, surf_pts, *, res, solve_mesh=(24, 24, 6)):
     for k in range(6):  # Voigt order 11,22,33,23,13,12
         ev = np.zeros(6)
         ev[k] = 1.0
-        eps = np.asarray(session.solve_macro_strain(ev).eps_per_gp)  # (n_gp,6) eng. Voigt
-        ax = (eps[:, 0] * e1[:, 0] ** 2 + eps[:, 1] * e1[:, 1] ** 2 + eps[:, 2] * e1[:, 2] ** 2
-              + eps[:, 3] * e1[:, 1] * e1[:, 2] + eps[:, 4] * e1[:, 0] * e1[:, 2]
-              + eps[:, 5] * e1[:, 0] * e1[:, 1])
+        eps = np.asarray(
+            session.solve_macro_strain(ev).eps_per_gp
+        )  # (n_gp,6) eng. Voigt
+        ax = (
+            eps[:, 0] * e1[:, 0] ** 2
+            + eps[:, 1] * e1[:, 1] ** 2
+            + eps[:, 2] * e1[:, 2] ** 2
+            + eps[:, 3] * e1[:, 1] * e1[:, 2]
+            + eps[:, 4] * e1[:, 0] * e1[:, 2]
+            + eps[:, 5] * e1[:, 0] * e1[:, 1]
+        )
         out[k] = ax[idx]
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.savez(cache, eps=out)
@@ -171,12 +186,16 @@ def _centerline_actors(plotter, problem, theme):
         fam = int(classify_family(mid)[0])
         tube = pv.lines_from_points(pts).tube(radius=0.006 * Lmax)
         actors.append(
-            plotter.add_mesh(tube, color=theme.family_colors[fam], show_scalar_bar=False)
+            plotter.add_mesh(
+                tube, color=theme.family_colors[fam], show_scalar_bar=False
+            )
         )
     return actors
 
 
-def _amr_pass_actors(plotter, problem, theme, *, base=(10, 10, 3), max_iters=3, threshold=0.2):
+def _amr_pass_actors(
+    plotter, problem, theme, *, base=(10, 10, 3), max_iters=3, threshold=0.2
+):
     """One clipped, het-coloured grid actor per refinement pass (for a crossfade)."""
     import mfem.ser as mfem
 
@@ -196,8 +215,14 @@ def _amr_pass_actors(plotter, problem, theme, *, base=(10, 10, 3), max_iters=3, 
         grid = to_pyvista_grid(mesh, metric=metric).clip(normal="z", crinkle=True)
         actors.append(
             plotter.add_mesh(
-                grid, scalars="het_metric", cmap=theme.cmap_het, clim=theme.het_clim,
-                show_edges=True, edge_color="#222233", line_width=0.4, show_scalar_bar=False,
+                grid,
+                scalars="het_metric",
+                cmap=theme.cmap_het,
+                clim=theme.het_clim,
+                show_edges=True,
+                edge_color="#222233",
+                line_width=0.4,
+                show_scalar_bar=False,
             )
         )
         flagged = flag_cells_for_refinement(metric, threshold)
@@ -210,6 +235,7 @@ def _amr_pass_actors(plotter, problem, theme, *, base=(10, 10, 3), max_iters=3, 
 # ----------------------------------------------------------------------------
 # the storyboard
 # ----------------------------------------------------------------------------
+
 
 def weave_explainer(
     problem,
@@ -242,7 +268,9 @@ def weave_explainer(
     clim = vf_clim(problem)
 
     theme = Theme(background="#06060c")
-    scene = WeaveScene(problem, theme=theme, off_screen=True, window_size=(window_px, window_px))
+    scene = WeaveScene(
+        problem, theme=theme, off_screen=True, window_size=(window_px, window_px)
+    )
     pl = scene.plotter
     pl.set_background("#05050a", top="#15152a")
     try:
@@ -255,8 +283,12 @@ def weave_explainer(
     centerlines = _centerline_actors(pl, problem, theme)
     iso_data = _iso_dataset(problem, res, clim)
     iso_actor = pl.add_mesh(
-        iso_data, scalars="local_vf", cmap=theme.cmap_vf, clim=clim,
-        smooth_shading=True, show_scalar_bar=False,
+        iso_data,
+        scalars="local_vf",
+        cmap=theme.cmap_vf,
+        clim=clim,
+        smooth_shading=True,
+        show_scalar_bar=False,
     )
     fibre = layers.add_fibre_field(pl, problem, theme, res=22)
     amr_actors = _amr_pass_actors(pl, problem, theme)
@@ -275,8 +307,13 @@ def weave_explainer(
     modulus = directional_modulus_surface(C, resolution=64, scale=0.40 * Lmax)
     modulus.points = modulus.points + np.asarray(center)
     mod_actor = pl.add_mesh(
-        modulus, scalars="E_GPa", cmap="inferno", smooth_shading=True,
-        specular=0.6, specular_power=15, show_scalar_bar=False,
+        modulus,
+        scalars="E_GPa",
+        cmap="inferno",
+        smooth_shading=True,
+        specular=0.6,
+        specular_power=15,
+        show_scalar_bar=False,
     )
 
     for sb in list(getattr(pl, "scalar_bars", {}).keys()):
@@ -317,16 +354,29 @@ def weave_explainer(
         col, row = k % 3, k // 3
         off = np.array([(col - 1) * dx, (0.5 - row) * dy, 0.0])
         cell = iso_data.copy()
-        cell.points = iso_pts + amp_cell * (iso_pts - np.asarray(center)) @ E_tensors[k].T + off
+        cell.points = (
+            iso_pts + amp_cell * (iso_pts - np.asarray(center)) @ E_tensors[k].T + off
+        )
         cell["eps_axial"] = eps_axial[k]
-        lc_cells.append(pl.add_mesh(
-            cell, scalars="eps_axial", cmap=theme.cmap_stress, clim=stress_clim,
-            smooth_shading=True, show_scalar_bar=False,
-        ))
+        lc_cells.append(
+            pl.add_mesh(
+                cell,
+                scalars="eps_axial",
+                cmap=theme.cmap_stress,
+                clim=stress_clim,
+                smooth_shading=True,
+                show_scalar_bar=False,
+            )
+        )
         lc_label_pts.append(np.asarray(center) + off + [0.0, -0.62 * Ly, 0.0])
     lc_labels = pl.add_point_labels(
-        np.array(lc_label_pts), LC_LABELS, font_size=int(window_px * 0.018),
-        text_color="white", shape=None, show_points=False, always_visible=True,
+        np.array(lc_label_pts),
+        LC_LABELS,
+        font_size=int(window_px * 0.018),
+        text_color="white",
+        shape=None,
+        show_points=False,
+        always_visible=True,
     )
 
     def _set_dynamic(key, mesh, opacity):
@@ -336,15 +386,24 @@ def weave_explainer(
         if opacity <= 1e-3 or mesh is None or mesh.n_points == 0:
             return
         dyn[key] = pl.add_mesh(
-            mesh, scalars="local_vf", cmap=theme.cmap_vf, clim=clim,
-            smooth_shading=True, show_scalar_bar=False, opacity=float(opacity),
+            mesh,
+            scalars="local_vf",
+            cmap=theme.cmap_vf,
+            clim=clim,
+            smooth_shading=True,
+            show_scalar_bar=False,
+            opacity=float(opacity),
         )
 
     # --- timeline (deterministic actor state from t) -----------------------
     def update(t: float) -> None:
         # box: solid early, faint reference during the loadcases, gone for the finale.
-        set_opacity(box, ramp(t, 0.2, 1.3) * (1.0 - 0.7 * ramp(t, 12.8, 13.4))
-                    * (1.0 - ramp(t, 17.4, 18.2)))
+        set_opacity(
+            box,
+            ramp(t, 0.2, 1.3)
+            * (1.0 - 0.7 * ramp(t, 12.8, 13.4))
+            * (1.0 - ramp(t, 17.4, 18.2)),
+        )
 
         for a in centerlines:
             set_opacity(a, window(t, 1.1, 5.7, fade=0.5))
@@ -365,10 +424,14 @@ def weave_explainer(
 
         # tow isosurface: hidden while the sections sweep, then the full Vf weave;
         # ghost during AMR/cloud/cut, fade for the finale.
-        iso_full = window(t, 5.4, 13.2, fade=0.7) * (1.0 - 0.78 * window(t, 7.9, 12.9, fade=0.5))
+        iso_full = window(t, 5.4, 13.2, fade=0.7) * (
+            1.0 - 0.78 * window(t, 7.9, 12.9, fade=0.5)
+        )
         set_opacity(iso_actor, iso_full)
 
-        set_opacity(fibre, window(t, 6.0, 10.6, fade=0.5) * (1.0 - 0.55 * ramp(t, 7.9, 8.4)))
+        set_opacity(
+            fibre, window(t, 6.0, 10.6, fade=0.5) * (1.0 - 0.55 * ramp(t, 7.9, 8.4))
+        )
 
         amr_g = window(t, 7.7, 10.6, fade=0.4)
         n = len(amr_actors)
@@ -393,7 +456,11 @@ def weave_explainer(
         cut_op = window(t, 11.6, 13.2, fade=0.4)
         if cut_op > 1e-3:
             z = Lz * (0.15 + 0.7 * ramp(t, 11.7, 13.0))
-            _set_dynamic("cut", inside_vol.slice(normal="z", origin=(center[0], center[1], z)), cut_op)
+            _set_dynamic(
+                "cut",
+                inside_vol.slice(normal="z", origin=(center[0], center[1], z)),
+                cut_op,
+            )
         else:
             _set_dynamic("cut", None, 0.0)
 
@@ -408,14 +475,34 @@ def weave_explainer(
     # --- captions ----------------------------------------------------------
     end_handle = handle or "b3_tex"
 
-    vf_legend = {"cmap": theme.cmap_vf, "vmin": clim[0], "vmax": clim[1],
-                 "title": "Vf", "fmt": "{:.2f}"}
-    het_legend = {"cmap": theme.cmap_het, "vmin": theme.het_clim[0], "vmax": theme.het_clim[1],
-                  "title": "het.", "fmt": "{:.2f}"}
-    E_legend = {"cmap": "inferno", "vmin": min(Ex, Ey, Ez), "vmax": max(Ex, Ey, Ez),
-                "title": "E [GPa]", "fmt": "{:.0f}"}
-    stress_legend = {"cmap": theme.cmap_stress, "vmin": stress_clim[0], "vmax": stress_clim[1],
-                     "title": "fibre strain", "fmt": "{:+.1f}"}
+    vf_legend = {
+        "cmap": theme.cmap_vf,
+        "vmin": clim[0],
+        "vmax": clim[1],
+        "title": "Vf",
+        "fmt": "{:.2f}",
+    }
+    het_legend = {
+        "cmap": theme.cmap_het,
+        "vmin": theme.het_clim[0],
+        "vmax": theme.het_clim[1],
+        "title": "het.",
+        "fmt": "{:.2f}",
+    }
+    E_legend = {
+        "cmap": "inferno",
+        "vmin": min(Ex, Ey, Ez),
+        "vmax": max(Ex, Ey, Ez),
+        "title": "E [GPa]",
+        "fmt": "{:.0f}",
+    }
+    stress_legend = {
+        "cmap": theme.cmap_stress,
+        "vmin": stress_clim[0],
+        "vmax": stress_clim[1],
+        "title": "fibre strain",
+        "fmt": "{:+.1f}",
+    }
 
     def caption(t: float) -> dict:
         if not captions:
@@ -423,53 +510,81 @@ def weave_explainer(
         if t < 1.5:
             return {"card": {"title": title, "sub": handle or "how it works"}}
         if t < 4.2:
-            return {"caption": "Implicit tow geometry",
-                    "sub": "a cross-section is swept along each tow path", "legend": vf_legend}
+            return {
+                "caption": "Implicit tow geometry",
+                "sub": "a cross-section is swept along each tow path",
+                "legend": vf_legend,
+            }
         if t < 6.0:
-            return {"caption": "Local fibre volume fraction",
-                    "sub": "the section compacts at crossovers, so Vf rises", "legend": vf_legend}
+            return {
+                "caption": "Local fibre volume fraction",
+                "sub": "the section compacts at crossovers, so Vf rises",
+                "legend": vf_legend,
+            }
         if t < 7.7:
-            return {"caption": "Local fibre orientation", "sub": "arrows = fibre direction in each tow",
-                    "legend": vf_legend}
+            return {
+                "caption": "Local fibre orientation",
+                "sub": "arrows = fibre direction in each tow",
+                "legend": vf_legend,
+            }
         if t < 10.0:
-            return {"caption": "Adaptive mesh refinement",
-                    "sub": "the mesh refines where the material is heterogeneous", "legend": het_legend}
+            return {
+                "caption": "Adaptive mesh refinement",
+                "sub": "the mesh refines where the material is heterogeneous",
+                "legend": het_legend,
+            }
         if t < 11.6:
-            return {"caption": "Local-cloud material sampling", "sub": "samples → IDW → Gauss points"}
+            return {
+                "caption": "Local-cloud material sampling",
+                "sub": "samples → IDW → Gauss points",
+            }
         if t < 13.2:
-            return {"caption": "Slices reveal the structure", "sub": "periodic RVE, matrix hidden",
-                    "legend": vf_legend}
+            return {
+                "caption": "Slices reveal the structure",
+                "sub": "periodic RVE, matrix hidden",
+                "legend": vf_legend,
+            }
         if t < LC1:
-            return {"caption": "Six homogenization loadcases",
-                    "sub": "unit macro strains; colour = fibre-axial strain (red tension, blue compression)",
-                    "legend": stress_legend}
+            return {
+                "caption": "Six homogenization loadcases",
+                "sub": "unit macro strains; colour = fibre-axial strain (red tension, blue compression)",
+                "legend": stress_legend,
+            }
         if t < 18.9:
             return {
                 "caption": "Homogenized stiffness",
                 "sub": "six loadcases -> effective C, then directional E",
-                "values": [("E_x", f"{Ex:.0f}"), ("E_y", f"{Ey:.0f}"), ("E_z", f"{Ez:.0f} GPa")],
+                "values": [
+                    ("E_x", f"{Ex:.0f}"),
+                    ("E_y", f"{Ey:.0f}"),
+                    ("E_z", f"{Ez:.0f} GPa"),
+                ],
                 "legend": E_legend,
             }
         return {"card": {"title": title, "sub": end_handle}}
 
     # --- camera choreography ----------------------------------------------
     z = 1.28 * Lmax  # global zoom-out so the RVE always fits in frame
-    track = CameraTrack([
-        CamKey(0.0, -65, 16, 2.7 * z, center),
-        CamKey(1.6, -55, 22, 2.05 * z, center),
-        CamKey(4.0, -35, 26, 1.95 * z, center),
-        CamKey(6.0, -12, 28, 1.85 * z, center),
-        CamKey(7.7, 6, 33, 1.9 * z, center),
-        CamKey(10.0, 22, 42, 1.85 * z, center),
-        CamKey(11.0, 26, 34, 1.45 * z, center),
-        CamKey(11.8, 30, 30, 1.55 * z, center),
-        CamKey(13.2, 50, 30, 2.3 * z, center),
-        CamKey(14.4, 72, 62, 5.6 * z, center),     # wide top-down: all six loadcases at once
-        CamKey(17.0, 92, 62, 5.6 * z, center),     # gentle drift across the panel
-        CamKey(18.1, 150, 28, 2.1 * z, center),    # dive back to centre
-        CamKey(18.9, 170, 22, 2.0 * z, center),    # settle for the stiffness surface
-        CamKey(seconds, 188, 20, 2.05 * z, center),
-    ])
+    track = CameraTrack(
+        [
+            CamKey(0.0, -65, 16, 2.7 * z, center),
+            CamKey(1.6, -55, 22, 2.05 * z, center),
+            CamKey(4.0, -35, 26, 1.95 * z, center),
+            CamKey(6.0, -12, 28, 1.85 * z, center),
+            CamKey(7.7, 6, 33, 1.9 * z, center),
+            CamKey(10.0, 22, 42, 1.85 * z, center),
+            CamKey(11.0, 26, 34, 1.45 * z, center),
+            CamKey(11.8, 30, 30, 1.55 * z, center),
+            CamKey(13.2, 50, 30, 2.3 * z, center),
+            CamKey(
+                14.4, 72, 62, 5.6 * z, center
+            ),  # wide top-down: all six loadcases at once
+            CamKey(17.0, 92, 62, 5.6 * z, center),  # gentle drift across the panel
+            CamKey(18.1, 150, 28, 2.1 * z, center),  # dive back to centre
+            CamKey(18.9, 170, 22, 2.0 * z, center),  # settle for the stiffness surface
+            CamKey(seconds, 188, 20, 2.05 * z, center),
+        ]
+    )
 
     logo_img = None
     if logo is not None:
@@ -478,8 +593,15 @@ def weave_explainer(
         logo_img = load_logo(logo, width=int(window_px * 0.11))
 
     director = Director(
-        plotter=pl, update=update, seconds=seconds, fps=fps,
-        camera=track, caption=caption, theme=theme, logo=logo_img, logo_margin=0.028,
+        plotter=pl,
+        update=update,
+        seconds=seconds,
+        fps=fps,
+        camera=track,
+        caption=caption,
+        theme=theme,
+        logo=logo_img,
+        logo_margin=0.028,
     )
     frames = director.render()
     scene.close()

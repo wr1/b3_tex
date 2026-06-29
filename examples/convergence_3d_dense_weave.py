@@ -89,11 +89,28 @@ DOMAIN_SIZE = [1.0, 1.0, 0.16]
 DENSE_BASE = {
     "domain": {"size": DOMAIN_SIZE, "mesh_resolution": [32, 32, 8]},
     "materials": [
-        {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-        {"name": "fibre", "type": "transverse_isotropic",
-         "e_l": 230.0e9, "e_t": 15.0e9, "g_lt": 24.0e9, "nu_lt": 0.20, "nu_tt": 0.30},
-        {"name": "yarn", "type": "chamis", "matrix": "matrix", "fibre": "fibre",
-         "fibre_volume_fraction": 0.70},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
+        {
+            "name": "fibre",
+            "type": "transverse_isotropic",
+            "e_l": 230.0e9,
+            "e_t": 15.0e9,
+            "g_lt": 24.0e9,
+            "nu_lt": 0.20,
+            "nu_tt": 0.30,
+        },
+        {
+            "name": "yarn",
+            "type": "chamis",
+            "matrix": "matrix",
+            "fibre": "fibre",
+            "fibre_volume_fraction": 0.70,
+        },
     ],
     "field": {
         "type": "plain_weave",
@@ -145,6 +162,7 @@ def build_config(
 # Backend handling
 # =============================================================================
 
+
 def get_solve_function(backend: str):
     if backend.startswith("mfem"):
         if "periodic" in backend:
@@ -163,6 +181,7 @@ def get_solve_function(backend: str):
 # Experimental plan (smart, not full factorial)
 # =============================================================================
 
+
 def get_experimental_plan():
     """
     Returns a list of dicts for the 4-axis study (material × qdeg × mesh × refinement_strategy).
@@ -174,42 +193,72 @@ def get_experimental_plan():
 
     # Uniform baselines (good operating region)
     for res in [3, 6, 10, 16]:
-        plan.append({
-            "n_xy": 24, "material_resolution": res, "qdeg": 2,
-            "refinement_strategy": "uniform", "amr_iterations": 0
-        })
+        plan.append(
+            {
+                "n_xy": 24,
+                "material_resolution": res,
+                "qdeg": 2,
+                "refinement_strategy": "uniform",
+                "amr_iterations": 0,
+            }
+        )
 
     for q in [2, 3, 4]:
-        plan.append({
-            "n_xy": 24, "material_resolution": 6, "qdeg": q,
-            "refinement_strategy": "uniform", "amr_iterations": 0
-        })
+        plan.append(
+            {
+                "n_xy": 24,
+                "material_resolution": 6,
+                "qdeg": q,
+                "refinement_strategy": "uniform",
+                "amr_iterations": 0,
+            }
+        )
 
     # AMR cases — very coarse start + high material sampling + decent q + AMR
     # Using 2, 8, 16 to have better spread (user request)
     for res in [6, 10, 16]:
-        plan.append({
-            "n_xy": 8, "material_resolution": res, "qdeg": 3,
-            "refinement_strategy": "amr", "amr_iterations": 3
-        })
+        plan.append(
+            {
+                "n_xy": 8,
+                "material_resolution": res,
+                "qdeg": 3,
+                "refinement_strategy": "amr",
+                "amr_iterations": 3,
+            }
+        )
 
     # n_xy=2 is extremely coarse — we allow significantly more AMR iterations
     # because the user noted it can tolerate higher AMR budgets when normalizing on runtime.
-    plan.append({
-        "n_xy": 2, "material_resolution": 12, "qdeg": 3,
-        "refinement_strategy": "amr", "amr_iterations": 8
-    })
+    plan.append(
+        {
+            "n_xy": 2,
+            "material_resolution": 12,
+            "qdeg": 3,
+            "refinement_strategy": "amr",
+            "amr_iterations": 8,
+        }
+    )
 
     # Extra point: even more aggressive AMR on the coarsest start
-    plan.append({
-        "n_xy": 2, "material_resolution": 12, "qdeg": 3,
-        "refinement_strategy": "amr", "amr_iterations": 12
-    })
+    plan.append(
+        {
+            "n_xy": 2,
+            "material_resolution": 12,
+            "qdeg": 3,
+            "refinement_strategy": "amr",
+            "amr_iterations": 12,
+        }
+    )
 
-    plan.append({
-        "n_xy": 16, "material_resolution": 10, "qdeg": 3,
-        "refinement_strategy": "amr", "amr_iterations": 3
-    })
+    plan.append(
+        {
+            "n_xy": 16,
+            "material_resolution": 10,
+            "qdeg": 3,
+            "refinement_strategy": "amr",
+            "amr_iterations": 3,
+        }
+    )
 
     return plan
 
@@ -217,6 +266,7 @@ def get_experimental_plan():
 # =============================================================================
 # One run
 # =============================================================================
+
 
 def run_one(
     n_xy: int,
@@ -233,7 +283,11 @@ def run_one(
     Returns a dict with accuracy metrics and detailed timings.
     """
     cfg = build_config(
-        n_xy, material_resolution, qdeg, backend, cell_type,
+        n_xy,
+        material_resolution,
+        qdeg,
+        backend,
+        cell_type,
         refinement_strategy=refinement_strategy,
         amr_iterations=amr_iterations,
     )
@@ -252,7 +306,7 @@ def run_one(
         if refinement_strategy == "amr" and amr_iterations > 0:
             # User's hypothesis: AMR + high material sampling + high order on coarser start is efficient
             # Model: AMR reaches accuracy of a finer mesh with less total time, despite some overhead
-            solve_time = base_solve * 0.78   # net win from adaptivity
+            solve_time = base_solve * 0.78  # net win from adaptivity
             # AMR gives better effective resolution for the same final n_cells
             effective_mesh_factor = 1.35
             err_mesh = 0.095 * (24.0 / max(n_xy * effective_mesh_factor, 8)) ** 1.85
@@ -298,9 +352,9 @@ def run_one(
         "n_cells": n_cells,
         "dofs": dofs,
         "total_time_s": round(total_time, 3),
-        "mat_time_s": 0.0,          # material sampling cost is included in total_time_s for real runs
+        "mat_time_s": 0.0,  # material sampling cost is included in total_time_s for real runs
         "solve_time_s": round(total_time, 3),
-        "frobenius_rel": 0.0,       # real error vs reference not computed here (use synthetic mode for plots)
+        "frobenius_rel": 0.0,  # real error vs reference not computed here (use synthetic mode for plots)
         "C": result.effective_stiffness.tolist(),
         "refinement_strategy": refinement_strategy,
         "amr_iterations": amr_iterations,
@@ -311,6 +365,7 @@ def run_one(
 # =============================================================================
 # Reporting
 # =============================================================================
+
 
 def save_results(runs: list[dict], out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -333,25 +388,42 @@ def generate_plots(runs: list[dict], out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Slice 1: Material resolution sweep (fixed good mesh + qdeg) ---
-    main = sorted([r for r in runs if r.get("n_xy") == 24 and r.get("qdeg") == 2],
-                  key=lambda x: x["material_resolution"])
+    main = sorted(
+        [r for r in runs if r.get("n_xy") == 24 and r.get("qdeg") == 2],
+        key=lambda x: x["material_resolution"],
+    )
 
     # 1. Error vs material resolution
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot([r["material_resolution"] for r in main],
-            [r["frobenius_rel"] for r in main], "o-", linewidth=2, markersize=8)
+    ax.plot(
+        [r["material_resolution"] for r in main],
+        [r["frobenius_rel"] for r in main],
+        "o-",
+        linewidth=2,
+        markersize=8,
+    )
     ax.set_xlabel("Material resolution (points per direction per cell)")
     ax.set_ylabel("Relative Frobenius error on C_eff")
-    ax.set_title("Convergence vs Material Sampling Resolution\n(qdeg=2, ~24-level mesh, periodic BCs)")
+    ax.set_title(
+        "Convergence vs Material Sampling Resolution\n(qdeg=2, ~24-level mesh, periodic BCs)"
+    )
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(out_dir / "error_vs_material_resolution.png", dpi=150, bbox_inches="tight")
+    fig.savefig(
+        out_dir / "error_vs_material_resolution.png", dpi=150, bbox_inches="tight"
+    )
     plt.close(fig)
 
     # 2. Time vs material resolution
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot([r["material_resolution"] for r in main],
-            [r["total_time_s"] for r in main], "o-", color="tab:orange", linewidth=2, markersize=8)
+    ax.plot(
+        [r["material_resolution"] for r in main],
+        [r["total_time_s"] for r in main],
+        "o-",
+        color="tab:orange",
+        linewidth=2,
+        markersize=8,
+    )
     ax.set_xlabel("Material resolution")
     ax.set_ylabel("Wall time (s)")
     ax.set_title("Total Wall Time vs Material Sampling Resolution")
@@ -361,13 +433,21 @@ def generate_plots(runs: list[dict], out_dir: Path):
     plt.close(fig)
 
     # --- Slice 2: qdeg sweep (fixed mesh + good resolution) ---
-    q_slice = sorted([r for r in runs if r.get("n_xy") == 24 and r.get("material_resolution") == 6],
-                     key=lambda x: x["qdeg"])
+    q_slice = sorted(
+        [r for r in runs if r.get("n_xy") == 24 and r.get("material_resolution") == 6],
+        key=lambda x: x["qdeg"],
+    )
 
     # 3. Error vs qdeg
     fig, ax = plt.subplots(figsize=(7, 5))
-    ax.plot([r["qdeg"] for r in q_slice],
-            [r["frobenius_rel"] for r in q_slice], "s-", color="tab:green", linewidth=2, markersize=8)
+    ax.plot(
+        [r["qdeg"] for r in q_slice],
+        [r["frobenius_rel"] for r in q_slice],
+        "s-",
+        color="tab:green",
+        linewidth=2,
+        markersize=8,
+    )
     ax.set_xlabel("Quadrature degree (qdeg)")
     ax.set_ylabel("Relative Frobenius error on C_eff")
     ax.set_title("Convergence vs Quadrature Degree\n(resolution=6, 24-level mesh)")
@@ -377,13 +457,21 @@ def generate_plots(runs: list[dict], out_dir: Path):
     plt.close(fig)
 
     # --- Slice 3: Mesh refinement (fixed good resolution + qdeg) ---
-    mesh_slice = sorted([r for r in runs if r.get("material_resolution") == 6 and r.get("qdeg") == 2],
-                        key=lambda x: x["n_xy"])
+    mesh_slice = sorted(
+        [r for r in runs if r.get("material_resolution") == 6 and r.get("qdeg") == 2],
+        key=lambda x: x["n_xy"],
+    )
 
     # 4. Error vs mesh size
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot([r["n_xy"] for r in mesh_slice],
-            [r["frobenius_rel"] for r in mesh_slice], "^-", color="tab:red", linewidth=2, markersize=8)
+    ax.plot(
+        [r["n_xy"] for r in mesh_slice],
+        [r["frobenius_rel"] for r in mesh_slice],
+        "^-",
+        color="tab:red",
+        linewidth=2,
+        markersize=8,
+    )
     ax.set_xlabel("Mesh resolution (n_xy)")
     ax.set_ylabel("Relative Frobenius error on C_eff")
     ax.set_title("Convergence vs Mesh Refinement\n(resolution=6, qdeg=2, periodic BCs)")
@@ -394,10 +482,15 @@ def generate_plots(runs: list[dict], out_dir: Path):
 
     # 5. Pareto front (all points)
     fig, ax = plt.subplots(figsize=(8, 6))
-    sc = ax.scatter([r["total_time_s"] for r in runs],
-                    [r["frobenius_rel"] for r in runs],
-                    c=[r.get("material_resolution", 3) for r in runs],
-                    cmap="viridis", s=80, alpha=0.75, edgecolors="black")
+    sc = ax.scatter(
+        [r["total_time_s"] for r in runs],
+        [r["frobenius_rel"] for r in runs],
+        c=[r.get("material_resolution", 3) for r in runs],
+        cmap="viridis",
+        s=80,
+        alpha=0.75,
+        edgecolors="black",
+    )
     ax.set_xlabel("Total wall time (s)")
     ax.set_ylabel("Relative Frobenius error on C_eff")
     ax.set_title("Accuracy vs Cost Trade-off\n(color = material resolution)")
@@ -415,11 +508,17 @@ def generate_plots(runs: list[dict], out_dir: Path):
         solve_times = [t - m for t, m in zip(total_times, mat_times)]
 
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.bar([str(r["material_resolution"]) for r in main],
-               mat_times, label="Material sampling")
-        ax.bar([str(r["material_resolution"]) for r in main],
-               solve_times,
-               bottom=mat_times, label="FE solve + assembly")
+        ax.bar(
+            [str(r["material_resolution"]) for r in main],
+            mat_times,
+            label="Material sampling",
+        )
+        ax.bar(
+            [str(r["material_resolution"]) for r in main],
+            solve_times,
+            bottom=mat_times,
+            label="FE solve + assembly",
+        )
         ax.set_xlabel("Material resolution")
         ax.set_ylabel("Wall time (s)")
         ax.set_title("Time Breakdown (Material Sampling vs Solve)")
@@ -428,7 +527,9 @@ def generate_plots(runs: list[dict], out_dir: Path):
         fig.savefig(out_dir / "time_breakdown.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
     else:
-        print("[info] Skipping detailed time-breakdown plot (no mat_time_s data available)")
+        print(
+            "[info] Skipping detailed time-breakdown plot (no mat_time_s data available)"
+        )
 
     print(f"Plots saved to {out_dir}")
 
@@ -441,9 +542,15 @@ def write_report(runs: list[dict], out_dir: Path):
         f.write("# 3D Convergence Study – Dense Plain Weave\n\n")
         f.write("**BCs**: Periodic (mfem-periodic + hexahedron)\n\n")
         f.write("## Key Observations\n\n")
-        f.write("- Material sampling cost grows very slowly with resolution (tensorized design).\n")
-        f.write("- Increasing material resolution is usually the cheapest way to gain accuracy.\n")
-        f.write("- Recommended sweet spot for this geometry: resolution 6–8 + qdeg 2 on ~24-level mesh.\n\n")
+        f.write(
+            "- Material sampling cost grows very slowly with resolution (tensorized design).\n"
+        )
+        f.write(
+            "- Increasing material resolution is usually the cheapest way to gain accuracy.\n"
+        )
+        f.write(
+            "- Recommended sweet spot for this geometry: resolution 6–8 + qdeg 2 on ~24-level mesh.\n\n"
+        )
         f.write("See the generated PNGs for visual trade-off surfaces.\n")
 
     print(f"Report written to {md_path}")
@@ -453,17 +560,23 @@ def write_report(runs: list[dict], out_dir: Path):
 # Main
 # =============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--synthetic", action="store_true",
-                        help="Run with synthetic timings (no backend required)")
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Run with synthetic timings (no backend required)",
+    )
     parser.add_argument("--out-dir", default="results/3d_convergence_dense")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
 
     plan = get_experimental_plan()
-    print(f"Running 3D convergence study with {len(plan)} points (including AMR cases)...")
+    print(
+        f"Running 3D convergence study with {len(plan)} points (including AMR cases)..."
+    )
     print("Default: periodic BCs (mfem-periodic + hexahedron)\n")
 
     runs = []
@@ -481,13 +594,17 @@ def main():
         print(f"  n_xy={n_xy:2d} res={res:2d} q={q} [{label}] ...", end=" ", flush=True)
 
         rec = run_one(
-            n_xy, res, q,
+            n_xy,
+            res,
+            q,
             synthetic=args.synthetic,
             refinement_strategy=strat,
             amr_iterations=amr_it,
         )
         runs.append(rec)
-        print(f"error={rec.get('frobenius_rel', 0):.4f}  time={rec.get('total_time_s', 0):.1f}s")
+        print(
+            f"error={rec.get('frobenius_rel', 0):.4f}  time={rec.get('total_time_s', 0):.1f}s"
+        )
 
     save_results(runs, out_dir)
     generate_plots(runs, out_dir)

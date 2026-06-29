@@ -74,11 +74,11 @@ def test_cylinder_yarn_classification_by_radial_distance():
     )
     points = np.array(
         [
-            [0.0, 0.0, 0.0],   # on axis -> yarn
+            [0.0, 0.0, 0.0],  # on axis -> yarn
             [10.0, 0.0, 0.0],  # axially far, on axis -> yarn
-            [0.0, 0.2, 0.0],   # radial 0.2 < 0.3 -> yarn
-            [0.0, 0.4, 0.0],   # radial 0.4 > 0.3 -> matrix
-            [5.0, 0.21, 0.21], # radial sqrt(0.0882) ~ 0.297 < 0.3 -> yarn
+            [0.0, 0.2, 0.0],  # radial 0.2 < 0.3 -> yarn
+            [0.0, 0.4, 0.0],  # radial 0.4 > 0.3 -> matrix
+            [5.0, 0.21, 0.21],  # radial sqrt(0.0882) ~ 0.297 < 0.3 -> yarn
         ]
     )
     samples = field.sample(points)
@@ -134,12 +134,14 @@ def test_orthonormal_frame_along_batch_matches_scalar():
 def test_orthonormal_frame_along_batch_handles_z_dominant_axes():
     """The helper-axis selection switches when |e1.z| >= 0.9 — make sure both
     branches are exercised inside one batch."""
-    axes = np.array([
-        [1.0, 0.0, 0.0],   # x-dominant -> helper = z
-        [0.0, 1.0, 0.0],   # y-dominant -> helper = z
-        [0.0, 0.0, 1.0],   # z-dominant -> helper = y
-        [0.1, 0.1, 1.0],   # nearly z   -> helper = y
-    ])
+    axes = np.array(
+        [
+            [1.0, 0.0, 0.0],  # x-dominant -> helper = z
+            [0.0, 1.0, 0.0],  # y-dominant -> helper = z
+            [0.0, 0.0, 1.0],  # z-dominant -> helper = y
+            [0.1, 0.1, 1.0],  # nearly z   -> helper = y
+        ]
+    )
     expected = np.stack([orthonormal_frame_along(a) for a in axes])
     got = orthonormal_frame_along_batch(axes)
     np.testing.assert_allclose(got, expected, atol=1e-12)
@@ -163,7 +165,8 @@ def _assert_sample_matches_arrays(field, points):
 
 def test_cylinder_yarn_sample_arrays_matches_sample():
     field = CylinderYarnField(
-        matrix_material="matrix", yarn_material="yarn",
+        matrix_material="matrix",
+        yarn_material="yarn",
         axis_point=np.array([0.5, 0.5, 0.5]),
         axis_direction=np.array([1.0, 0.0, 0.0]),
         radius=0.3,
@@ -175,7 +178,8 @@ def test_cylinder_yarn_sample_arrays_matches_sample():
 
 def test_multi_straight_yarn_sample_arrays_matches_sample():
     field = MultiStraightYarnField(
-        matrix_material="matrix", yarn_material="yarn",
+        matrix_material="matrix",
+        yarn_material="yarn",
         yarns=(
             StraightYarn(
                 axis_point=np.array([0.25, 0.5, 0.5]),
@@ -196,10 +200,12 @@ def test_multi_straight_yarn_sample_arrays_matches_sample():
 
 def test_weave_field_sample_arrays_matches_sample():
     field = WeaveField(
-        matrix_material="matrix", yarn_material="yarn",
+        matrix_material="matrix",
+        yarn_material="yarn",
         yarns=plain_weave_yarns(
             domain_size=(1.0, 1.0, 0.16),
-            n_warp=2, n_weft=2,
+            n_warp=2,
+            n_weft=2,
             yarn_half_width=0.2,
             yarn_half_height=0.035,
             amplitude=0.04,

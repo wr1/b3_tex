@@ -36,7 +36,9 @@ def require_matplotlib():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError as exc:  # pragma: no cover
-        raise ImportError(f"2D plotting needs matplotlib — {_HINT}") from exc
+        raise ImportError(
+            "2D plotting needs matplotlib — install core deps:  pip install -e ."
+        ) from exc
     return plt
 
 

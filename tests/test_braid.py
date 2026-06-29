@@ -79,9 +79,7 @@ def test_z_amplitude_keeps_bias_within_thickness():
 
 
 def test_axial_can_be_disabled():
-    yarns = braid_yarns(
-        domain_size=DOMAIN, n_bias_per_dir=2, axial_enabled=False
-    )
+    yarns = braid_yarns(domain_size=DOMAIN, n_bias_per_dir=2, axial_enabled=False)
     assert len(yarns) == 4  # two bias families only
 
 

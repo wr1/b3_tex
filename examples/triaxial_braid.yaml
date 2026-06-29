@@ -18,8 +18,10 @@
 #   nominal_fibre_volume_fraction / max_fibre_volume_fraction (or nominal_vf/max_vf)
 
 domain:
-  size: [0.0017, 0.00057735, 0.0006]   # ~1 braid unit cell
-  mesh_resolution: [34, 12, 12]
+  size: [0.0017, 0.00057735, 0.00026]  # ~1 braid unit cell; thickness fits the
+                                        # bias/axial tows (touching both faces) so
+                                        # there is no neat-resin skin above/below
+  mesh_resolution: [34, 12, 6]
 
 periodic_tolerance: 1.0e-8
 
@@ -33,7 +35,7 @@ field:
   type: braid
   matrix_material: matrix
   yarn_material: yarn
-  domain_size: [0.0017, 0.00057735, 0.0006]
+  domain_size: [0.0017, 0.00057735, 0.00026]
   braid_angle_deg: 30
   n_bias_per_dir: 3
   bias_width: 0.00045

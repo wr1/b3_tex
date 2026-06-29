@@ -180,13 +180,9 @@ def build_braid(
 
     axial = dict(config.get("axial", {}))
     nominal_vf = float(
-        config.get(
-            "nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55)
-        )
+        config.get("nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55))
     )
-    max_vf = float(
-        config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9))
-    )
+    max_vf = float(config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9)))
 
     yarns = braid_yarns(
         domain_size=tuple(float(s) for s in config["domain_size"]),

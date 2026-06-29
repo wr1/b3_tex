@@ -45,7 +45,11 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
     built = build_from_registry(kind, config, materials)
     if built is not None:
         return built
-    _deprecated_to = {"plain_weave": "woven", "weave": "woven", "stitched_biaxial": "ncf"}
+    _deprecated_to = {
+        "plain_weave": "woven",
+        "weave": "woven",
+        "stitched_biaxial": "ncf",
+    }
     if kind in _deprecated_to:
         import warnings
 
@@ -58,7 +62,10 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
     if kind == "cylinder_yarn":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
-        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        for label, name in (
+            ("matrix_material", matrix_name),
+            ("yarn_material", yarn_name),
+        ):
             if name not in materials:
                 raise ValueError(f"{label} {name!r} is not in materials")
         return CylinderYarnField(
@@ -71,7 +78,10 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
     if kind == "plain_weave":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
-        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        for label, name in (
+            ("matrix_material", matrix_name),
+            ("yarn_material", yarn_name),
+        ):
             if name not in materials:
                 raise ValueError(f"{label} {name!r} is not in materials")
         domain_size = tuple(float(s) for s in config["domain_size"])
@@ -84,11 +94,16 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             amplitude=float(config["amplitude"]),
             power=float(config.get("power", 2.0)),
         )
-        return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
+        return WeaveField(
+            matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns
+        )
     if kind == "weave":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
-        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        for label, name in (
+            ("matrix_material", matrix_name),
+            ("yarn_material", yarn_name),
+        ):
             if name not in materials:
                 raise ValueError(f"{label} {name!r} is not in materials")
         yarns = tuple(
@@ -105,7 +120,9 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
             )
             for y in config["yarns"]
         )
-        return WeaveField(matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns)
+        return WeaveField(
+            matrix_material=matrix_name, yarn_material=yarn_name, yarns=yarns
+        )
     if kind in ("parametric_plain_weave", "satin_weave"):
         import warnings
 
@@ -131,7 +148,9 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
         }
         if kind == "parametric_plain_weave":
             woven_cfg["pattern"] = {
-                "kind": "plain", "n_warp": int(config["n_warp"]), "n_weft": int(config["n_weft"]),
+                "kind": "plain",
+                "n_warp": int(config["n_warp"]),
+                "n_weft": int(config["n_weft"]),
             }
             woven_cfg["compaction"] = float(config.get("compaction", 0.0))
             if bool(config.get("nest_crossover", False)):
@@ -140,14 +159,19 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
                 woven_cfg["amplitude"] = float(config.get("amplitude", 0.0))
         else:
             woven_cfg["pattern"] = {
-                "kind": "satin", "n": int(config["n_harness"]), "shift": int(config.get("shift", 2)),
+                "kind": "satin",
+                "n": int(config["n_harness"]),
+                "shift": int(config.get("shift", 2)),
             }
             woven_cfg["amplitude"] = float(config["amplitude"])
         return build_from_registry("woven", woven_cfg, materials)
     if kind == "stitched_biaxial":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
-        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        for label, name in (
+            ("matrix_material", matrix_name),
+            ("yarn_material", yarn_name),
+        ):
             if name not in materials:
                 raise ValueError(f"{label} {name!r} is not in materials")
         domain_size = tuple(float(s) for s in config["domain_size"])
@@ -167,7 +191,10 @@ def _build_field(config: dict[str, Any], materials: dict[str, Material]) -> Phas
     if kind == "multi_straight_yarn":
         matrix_name = str(config["matrix_material"])
         yarn_name = str(config["yarn_material"])
-        for label, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        for label, name in (
+            ("matrix_material", matrix_name),
+            ("yarn_material", yarn_name),
+        ):
             if name not in materials:
                 raise ValueError(f"{label} {name!r} is not in materials")
         yarns = tuple(
@@ -222,7 +249,9 @@ class RVEProblem:
 
         tolerance = float(config.get("periodic_tolerance", 1e-8))
         periodic_pairs = tuple(
-            PeriodicPair(axis=axis, lower=0.0, upper=float(size[axis]), tolerance=tolerance)
+            PeriodicPair(
+                axis=axis, lower=0.0, upper=float(size[axis]), tolerance=tolerance
+            )
             for axis in range(3)
         )
 

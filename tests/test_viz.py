@@ -13,7 +13,9 @@ import yaml
 from b3_tex.problem import RVEProblem
 from b3_tex.viz._deps import HAVE_PYVISTA
 
-pytestmark = pytest.mark.skipif(not HAVE_PYVISTA, reason="needs the 'viz' extra (pyvista)")
+pytestmark = pytest.mark.skipif(
+    not HAVE_PYVISTA, reason="needs the 'viz' extra (pyvista)"
+)
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 COMPACTED = EXAMPLES / "plain_weave_compacted_high_vf.yaml"

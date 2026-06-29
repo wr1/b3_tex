@@ -32,19 +32,36 @@ from b3_tex.problem import RVEProblem
 CFG = {
     "domain": {"size": [1.0, 1.0, 0.16], "mesh_resolution": [10, 10, 3]},
     "materials": [
-        {"name": "matrix", "type": "isotropic",
-         "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
-        {"name": "fibre", "type": "transverse_isotropic",
-         "e_l": 70.0e9, "e_t": 15.0e9, "g_lt": 24.0e9,
-         "nu_lt": 0.20, "nu_tt": 0.30},
-        {"name": "yarn", "type": "chamis",
-         "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.70},
+        {
+            "name": "matrix",
+            "type": "isotropic",
+            "youngs_modulus": 3.0e9,
+            "poisson_ratio": 0.35,
+        },
+        {
+            "name": "fibre",
+            "type": "transverse_isotropic",
+            "e_l": 70.0e9,
+            "e_t": 15.0e9,
+            "g_lt": 24.0e9,
+            "nu_lt": 0.20,
+            "nu_tt": 0.30,
+        },
+        {
+            "name": "yarn",
+            "type": "chamis",
+            "matrix": "matrix",
+            "fibre": "fibre",
+            "fibre_volume_fraction": 0.70,
+        },
     ],
     "field": {
         "type": "plain_weave",
-        "matrix_material": "matrix", "yarn_material": "yarn",
+        "matrix_material": "matrix",
+        "yarn_material": "yarn",
         "domain_size": [1.0, 1.0, 0.16],
-        "n_warp": 2, "n_weft": 2,
+        "n_warp": 2,
+        "n_weft": 2,
         "yarn_half_width": 0.245,
         "yarn_half_height": 0.038,
         "amplitude": 0.040,
@@ -63,9 +80,9 @@ def rot90_z(points):
     return out
 
 
-R3 = np.array([[0.0, -1.0, 0.0],
-               [1.0, 0.0, 0.0],
-               [0.0, 0.0, 1.0]])  # acts on local 1-axis: (1,0,0) -> (0,1,0)
+R3 = np.array(
+    [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+)  # acts on local 1-axis: (1,0,0) -> (0,1,0)
 
 
 def main():
@@ -97,8 +114,10 @@ def main():
         # rotation matrix transforms as R_b = R3 @ R_a (no conjugation).
         expected = np.einsum("ij,njk->nik", R3, ra)
         diff = np.linalg.norm(rb - expected, axis=(-2, -1))
-        print(f"[field] rotation transform residual on shared-yarn pts: "
-              f"mean={diff.mean():.3e}  max={diff.max():.3e}")
+        print(
+            f"[field] rotation transform residual on shared-yarn pts: "
+            f"mean={diff.mean():.3e}  max={diff.max():.3e}"
+        )
         print("        (0 = warp local frames map cleanly to weft frames)")
 
         # Frobenius distance is right-invariant: ||R3@R_a - R3@R_b||_F == ||R_a - R_b||_F,
@@ -127,20 +146,27 @@ def main():
         coords = np.array([mesh.GetVertexArray(int(v)) for v in verts])
         base_centroids[e] = coords.mean(axis=0)
     from scipy.spatial import cKDTree as _cKD
+
     tree0 = _cKD(base_centroids)
     rot_c0 = rot90_z(base_centroids)
     d0, p0 = tree0.query(rot_c0, k=1)
     print(f"\n[base ] cells={base_n}, max pair distance={d0.max():.3e}")
-    rel0 = np.abs(metric0 - metric0[p0]) / np.maximum(np.maximum(metric0, metric0[p0]), 1e-9)
-    print(f"[base ] metric agreement: mean rel diff={rel0.mean():.3e}  "
-          f"max={rel0.max():.3e}")
+    rel0 = np.abs(metric0 - metric0[p0]) / np.maximum(
+        np.maximum(metric0, metric0[p0]), 1e-9
+    )
+    print(
+        f"[base ] metric agreement: mean rel diff={rel0.mean():.3e}  "
+        f"max={rel0.max():.3e}"
+    )
     bad0 = rel0 > 0.10
     print(f"        cells with >10% disagreement on base mesh: {bad0.sum()} / {base_n}")
     if bad0.sum() > 0:
         worst = np.argsort(-rel0)[:5]
         for i in worst:
-            print(f"          centroid={base_centroids[i]}  m={metric0[i]:.3f}  "
-                  f"partner_m={metric0[p0[i]]:.3f}  rel={rel0[i]:.3f}")
+            print(
+                f"          centroid={base_centroids[i]}  m={metric0[i]:.3f}  "
+                f"partner_m={metric0[p0[i]]:.3f}  rel={rel0[i]:.3f}"
+            )
 
     # Now refine and re-check (post-refinement asymmetry).
     flagged = flag_cells_for_refinement(metric0, 0.20)
@@ -160,22 +186,27 @@ def main():
 
     # Match each cell to the closest cell at its rotated centroid.
     from scipy.spatial import cKDTree
+
     tree = cKDTree(centroids)
     dists, partners = tree.query(rotated_centroids, k=1)
 
     # Only consider matches that landed within a cell-diagonal distance.
     typical_h = (Lx / nx) / 2  # post-1-iter cells are ~half base size
     good = dists < typical_h
-    print(f"\n[mesh ] iter-1 cells={n_elem}, well-matched 90-deg pairs: "
-          f"{good.sum()} (median pair distance={np.median(dists[good]):.4f}, "
-          f"typical h~{typical_h:.4f})")
+    print(
+        f"\n[mesh ] iter-1 cells={n_elem}, well-matched 90-deg pairs: "
+        f"{good.sum()} (median pair distance={np.median(dists[good]):.4f}, "
+        f"typical h~{typical_h:.4f})"
+    )
 
     if good.sum() > 0:
         m_a = metric1[good]
         m_b = metric1[partners[good]]
         rel = np.abs(m_a - m_b) / np.maximum(np.maximum(m_a, m_b), 1e-9)
-        print(f"[mesh ] paired-cell metric agreement: mean rel diff="
-              f"{rel.mean():.3e}  max={rel.max():.3e}")
+        print(
+            f"[mesh ] paired-cell metric agreement: mean rel diff="
+            f"{rel.mean():.3e}  max={rel.max():.3e}"
+        )
         bad = rel > 0.10
         print(f"        cells with >10% disagreement: {bad.sum()} / {good.sum()}")
 
@@ -186,8 +217,10 @@ def main():
             for i in worst_idx:
                 ci = good_indices[i]
                 cj = partners[ci]
-                print(f"          {centroids[ci]}  m_a={metric1[ci]:.3f}  "
-                      f"m_b={metric1[cj]:.3f}  rel={rel[i]:.3f}")
+                print(
+                    f"          {centroids[ci]}  m_a={metric1[ci]:.3f}  "
+                    f"m_b={metric1[cj]:.3f}  rel={rel[i]:.3f}"
+                )
 
 
 if __name__ == "__main__":

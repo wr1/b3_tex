@@ -35,16 +35,29 @@ from b3_tex.reference import mori_tanaka_cylinder
 
 MESH_SWEEP = (4, 6, 8, 10, 12, 14)
 RADIUS = 0.4
-MATRIX = {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35}
+MATRIX = {
+    "name": "matrix",
+    "type": "isotropic",
+    "youngs_modulus": 3.0e9,
+    "poisson_ratio": 0.35,
+}
 YARN = {
-    "name": "yarn", "type": "transverse_isotropic",
-    "e_l": 140e9, "e_t": 10e9, "g_lt": 5e9, "nu_lt": 0.28, "nu_tt": 0.40,
+    "name": "yarn",
+    "type": "transverse_isotropic",
+    "e_l": 140e9,
+    "e_t": 10e9,
+    "g_lt": 5e9,
+    "nu_lt": 0.28,
+    "nu_tt": 0.40,
 }
 
 
 def _ud_tow_config(mesh_n: int, sampling: str, qdeg: int = 2) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [MATRIX, YARN],
         "field": {
             "type": "cylinder_yarn",
@@ -91,10 +104,13 @@ def main() -> None:
     )
     yarn = Material.transverse_isotropic(
         "yarn",
-        e_l=YARN["e_l"], e_t=YARN["e_t"], g_lt=YARN["g_lt"],
-        nu_lt=YARN["nu_lt"], nu_tt=YARN["nu_tt"],
+        e_l=YARN["e_l"],
+        e_t=YARN["e_t"],
+        g_lt=YARN["g_lt"],
+        nu_lt=YARN["nu_lt"],
+        nu_tt=YARN["nu_tt"],
     )
-    vf = float(np.pi * RADIUS ** 2)
+    vf = float(np.pi * RADIUS**2)
     C_MT = mori_tanaka_cylinder(matrix=matrix, fibre=yarn, fibre_volume_fraction=vf)
 
     runs: list[dict] = []
@@ -139,8 +155,18 @@ def main() -> None:
     }
 
     style = {
-        "centroid":   {"marker": "o", "linestyle": "--", "color": "#d95f02", "label": "centroid (DG-0)"},
-        "quadrature": {"marker": "s", "linestyle": "-",  "color": "#1b9e77", "label": "quadrature (q=2)"},
+        "centroid": {
+            "marker": "o",
+            "linestyle": "--",
+            "color": "#d95f02",
+            "label": "centroid (DG-0)",
+        },
+        "quadrature": {
+            "marker": "s",
+            "linestyle": "-",
+            "color": "#1b9e77",
+            "label": "quadrature (q=2)",
+        },
     }
 
     # E_x convergence
@@ -148,8 +174,13 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for s in ("centroid", "quadrature"):
         ax.plot(dofs[s], np.array(e_x[s]) / 1e9, **style[s])
-    ax.axhline(mt_constants["e_l"] / 1e9, color="black", linewidth=1.0,
-               linestyle=":", label="Mori-Tanaka")
+    ax.axhline(
+        mt_constants["e_l"] / 1e9,
+        color="black",
+        linewidth=1.0,
+        linestyle=":",
+        label="Mori-Tanaka",
+    )
     ax.set_xscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"$E_x$ (axial)  [GPa]")
@@ -165,8 +196,13 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for s in ("centroid", "quadrature"):
         ax.plot(dofs[s], np.array(e_y[s]) / 1e9, **style[s])
-    ax.axhline(mt_constants["e_t"] / 1e9, color="black", linewidth=1.0,
-               linestyle=":", label="Mori-Tanaka")
+    ax.axhline(
+        mt_constants["e_t"] / 1e9,
+        color="black",
+        linewidth=1.0,
+        linestyle=":",
+        label="Mori-Tanaka",
+    )
     ax.set_xscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"$E_y$ (transverse)  [GPa]")

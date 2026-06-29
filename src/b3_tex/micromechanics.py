@@ -34,7 +34,44 @@ from b3_tex.reference import (
     _engineering_constants_isotropic,
     engineering_constants_transverse_iso,
 )
-from b3_tex.tensors import transverse_isotropic_stiffness
+from b3_tex.tensors import (
+    transverse_isotropic_stiffness,
+    transverse_isotropic_stiffness_batch,
+)
+
+
+def chamis_ud_stiffness_batch(
+    *,
+    matrix: Material,
+    fibre: Material,
+    vf: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Return ``(K, 6, 6)`` transverse-isotropic UD stiffness over a Vf vector."""
+    vf_arr = np.asarray(vf, dtype=float).ravel()
+    if np.any(vf_arr < 0.0) or np.any(vf_arr > 1.0):
+        raise ValueError("fibre volume fraction must be in [0, 1]")
+    vm = 1.0 - vf_arr
+
+    em, num = _engineering_constants_isotropic(matrix.stiffness)
+    gm = em / (2.0 * (1.0 + num))
+
+    fc = engineering_constants_transverse_iso(fibre.stiffness)
+    e_l_f, e_t_f = fc["e_l"], fc["e_t"]
+    g_lt_f, nu_lt_f = fc["g_lt"], fc["nu_lt"]
+    g_tt_f = fc["g_tt"]
+    if e_t_f <= 0 or g_lt_f <= 0 or g_tt_f <= 0:
+        raise ValueError("fibre modulus must be positive")
+
+    e_l = vf_arr * e_l_f + vm * em
+    nu_lt = vf_arr * nu_lt_f + vm * num
+    sqrt_vf = np.sqrt(vf_arr)
+    e_t = em / (1.0 - sqrt_vf * (1.0 - em / e_t_f))
+    g_lt = gm / (1.0 - sqrt_vf * (1.0 - gm / g_lt_f))
+    g_tt = gm / (1.0 - sqrt_vf * (1.0 - gm / g_tt_f))
+    nu_tt = e_t / (2.0 * g_tt) - 1.0
+    return transverse_isotropic_stiffness_batch(
+        e_l=e_l, e_t=e_t, g_lt=g_lt, nu_lt=nu_lt, nu_tt=nu_tt
+    )
 
 
 def chamis_ud_stiffness(

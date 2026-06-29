@@ -70,7 +70,9 @@ def _render(problem: RVEProblem, out_path: Path, quadrature_degree: int = 2) -> 
     glyph_scale = 0.9 * min(Lx / max(nx, 1), Ly / max(ny, 1), Lz / max(nz, 1))
     arrow = pv.Arrow(
         start=(-0.5, 0.0, 0.0),
-        tip_length=0.30, tip_radius=0.22, shaft_radius=0.08,
+        tip_length=0.30,
+        tip_radius=0.22,
+        shaft_radius=0.08,
     )
     glyphs = glyph_pd.glyph(orient="e1", scale=False, geom=arrow, factor=glyph_scale)
 
@@ -90,11 +92,15 @@ def _render(problem: RVEProblem, out_path: Path, quadrature_degree: int = 2) -> 
     plotter = pv.Plotter(off_screen=True, window_size=(2000, 1500))
     plotter.add_mesh(
         mesh_grid.extract_feature_edges(),
-        color="#888888", line_width=0.5, opacity=0.5,
+        color="#888888",
+        line_width=0.5,
+        opacity=0.5,
     )
     family_cmap = ["#cc4422", "#2244cc", "#22aa44", "#bbbbbb"]
     plotter.add_mesh(
-        glyphs, scalars="family", cmap=family_cmap,
+        glyphs,
+        scalars="family",
+        cmap=family_cmap,
         clim=(0.0, 3.0),
         show_scalar_bar=False,
     )
@@ -108,7 +114,9 @@ def _render(problem: RVEProblem, out_path: Path, quadrature_degree: int = 2) -> 
     plotter.add_text(
         f"Yarn e1 at quadrature points  (degree {quadrature_degree})\n"
         f"{n_yarn_qp} of {n_total_qp} quadrature points inside a yarn",
-        position="upper_left", font_size=18, color="black",
+        position="upper_left",
+        font_size=18,
+        color="black",
     )
     plotter.view_isometric()
     plotter.camera.zoom(1.6)

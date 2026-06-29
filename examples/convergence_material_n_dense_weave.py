@@ -45,7 +45,12 @@ DOMAIN_SIZE = [1.0, 1.0, 0.16]
 DENSE_MESH = [32, 32, 8]
 
 MATERIALS = [
-    {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
+    {
+        "name": "matrix",
+        "type": "isotropic",
+        "youngs_modulus": 3.0e9,
+        "poisson_ratio": 0.35,
+    },
     {
         "name": "fibre",
         "type": "transverse_isotropic",
@@ -138,8 +143,6 @@ def run_one(
     elapsed = time.perf_counter() - t0
 
     spec = _resolve_material_sampling_spec(problem.solver)
-    n_mat_points = int(problem.solver.get("mesh_resolution", [32, 32, 8])[0] ** 3)  # rough
-    # Better: we don't have n_cells here easily without the mesh, so we record resolution
 
     return {
         "n_xy": n_xy,
@@ -152,13 +155,17 @@ def run_one(
         "elapsed_s": elapsed,
         "engineering": result.engineering_constants(),
         "material_strategy": spec["strategy"],
-        "material_resolution": material_resolution,
     }
 
 
 def load_reference_C() -> np.ndarray:
     """Load the existing reference C_eff for the dense weave (from results/)."""
-    ref_path = Path(__file__).resolve().parent.parent / "results" / "plain_weave_dense" / "C_eff.npz"
+    ref_path = (
+        Path(__file__).resolve().parent.parent
+        / "results"
+        / "plain_weave_dense"
+        / "C_eff.npz"
+    )
     if not ref_path.exists():
         raise FileNotFoundError(f"Reference not found: {ref_path}")
     data = np.load(ref_path)
@@ -166,38 +173,52 @@ def load_reference_C() -> np.ndarray:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Material sampling resolution sweep on dense plain weave")
-    parser.add_argument("--backend", default="mfem-periodic", choices=[
-        "mfem-periodic", "mfem-kubc", "dolfinx-periodic", "dolfinx-kubc"
-    ])
-    parser.add_argument("--cell-type", default="hexahedron", choices=["hexahedron", "tetrahedron"])
-    parser.add_argument("--mesh", nargs=3, type=int, default=DENSE_MESH, metavar=("NX", "NY", "NZ"))
-    parser.add_argument("--resolutions", nargs="+", type=int, default=list(range(1, 11)) + [12, 16])
+    parser = argparse.ArgumentParser(
+        description="Material sampling resolution sweep on dense plain weave"
+    )
+    parser.add_argument(
+        "--backend",
+        default="mfem-periodic",
+        choices=["mfem-periodic", "mfem-kubc", "dolfinx-periodic", "dolfinx-kubc"],
+    )
+    parser.add_argument(
+        "--cell-type", default="hexahedron", choices=["hexahedron", "tetrahedron"]
+    )
+    parser.add_argument(
+        "--mesh", nargs=3, type=int, default=DENSE_MESH, metavar=("NX", "NY", "NZ")
+    )
+    parser.add_argument(
+        "--resolutions", nargs="+", type=int, default=list(range(1, 11)) + [12, 16]
+    )
     parser.add_argument("--qdeg", type=int, default=2)
     parser.add_argument("--out", default="results/convergence_material_n_dense.json")
     args = parser.parse_args()
 
     n_xy, n_y, n_z = args.mesh
-    assert n_xy == n_y, "Only square in-plane meshes supported in this script for simplicity"
+    assert n_xy == n_y, (
+        "Only square in-plane meshes supported in this script for simplicity"
+    )
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Dense plain weave material-resolution sweep")
+    print("Dense plain weave material-resolution sweep")
     print(f"  Mesh: {n_xy} x {n_xy} x {n_z}")
     print(f"  Backend: {args.backend} ({args.cell_type})")
     print(f"  Resolutions: {args.resolutions}")
     print()
 
     C_ref = load_reference_C()
-    print(f"Reference C11 = {C_ref[0,0]:.4e}")
+    print(f"Reference C11 = {C_ref[0, 0]:.4e}")
 
     runs = []
     for res in args.resolutions:
         print(f"[res={res:2d}] ", end="", flush=True)
         try:
             rec = run_one(
-                n_xy, n_z, res,
+                n_xy,
+                n_z,
+                res,
                 backend=args.backend,
                 cell_type=args.cell_type,
                 qdeg=args.qdeg,
@@ -215,23 +236,33 @@ def main() -> None:
             # continue with next resolution
 
     with open(out_path, "w") as f:
-        json.dump({"runs": runs, "reference_path": str(Path("results/plain_weave_dense/C_eff.npz"))}, f, indent=2)
+        json.dump(
+            {
+                "runs": runs,
+                "reference_path": str(Path("results/plain_weave_dense/C_eff.npz")),
+            },
+            f,
+            indent=2,
+        )
 
     print(f"\nSaved {len(runs)} runs to {out_path}")
     print("You can now plot Frobenius error, E_x, E_z, etc. vs material_resolution.")
 
 
-def benchmark_material_sampling_only(resolutions: list[int], n_samples_per_cell: int = 200_000) -> None:
+def benchmark_material_sampling_only(
+    resolutions: list[int], n_samples_per_cell: int = 200_000
+) -> None:
     """Pure-numpy benchmark of the material sampling cost (no FE backend required).
 
     This shows how expensive it is to evaluate the PhaseField at very high
     per-cell resolution on the dense weave geometry.
     """
-    from b3_tex.fields import WeaveField
     from b3_tex.problem import RVEProblem
 
     print("\n=== Pure material sampling cost (no FE) ===")
-    probe = RVEProblem.from_config(dense_weave_config(8, 4, 1))  # any mesh, we only need the field
+    probe = RVEProblem.from_config(
+        dense_weave_config(8, 4, 1)
+    )  # any mesh, we only need the field
     field = probe.field
 
     rng = np.random.default_rng(0)
@@ -240,13 +271,13 @@ def benchmark_material_sampling_only(resolutions: list[int], n_samples_per_cell:
     for res in resolutions:
         # Simulate the work of one high-res cloud per "cell"
         # (we just time the actual field evaluation at res**3 points per "virtual cell")
-        M = res ** 3
+        M = res**3
         t0 = time.perf_counter()
-        _ = field.sample_arrays(pts)          # vectorised hot path
+        _ = field.sample_arrays(pts)  # vectorised hot path
         # In reality we would do this M times per cell, but here we measure the kernel
         # on a representative number of points.
         dt = time.perf_counter() - t0
-        print(f"  resolution={res:2d} (M={M:4d})  200k-point batch: {dt*1000:.2f} ms")
+        print(f"  resolution={res:2d} (M={M:4d})  200k-point batch: {dt * 1000:.2f} ms")
 
 
 if __name__ == "__main__":

@@ -38,7 +38,12 @@ from b3_tex.quadrature import (
 )
 from b3_tex.result import HomogenizationResult
 
-__all__ = ["_cell_centroids", "_global_stiffness_at_cell_centroids", "_voigt_strain", "solve"]
+__all__ = [
+    "_cell_centroids",
+    "_global_stiffness_at_cell_centroids",
+    "_voigt_strain",
+    "solve",
+]
 
 
 def _build_pin_bcs(V, mesh):
@@ -66,9 +71,7 @@ def _build_pin_bcs(V, mesh):
 
         def at_centre(x, c=centre):
             return (
-                np.isclose(x[0], c[0])
-                & np.isclose(x[1], c[1])
-                & np.isclose(x[2], c[2])
+                np.isclose(x[0], c[0]) & np.isclose(x[1], c[1]) & np.isclose(x[2], c[2])
             )
 
         dofs = dolfinx.fem.locate_dofs_geometrical((V_sub, V_sub_c), at_centre)
@@ -225,15 +228,10 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
                 "AMR phase 1 currently requires cell_type='tetrahedron' "
                 f"(got {cell_type_name!r}); dolfinx.mesh.refine is tet-only in 0.10"
             )
-        from b3_tex.amr import DEFAULT_AMR_SUB_SAMPLES, iteratively_refine
+        from b3_tex.amr import amr_loop_kwargs, iteratively_refine
+
         amr_cfg = problem.solver["amr"]
-        mesh = iteratively_refine(
-            mesh, problem,
-            threshold=float(amr_cfg.get("threshold", 0.15)),
-            max_iterations=int(amr_cfg.get("max_iterations", 4)),
-            dof_budget=int(amr_cfg.get("dof_budget", 200_000)),
-            n_samples_per_cell=int(amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)),
-        )
+        mesh = iteratively_refine(mesh, problem, **amr_loop_kwargs(amr_cfg))
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
@@ -247,7 +245,9 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
         C_func = dolfinx.fem.Function(T)
         centroids = _cell_centroids(mesh)
-        C_func.x.array[:] = _global_stiffness_at_cell_centroids(problem, centroids).reshape(-1)
+        C_func.x.array[:] = _global_stiffness_at_cell_centroids(
+            problem, centroids
+        ).reshape(-1)
         C_func.x.scatter_forward()
         dx_q = ufl.dx(domain=mesh)
     else:
@@ -286,7 +286,11 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         "pc_factor_mat_solver_type": "mumps",
     }
     linear_problem = dolfinx_mpc.LinearProblem(
-        a_form, L_form, mpc, bcs=bcs, u=u_sol,
+        a_form,
+        L_form,
+        mpc,
+        bcs=bcs,
+        u=u_sol,
         petsc_options_prefix="b3tex_periodic_",
         petsc_options=petsc_options,
     )
@@ -297,9 +301,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     one_form = dolfinx.fem.form(1.0 * dx_q)
     volume = mesh.comm.allreduce(dolfinx.fem.assemble_scalar(one_form), op=MPI.SUM)
 
-    component_forms = [
-        dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)
-    ]
+    component_forms = [dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)]
 
     loadcase_strains = np.eye(6)
     loadcase_stresses = np.zeros((6, 6))
@@ -312,7 +314,9 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         linear_problem.solve()
         for a_idx, form in enumerate(component_forms):
             integral = dolfinx.fem.assemble_scalar(form)
-            loadcase_stresses[a_idx, k] = mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+            loadcase_stresses[a_idx, k] = (
+                mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+            )
 
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 

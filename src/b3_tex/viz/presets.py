@@ -129,11 +129,15 @@ def explore(problem, *, theme: Theme = DEFAULT_THEME):
             if actor is not None and hasattr(actor, "SetVisibility"):
                 actor.SetVisibility(bool(flag))
             plotter.render()
+
         return cb
 
     for i, (name, _label_txt) in enumerate(specs):
         plotter.add_checkbox_button_widget(
-            _toggle(name), value=True, position=(10, 10 + 60 * i), size=30,
+            _toggle(name),
+            value=True,
+            position=(10, 10 + 60 * i),
+            size=30,
         )
     scene.show()
     return scene
@@ -141,7 +145,10 @@ def explore(problem, *, theme: Theme = DEFAULT_THEME):
 
 # -- animations ------------------------------------------------------------
 
-def orbit(scene: WeaveScene, out_path: str | Path, *, n_frames: int = 72, fps: int = 20) -> Path:
+
+def orbit(
+    scene: WeaveScene, out_path: str | Path, *, n_frames: int = 72, fps: int = 20
+) -> Path:
     """Spin the camera 360° around an already-built scene → GIF/MP4."""
     from b3_tex.viz._deps import require_imageio
 
@@ -190,7 +197,9 @@ def amr_progression(
     frames = []
     for it in range(max_iters + 1):
         metric = cell_heterogeneity_metric_mfem(mesh, problem, n_samples_per_cell=216)
-        scene = WeaveScene(problem, theme=theme, off_screen=True, window_size=window_size)
+        scene = WeaveScene(
+            problem, theme=theme, off_screen=True, window_size=window_size
+        )
         scene.add_amr(mesh=mesh, metric=metric, clip="z").add_box().isometric()
         scene.plotter.add_text(f"AMR pass {it}  ({mesh.GetNE()} cells)", font_size=10)
         frames.append(scene.plotter.screenshot(return_img=True))

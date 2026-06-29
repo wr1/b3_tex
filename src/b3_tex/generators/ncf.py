@@ -45,7 +45,9 @@ from b3_tex.geometry.yarn import ParametricYarn
 __all__ = ["build_ncf", "ncf_yarns"]
 
 
-def _ply_directions(angle_deg: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+def _ply_directions(
+    angle_deg: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return ``(tow_dir, in_plane_perp)`` unit vectors for an in-plane ply angle."""
     theta = np.deg2rad(float(angle_deg))
     d = np.array([np.cos(theta), np.sin(theta), 0.0])
@@ -94,9 +96,7 @@ def _ply_yarns(
             point=point, direction=d, s_min=-half_span, s_max=half_span
         )
         yarns.append(
-            ParametricYarn(
-                centerline, section, nominal_vf=nominal_vf, max_vf=max_vf
-            )
+            ParametricYarn(centerline, section, nominal_vf=nominal_vf, max_vf=max_vf)
         )
     return yarns
 
@@ -157,7 +157,9 @@ def _stitch_yarns(
     Lx, Ly, _Lz = (float(v) for v in domain_size)
     pattern = str(stitch.get("pattern", "tricot"))
     if pattern not in ("tricot", "pillar"):
-        raise ValueError(f"stitch.pattern must be 'tricot' or 'pillar', got {pattern!r}")
+        raise ValueError(
+            f"stitch.pattern must be 'tricot' or 'pillar', got {pattern!r}"
+        )
     n_x = int(stitch.get("n_x", 2))
     n_y = int(stitch.get("n_y", 2))
     if n_x <= 0 or n_y <= 0:
@@ -175,16 +177,17 @@ def _stitch_yarns(
     for i in range(n_x):
         x = (i + 0.5) * Lx / n_x
         cp = _stitch_control_points(
-            pattern=pattern, x=x, y=0.5 * Ly, z_lo=z_lo, z_hi=z_hi,
-            pitch=pitch, span=Ly,
+            pattern=pattern,
+            x=x,
+            y=0.5 * Ly,
+            z_lo=z_lo,
+            z_hi=z_hi,
+            pitch=pitch,
+            span=Ly,
         )
-        centerline = SplineCenterline(
-            control_points=cp, degree=min(3, cp.shape[0] - 1)
-        )
+        centerline = SplineCenterline(control_points=cp, degree=min(3, cp.shape[0] - 1))
         yarns.append(
-            ParametricYarn(
-                centerline, section, nominal_vf=nominal_vf, max_vf=max_vf
-            )
+            ParametricYarn(centerline, section, nominal_vf=nominal_vf, max_vf=max_vf)
         )
     return yarns
 
@@ -240,8 +243,10 @@ def ncf_yarns(
     if stitch is not None:
         yarns.extend(
             _stitch_yarns(
-                stitch, domain_size=domain_size,
-                nominal_vf=nominal_vf, max_vf=max_vf,
+                stitch,
+                domain_size=domain_size,
+                nominal_vf=nominal_vf,
+                max_vf=max_vf,
             )
         )
     return tuple(yarns)
@@ -278,13 +283,9 @@ def build_ncf(
             raise ValueError(f"{key} {name!r} is not in materials")
 
     nominal_vf = float(
-        config.get(
-            "nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55)
-        )
+        config.get("nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55))
     )
-    max_vf = float(
-        config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9))
-    )
+    max_vf = float(config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9)))
     yarns = ncf_yarns(
         domain_size=tuple(float(s) for s in config["domain_size"]),
         plies=list(config["plies"]),

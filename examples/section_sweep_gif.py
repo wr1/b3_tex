@@ -41,6 +41,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 from b3_tex.problem import RVEProblem
+from b3_tex.viz.theme import panel_rc
 
 EXAMPLES = Path(__file__).resolve().parent
 OUT_DIR = EXAMPLES.parent / "results"
@@ -69,34 +70,37 @@ def vf_limits(problem: RVEProblem) -> tuple[float, float]:
     return float(np.floor(vf.min() * 100) / 100), float(np.ceil(vf.max() * 100) / 100)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml"))
-    ap.add_argument("--axis", choices=("x", "y", "z"), default="z",
-                    help="axis along which the cut plane travels")
-    ap.add_argument("--frames", type=int, default=30)
-    ap.add_argument("--grid", type=int, default=140, help="in-plane samples per side")
-    ap.add_argument("--quiver-step", type=int, default=7)
-    ap.add_argument("--out", default=str(OUT_DIR / "section_sweep.gif"))
-    args = ap.parse_args()
+def make_section_sweep(
+    config_path: Path | str,
+    out_path: Path | str,
+    *,
+    axis: str = "z",
+    frames: int = 30,
+    grid: int = 140,
+    quiver_step: int = 7,
+) -> Path:
+    """Render the cut-plane sweep GIF (+ a mid-sweep still) for ``config_path``.
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    problem = RVEProblem.from_config(_load(Path(args.config)))
+    Returns the GIF path. This is the importable core; ``main`` is a thin CLI
+    wrapper around it (and the gallery driver calls it directly)."""
+    config_path, out = Path(config_path), Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    problem = RVEProblem.from_config(_load(config_path))
     field = problem.field
     sampler = getattr(field, "sample_local_vf", None)
 
-    sweep = {"x": 0, "y": 1, "z": 2}[args.axis]
+    sweep = {"x": 0, "y": 1, "z": 2}[axis]
     u_ax, v_ax = _PLANE_AXES[sweep]
     Lu, Lv, Lsweep = problem.size[u_ax], problem.size[v_ax], problem.size[sweep]
-    u = np.linspace(0, Lu, args.grid)
-    v = np.linspace(0, Lv, args.grid)
+    u = np.linspace(0, Lu, grid)
+    v = np.linspace(0, Lv, grid)
     U, V = np.meshgrid(u, v)  # (nv, nu)
     flat_u, flat_v = U.ravel(), V.ravel()
     n = flat_u.size
     # Sweep positions stay just inside the domain so slices are populated.
-    positions = np.linspace(0.04 * Lsweep, 0.96 * Lsweep, args.frames)
+    positions = np.linspace(0.04 * Lsweep, 0.96 * Lsweep, frames)
     vmin, vmax = vf_limits(problem)
-    s = args.quiver_step
+    s = quiver_step
 
     def sample_plane(pos: float):
         pts = np.zeros((n, 3))
@@ -104,11 +108,11 @@ def main() -> None:
         pts[:, u_ax] = flat_u
         pts[:, v_ax] = flat_v
         ids, rot = field.sample_arrays(pts)
-        yarn = ids.reshape(args.grid, args.grid) == 1
-        e1u = rot[:, u_ax, 0].reshape(args.grid, args.grid)
-        e1v = rot[:, v_ax, 0].reshape(args.grid, args.grid)
+        yarn = ids.reshape(grid, grid) == 1
+        e1u = rot[:, u_ax, 0].reshape(grid, grid)
+        e1v = rot[:, v_ax, 0].reshape(grid, grid)
         if sampler is not None:
-            vf = np.asarray(sampler(pts), dtype=float).reshape(args.grid, args.grid)
+            vf = np.asarray(sampler(pts), dtype=float).reshape(grid, grid)
         else:
             vf = np.where(yarn, 1.0, np.nan)
         vf = np.where(yarn, vf, np.nan)
@@ -116,50 +120,99 @@ def main() -> None:
         ev = np.where(yarn, e1v, np.nan)
         return vf, eu, ev
 
-    fig, ax = plt.subplots(figsize=(6.4, 5.6))
-    vf0, eu0, ev0 = sample_plane(positions[0])
-    mesh = ax.pcolormesh(u, v, vf0, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest")
-    quiv = ax.quiver(
-        U[::s, ::s], V[::s, ::s], eu0[::s, ::s], ev0[::s, ::s],
-        color="#39d0ff", scale=22, width=0.0045, pivot="mid",
-    )
-    cbar = fig.colorbar(mesh, ax=ax)
-    cbar.set_label("local in-tow fibre volume fraction $V_f$")
-    ax.set_xlabel(_AXIS_NAME[u_ax])
-    ax.set_ylabel(_AXIS_NAME[v_ax])
-    ax.set_aspect("equal")
-    title = ax.set_title("")
-
-    def update(k: int):
-        pos = positions[k]
-        vf, eu, ev = sample_plane(pos)
-        mesh.set_array(vf.ravel())  # 'nearest' shading: one colour cell per node
-        quiv.set_UVC(eu[::s, ::s], ev[::s, ::s])
-        title.set_text(
-            f"{Path(args.config).stem}\ncut plane  {args.axis} = {pos:.3f}   "
-            f"(fibre direction → quiver, $V_f$ → colour)"
+    with plt.rc_context(panel_rc()):
+        fig, ax = plt.subplots(figsize=(6.4, 5.6))
+        vf0, eu0, ev0 = sample_plane(positions[0])
+        mesh = ax.pcolormesh(
+            u, v, vf0, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest"
         )
-        return mesh, quiv, title
+        quiv = ax.quiver(
+            U[::s, ::s],
+            V[::s, ::s],
+            eu0[::s, ::s],
+            ev0[::s, ::s],
+            color="#39d0ff",
+            scale=22,
+            width=0.0045,
+            pivot="mid",
+        )
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label("local in-tow fibre volume fraction $V_f$")
+        ax.set_xlabel(_AXIS_NAME[u_ax])
+        ax.set_ylabel(_AXIS_NAME[v_ax])
+        ax.set_aspect("equal")
+        title = ax.set_title("")
 
-    anim = FuncAnimation(fig, update, frames=args.frames, blit=False)
-    out = Path(args.out)
-    anim.save(out, writer=PillowWriter(fps=8))
-    plt.close(fig)
-    print(f"Wrote {out}  ({args.frames} frames, sweep along {args.axis})")
+        def update(k: int):
+            pos = positions[k]
+            vf, eu, ev = sample_plane(pos)
+            mesh.set_array(vf.ravel())  # 'nearest' shading: one colour cell per node
+            quiv.set_UVC(eu[::s, ::s], ev[::s, ::s])
+            title.set_text(
+                f"{config_path.stem}\ncut plane  {axis} = {pos:.3f}   "
+                f"(fibre direction → quiver, $V_f$ → colour)"
+            )
+            return mesh, quiv, title
 
-    # Also dump a representative mid-sweep still.
-    still = out.with_name(out.stem + "_mid.png")
-    fig2, ax2 = plt.subplots(figsize=(6.4, 5.6))
-    vf, eu, ev = sample_plane(positions[len(positions) // 2])
-    m2 = ax2.pcolormesh(u, v, vf, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest")
-    ax2.quiver(U[::s, ::s], V[::s, ::s], eu[::s, ::s], ev[::s, ::s],
-               color="#39d0ff", scale=22, width=0.0045, pivot="mid")
-    fig2.colorbar(m2, ax=ax2, label="local in-tow fibre volume fraction $V_f$")
-    ax2.set_xlabel(_AXIS_NAME[u_ax]); ax2.set_ylabel(_AXIS_NAME[v_ax])
-    ax2.set_aspect("equal")
-    ax2.set_title(f"{Path(args.config).stem}  mid-sweep ({args.axis})")
-    fig2.tight_layout(); fig2.savefig(still, dpi=130); plt.close(fig2)
-    print(f"Wrote {still}")
+        anim = FuncAnimation(fig, update, frames=frames, blit=False)
+        anim.save(out, writer=PillowWriter(fps=8))
+        plt.close(fig)
+        print(f"Wrote {out}  ({frames} frames, sweep along {axis})")
+
+        # Also dump a representative mid-sweep still.
+        still = out.with_name(out.stem + "_mid.png")
+        fig2, ax2 = plt.subplots(figsize=(6.4, 5.6))
+        vf, eu, ev = sample_plane(positions[len(positions) // 2])
+        m2 = ax2.pcolormesh(
+            u, v, vf, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest"
+        )
+        ax2.quiver(
+            U[::s, ::s],
+            V[::s, ::s],
+            eu[::s, ::s],
+            ev[::s, ::s],
+            color="#39d0ff",
+            scale=22,
+            width=0.0045,
+            pivot="mid",
+        )
+        fig2.colorbar(m2, ax=ax2, label="local in-tow fibre volume fraction $V_f$")
+        ax2.set_xlabel(_AXIS_NAME[u_ax])
+        ax2.set_ylabel(_AXIS_NAME[v_ax])
+        ax2.set_aspect("equal")
+        ax2.set_title(f"{config_path.stem}  mid-sweep ({axis})")
+        fig2.tight_layout()
+        fig2.savefig(still, dpi=130)
+        plt.close(fig2)
+        print(f"Wrote {still}")
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--config", default=str(EXAMPLES / "plain_weave_compacted_high_vf.yaml")
+    )
+    ap.add_argument(
+        "--axis",
+        choices=("x", "y", "z"),
+        default="z",
+        help="axis along which the cut plane travels",
+    )
+    ap.add_argument("--frames", type=int, default=30)
+    ap.add_argument("--grid", type=int, default=140, help="in-plane samples per side")
+    ap.add_argument("--quiver-step", type=int, default=7)
+    ap.add_argument("--out", default=str(OUT_DIR / "section_sweep.gif"))
+    args = ap.parse_args()
+
+    make_section_sweep(
+        args.config,
+        args.out,
+        axis=args.axis,
+        frames=args.frames,
+        grid=args.grid,
+        quiver_step=args.quiver_step,
+    )
 
 
 if __name__ == "__main__":

@@ -1,11 +1,16 @@
 # Quad-axial [0/+45/-45/90] non-crimp fabric (NCF) with a tricot stitch.
-# Mirrors louisepb/TexGenScripts NonCrimpFabric.py; TexGen mm dimensions mapped
-# to SI metres (/1000): tow width 0.95 mm -> 0.00095, spacing 1.0 mm -> 0.001,
-# tow height 0.2 mm -> 0.0002, stitch radius 0.025 mm -> 0.000025.
+# Topology mirrors louisepb/TexGenScripts NonCrimpFabric.py (spacing 1.0 mm ->
+# 0.001, stitch radius 0.025 mm -> 0.000025), but the inlay tows are sized to a
+# realistic fibre packing rather than TexGen's lean illustrative tapes: each ply
+# is a near-rectangular tape (power 10) of height 0.25 mm = a quarter of the
+# 1 mm thickness and width = the 1 mm spacing, so the four plies fill the stack
+# edge-to-edge. The tow bundle then occupies ~91% of the RVE (RVE fibre Vf ~0.50
+# at the nominal 0.55 in-tow Vf), with neat resin only in the thin ply-interface
+# and stitch-displacement pockets.
 #
-# Four straight inlay plies stacked through-thickness at z = 0.2/0.4/0.6/0.8 mm,
-# each laid at its own in-plane angle, held by tricot stitch columns that dip
-# below the bottom ply and rise above the top ply (z_span spans the whole stack).
+# Four straight inlay plies stacked through-thickness at z = 0.125/0.375/0.625/
+# 0.875 mm, each laid at its own in-plane angle, held by tricot stitch columns
+# that dip below the bottom ply and rise above the top ply (z_span spans the stack).
 
 domain:
   size: [0.004, 0.004, 0.001]        # 4 x 4 mm in plane, 1 mm thick
@@ -24,14 +29,20 @@ field:
   matrix_material: matrix
   yarn_material: yarn
   domain_size: [0.004, 0.004, 0.001]
-  power: 0.5                          # power-ellipse (lenticular) inlay sections
+  power: 10.0                         # near-rectangular tape sections: the flat
+                                      # inlays nearly fill each z-band, so the tow
+                                      # bundle occupies ~91% of the RVE (thin resin
+                                      # only at ply interfaces) — realistic NCF
+                                      # packing, not the lean lenticular pockets.
   nominal_fibre_volume_fraction: 0.55
   max_fibre_volume_fraction: 0.90
-  plies:
-    - {angle_deg: 0,   z_center: 0.0002, width: 0.00095, height: 0.0002, spacing: 0.001}
-    - {angle_deg: 45,  z_center: 0.0004, width: 0.00095, height: 0.0002, spacing: 0.001}
-    - {angle_deg: -45, z_center: 0.0006, width: 0.00095, height: 0.0002, spacing: 0.001}
-    - {angle_deg: 90,  z_center: 0.0008, width: 0.00095, height: 0.0002, spacing: 0.001}
+  plies:                              # height 0.25 mm x 4 plies = the full 1 mm
+                                      # thickness (no neat-resin skins); width = the
+                                      # 1 mm spacing so in-ply tows touch edge-to-edge.
+    - {angle_deg: 0,   z_center: 0.000125, width: 0.001, height: 0.00025, spacing: 0.001}
+    - {angle_deg: 45,  z_center: 0.000375, width: 0.001, height: 0.00025, spacing: 0.001}
+    - {angle_deg: -45, z_center: 0.000625, width: 0.001, height: 0.00025, spacing: 0.001}
+    - {angle_deg: 90,  z_center: 0.000875, width: 0.001, height: 0.00025, spacing: 0.001}
   stitch:
     pattern: tricot
     n_x: 4

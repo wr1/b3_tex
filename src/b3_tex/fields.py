@@ -176,6 +176,18 @@ class CylinderYarnField:
         ids, rotations = self.sample_arrays(pts)
         return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
 
+    def surface_proximity(self, points: ArrayLike) -> NDArray[np.float64]:
+        """Smooth proximity field: ``r / radius`` (0 on axis, 1 on the surface).
+
+        Used by the AMR marker to detect a thin yarn even when the discrete
+        inside/outside count gives no signal (see :mod:`b3_tex.amr`)."""
+        pts = _as_points_2d(points)
+        return self._radial_distance(pts) / self.radius
+
+    def min_feature_size(self) -> float:
+        """Smallest through-thickness of the yarn (the cylinder diameter)."""
+        return 2.0 * self.radius
+
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
@@ -208,9 +220,9 @@ class SinusoidalYarn:
     amplitude: float
     period: float
     phase: float
-    half_width: float    # in-plane semi-axis (perpendicular to running axis, in plane)
-    half_height: float   # out-of-plane semi-axis (perpendicular to centerline tangent)
-    power: float = 2.0   # super-ellipse exponent; 2 = ellipse, larger = more rectangular
+    half_width: float  # in-plane semi-axis (perpendicular to running axis, in plane)
+    half_height: float  # out-of-plane semi-axis (perpendicular to centerline tangent)
+    power: float = 2.0  # super-ellipse exponent; 2 = ellipse, larger = more rectangular
 
     def __post_init__(self) -> None:
         if self.axis not in ("x", "y"):
@@ -220,7 +232,9 @@ class SinusoidalYarn:
         if self.period <= 0:
             raise ValueError("period must be positive")
         if self.power < 1.0:
-            raise ValueError("power must be >= 1 (sub-1 exponents make a non-convex astroid)")
+            raise ValueError(
+                "power must be >= 1 (sub-1 exponents make a non-convex astroid)"
+            )
         # Reuse the shared geometry core: the sinusoid math lives in the
         # centerline, the super-ellipse shape/area in the section. The analytic
         # ``ellipse_value`` below is kept (instead of the generic ParametricYarn
@@ -344,6 +358,18 @@ class WeaveField:
         ids, rotations = self.sample_arrays(pts)
         return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
 
+    def surface_proximity(self, points: ArrayLike) -> NDArray[np.float64]:
+        """Per-point ``min_k ellipse_value`` over yarns (<=1 inside any yarn)."""
+        pts = _as_points_2d(points)
+        values = np.full((len(self.yarns), pts.shape[0]), np.inf)
+        for k, yarn in enumerate(self.yarns):
+            values[k] = yarn.ellipse_value(pts)
+        return values.min(axis=0)
+
+    def min_feature_size(self) -> float:
+        """Smallest through-thickness across all yarns (thinnest semi-axis x2)."""
+        return 2.0 * min(min(yarn.half_width, yarn.half_height) for yarn in self.yarns)
+
 
 @dataclass(frozen=True)
 class ParametricWeaveField:
@@ -368,21 +394,24 @@ class ParametricWeaveField:
     def material_names(self) -> tuple[str, ...]:
         return (self.matrix_material, self.yarn_material)
 
-    def _winner(self, pts: NDArray[np.float64]) -> tuple[NDArray[np.intp], NDArray[np.bool_]]:
+    def _winner(
+        self, pts: NDArray[np.float64]
+    ) -> tuple[NDArray[np.intp], NDArray[np.bool_], NDArray[np.float64]]:
         n = pts.shape[0]
         values = np.full((len(self.yarns), n), np.inf)
         for k, yarn in enumerate(self.yarns):
             values[k] = yarn.ellipse_value(pts)
         best_k = np.argmin(values, axis=0)
-        inside = values[best_k, np.arange(n)] <= 1.0
-        return best_k, inside
+        min_vals = values[best_k, np.arange(n)]
+        inside = min_vals <= 1.0
+        return best_k, inside, min_vals
 
     def sample_arrays(
         self, points: ArrayLike
     ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
         pts = _as_points_2d(points)
         n = pts.shape[0]
-        best_k, inside = self._winner(pts)
+        best_k, inside, _min_vals = self._winner(pts)
         rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
         for k, yarn in enumerate(self.yarns):
             mask = inside & (best_k == k)
@@ -396,7 +425,7 @@ class ParametricWeaveField:
         """Per-point local fibre volume fraction; ``nan`` where the point is matrix."""
         pts = _as_points_2d(points)
         n = pts.shape[0]
-        best_k, inside = self._winner(pts)
+        best_k, inside, _min_vals = self._winner(pts)
         vf = np.full(n, np.nan)
         for k, yarn in enumerate(self.yarns):
             mask = inside & (best_k == k)
@@ -411,8 +440,20 @@ class ParametricWeaveField:
         ids, rotations = self.sample_arrays(pts)
         return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
 
+    def surface_proximity(self, points: ArrayLike) -> NDArray[np.float64]:
+        """Per-point ``min_k ellipse_value`` over yarns (<=1 inside any yarn)."""
+        pts = _as_points_2d(points)
+        _best_k, _inside, min_vals = self._winner(pts)
+        return min_vals
 
-def _compacted_height(half_height: float, compaction: float, period: float, phase: float):
+    def min_feature_size(self) -> float:
+        """Smallest through-thickness across all yarns (thinnest semi-axis x2)."""
+        return 2.0 * min(yarn.min_half_extent() for yarn in self.yarns)
+
+
+def _compacted_height(
+    half_height: float, compaction: float, period: float, phase: float
+):
     """Section half-height that thins toward the undulation extremes (crossovers).
 
     ``half_height(s) = h0 * (1 - compaction * sin(2*pi*s/period + phase)**2)``, so the
@@ -473,12 +514,20 @@ def parametric_plain_weave_yarns(
         y_pos = (j + 0.5) * Ly / n_warp
         phase = (j % 2) * np.pi
         cl = SinusoidalCenterline(
-            axis="x", inplane_position=y_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_x, phase=phase, s_min=0.0, s_max=Lx,
+            axis="x",
+            inplane_position=y_pos,
+            z_mid=z_mid,
+            amplitude=amplitude,
+            period=period_x,
+            phase=phase,
+            s_min=0.0,
+            s_max=Lx,
         )
         sec = SuperellipseSection(
             half_width=yarn_half_width,
-            half_height=_compacted_height(yarn_half_height, compaction, period_x, phase),
+            half_height=_compacted_height(
+                yarn_half_height, compaction, period_x, phase
+            ),
             power=power,
         )
         yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
@@ -486,12 +535,20 @@ def parametric_plain_weave_yarns(
         x_pos = (i + 0.5) * Lx / n_weft
         phase = (i % 2) * np.pi + np.pi
         cl = SinusoidalCenterline(
-            axis="y", inplane_position=x_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_y, phase=phase, s_min=0.0, s_max=Ly,
+            axis="y",
+            inplane_position=x_pos,
+            z_mid=z_mid,
+            amplitude=amplitude,
+            period=period_y,
+            phase=phase,
+            s_min=0.0,
+            s_max=Ly,
         )
         sec = SuperellipseSection(
             half_width=yarn_half_width,
-            half_height=_compacted_height(yarn_half_height, compaction, period_y, phase),
+            half_height=_compacted_height(
+                yarn_half_height, compaction, period_y, phase
+            ),
             power=power,
         )
         yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
@@ -614,21 +671,35 @@ def plain_weave_yarns(
     for j in range(n_warp):
         y_pos = (j + 0.5) * Ly / n_warp
         phase = (j % 2) * np.pi
-        yarns.append(SinusoidalYarn(
-            axis="x", inplane_position=y_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_x, phase=phase,
-            half_width=yarn_half_width, half_height=yarn_half_height,
-            power=power,
-        ))
+        yarns.append(
+            SinusoidalYarn(
+                axis="x",
+                inplane_position=y_pos,
+                z_mid=z_mid,
+                amplitude=amplitude,
+                period=period_x,
+                phase=phase,
+                half_width=yarn_half_width,
+                half_height=yarn_half_height,
+                power=power,
+            )
+        )
     for i in range(n_weft):
         x_pos = (i + 0.5) * Lx / n_weft
         phase = (i % 2) * np.pi + np.pi
-        yarns.append(SinusoidalYarn(
-            axis="y", inplane_position=x_pos, z_mid=z_mid,
-            amplitude=amplitude, period=period_y, phase=phase,
-            half_width=yarn_half_width, half_height=yarn_half_height,
-            power=power,
-        ))
+        yarns.append(
+            SinusoidalYarn(
+                axis="y",
+                inplane_position=x_pos,
+                z_mid=z_mid,
+                amplitude=amplitude,
+                period=period_y,
+                phase=phase,
+                half_width=yarn_half_width,
+                half_height=yarn_half_height,
+                power=power,
+            )
+        )
     return tuple(yarns)
 
 
@@ -675,27 +746,33 @@ def stitched_biaxial_yarns(
     yarns: list[StraightYarn] = []
     for j in range(n_warp):
         y_pos = (j + 0.5) * Ly / n_warp
-        yarns.append(StraightYarn(
-            axis_point=np.array([0.0, y_pos, z_warp]),
-            axis_direction=np.array([1.0, 0.0, 0.0]),
-            radius=tow_radius,
-        ))
+        yarns.append(
+            StraightYarn(
+                axis_point=np.array([0.0, y_pos, z_warp]),
+                axis_direction=np.array([1.0, 0.0, 0.0]),
+                radius=tow_radius,
+            )
+        )
     for i in range(n_weft):
         x_pos = (i + 0.5) * Lx / n_weft
-        yarns.append(StraightYarn(
-            axis_point=np.array([x_pos, 0.0, z_weft]),
-            axis_direction=np.array([0.0, 1.0, 0.0]),
-            radius=tow_radius,
-        ))
+        yarns.append(
+            StraightYarn(
+                axis_point=np.array([x_pos, 0.0, z_weft]),
+                axis_direction=np.array([0.0, 1.0, 0.0]),
+                radius=tow_radius,
+            )
+        )
     for i in range(n_stitches_x):
         for j in range(n_stitches_y):
             x_pos = (i + 0.5) * Lx / n_stitches_x
             y_pos = (j + 0.5) * Ly / n_stitches_y
-            yarns.append(StraightYarn(
-                axis_point=np.array([x_pos, y_pos, 0.0]),
-                axis_direction=np.array([0.0, 0.0, 1.0]),
-                radius=stitch_radius,
-            ))
+            yarns.append(
+                StraightYarn(
+                    axis_point=np.array([x_pos, y_pos, 0.0]),
+                    axis_direction=np.array([0.0, 0.0, 1.0]),
+                    radius=stitch_radius,
+                )
+            )
     return tuple(yarns)
 
 

@@ -41,8 +41,8 @@ DOMAIN_SIZE = [1.0, 1.0, 0.16]
 MESH_SWEEP_XY = (10, 14, 18, 22)
 REF_N_XY = 28
 REF_N_Z = 10
-DEGREE_SWEEP = (1, 2, 3, 4, 6, 8)            # GP density sweep
-DEGREE_SWEEP_MESH = (14, 5)                   # fixed (n_xy, n_z) for the degree sweep
+DEGREE_SWEEP = (1, 2, 3, 4, 6, 8)  # GP density sweep
+DEGREE_SWEEP_MESH = (14, 5)  # fixed (n_xy, n_z) for the degree sweep
 
 
 def z_resolution(n_xy: int) -> int:
@@ -59,14 +59,27 @@ def weave_config(
     return {
         "domain": {"size": DOMAIN_SIZE, "mesh_resolution": [n_xy, n_xy, n_z]},
         "materials": [
-            {"name": "matrix", "type": "isotropic", "youngs_modulus": 3.0e9, "poisson_ratio": 0.35},
             {
-                "name": "fibre", "type": "transverse_isotropic",
-                "e_l": 70.0e9, "e_t": 15.0e9, "g_lt": 24.0e9, "nu_lt": 0.20, "nu_tt": 0.30,
+                "name": "matrix",
+                "type": "isotropic",
+                "youngs_modulus": 3.0e9,
+                "poisson_ratio": 0.35,
             },
             {
-                "name": "yarn", "type": "chamis",
-                "matrix": "matrix", "fibre": "fibre", "fibre_volume_fraction": 0.70,
+                "name": "fibre",
+                "type": "transverse_isotropic",
+                "e_l": 70.0e9,
+                "e_t": 15.0e9,
+                "g_lt": 24.0e9,
+                "nu_lt": 0.20,
+                "nu_tt": 0.30,
+            },
+            {
+                "name": "yarn",
+                "type": "chamis",
+                "matrix": "matrix",
+                "fibre": "fibre",
+                "fibre_volume_fraction": 0.70,
             },
         ],
         "field": {
@@ -74,7 +87,8 @@ def weave_config(
             "matrix_material": "matrix",
             "yarn_material": "yarn",
             "domain_size": DOMAIN_SIZE,
-            "n_warp": 2, "n_weft": 2,
+            "n_warp": 2,
+            "n_weft": 2,
             "yarn_half_width": 0.245,
             "yarn_half_height": 0.038,
             "amplitude": 0.040,
@@ -118,9 +132,11 @@ def mesh_yarn_fraction(mesh, field, sampling: str, qdeg: int = 2) -> float:
     assembly queries (cell centroids vs quadrature points)."""
     if sampling == "centroid":
         from b3_tex.backends.dolfinx_periodic_backend import _cell_centroids
+
         pts = _cell_centroids(mesh)
     else:
         from b3_tex.quadrature import quadrature_point_coords
+
         pts = quadrature_point_coords(mesh, qdeg)
     return _yarn_fraction_at_points(field, pts)
 
@@ -166,42 +182,68 @@ def main() -> None:
 
     # True Vf via Monte Carlo on the implicit phase field. Use any config to
     # get a PhaseField; the geometry is identical across runs.
-    probe_problem = RVEProblem.from_config(weave_config(MESH_SWEEP_XY[0], z_resolution(MESH_SWEEP_XY[0]), "quadrature"))
+    probe_problem = RVEProblem.from_config(
+        weave_config(MESH_SWEEP_XY[0], z_resolution(MESH_SWEEP_XY[0]), "quadrature")
+    )
     print("[mc  ] true Vf via Monte Carlo (200k samples) ...", end=" ", flush=True)
     true_vf = true_yarn_volume_fraction(probe_problem.field)
     print(f"Vf={true_vf:.4f}")
 
-    print(f"[ref ] n_xy={REF_N_XY} n_z={REF_N_Z} sampling=quadrature ...", end=" ", flush=True)
+    print(
+        f"[ref ] n_xy={REF_N_XY} n_z={REF_N_Z} sampling=quadrature ...",
+        end=" ",
+        flush=True,
+    )
     ref_rec = run_one(REF_N_XY, REF_N_Z, "quadrature")
-    print(f"C11={ref_rec['C'][0][0]:.3e}  Vf={ref_rec['vf_fe']:.4f}  t={ref_rec['elapsed_s']:.1f}s")
+    print(
+        f"C11={ref_rec['C'][0][0]:.3e}  Vf={ref_rec['vf_fe']:.4f}  t={ref_rec['elapsed_s']:.1f}s"
+    )
     C_ref = np.asarray(ref_rec["C"], dtype=float)
 
     runs: list[dict] = []
     for n_xy in MESH_SWEEP_XY:
         n_z = z_resolution(n_xy)
         for sampling in ("centroid", "quadrature"):
-            print(f"[n_xy={n_xy:2d} n_z={n_z:2d}] sampling={sampling:9s} ...", end=" ", flush=True)
+            print(
+                f"[n_xy={n_xy:2d} n_z={n_z:2d}] sampling={sampling:9s} ...",
+                end=" ",
+                flush=True,
+            )
             rec = run_one(n_xy, n_z, sampling)
             runs.append(rec)
-            print(f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s")
+            print(
+                f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s"
+            )
 
     # Degree sweep at fixed coarse mesh, quadrature sampling, tet
     deg_runs: list[dict] = []
     for qdeg in DEGREE_SWEEP:
         n_xy_d, n_z_d = DEGREE_SWEEP_MESH
-        print(f"[degree={qdeg}] n=({n_xy_d},{n_xy_d},{n_z_d}) sampling=quadrature ...", end=" ", flush=True)
+        print(
+            f"[degree={qdeg}] n=({n_xy_d},{n_xy_d},{n_z_d}) sampling=quadrature ...",
+            end=" ",
+            flush=True,
+        )
         rec = run_one(n_xy_d, n_z_d, "quadrature", qdeg=qdeg)
         deg_runs.append(rec)
-        print(f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s")
+        print(
+            f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s"
+        )
 
     # Hex sweep mirroring the tet sweep, quadrature sampling, q=2
     hex_runs: list[dict] = []
     for n_xy in MESH_SWEEP_XY:
         n_z = z_resolution(n_xy)
-        print(f"[n_xy={n_xy:2d} n_z={n_z:2d}] sampling=quadrature  cell=hex ...", end=" ", flush=True)
+        print(
+            f"[n_xy={n_xy:2d} n_z={n_z:2d}] sampling=quadrature  cell=hex ...",
+            end=" ",
+            flush=True,
+        )
         rec = run_one(n_xy, n_z, "quadrature", cell_type="hexahedron")
         hex_runs.append(rec)
-        print(f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s")
+        print(
+            f"C11={rec['C'][0][0]:.3e}  Vf={rec['vf_fe']:.4f}  t={rec['elapsed_s']:5.1f}s"
+        )
 
     payload = {
         "domain_size": DOMAIN_SIZE,
@@ -221,8 +263,11 @@ def main() -> None:
     print(f"wrote {json_path}")
 
     # ---- plotting -----------------------------------------------------------
-    def axial_x(C):  return float(1.0 / np.linalg.inv(C)[0, 0])
-    def axial_z(C):  return float(1.0 / np.linalg.inv(C)[2, 2])
+    def axial_x(C):
+        return float(1.0 / np.linalg.inv(C)[0, 0])
+
+    def axial_z(C):
+        return float(1.0 / np.linalg.inv(C)[2, 2])
 
     def split(metric):
         dofs = {"centroid": [], "quadrature": []}
@@ -243,10 +288,18 @@ def main() -> None:
     # number of physical points at which the stiffness field C(x) is sampled
     # to populate the constitutive integrand.
     style = {
-        "centroid":   {"marker": "o", "linestyle": "--", "color": "#d95f02",
-                       "label": "C at cell centroid (1 sample/cell)"},
-        "quadrature": {"marker": "s", "linestyle": "-",  "color": "#1b9e77",
-                       "label": "C at GPs (tet, q=2 → 4 samples/cell)"},
+        "centroid": {
+            "marker": "o",
+            "linestyle": "--",
+            "color": "#d95f02",
+            "label": "C at cell centroid (1 sample/cell)",
+        },
+        "quadrature": {
+            "marker": "s",
+            "linestyle": "-",
+            "color": "#1b9e77",
+            "label": "C at GPs (tet, q=2 → 4 samples/cell)",
+        },
     }
     ref_label = (
         f"reference: quadrature, "
@@ -259,8 +312,13 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for s in ("centroid", "quadrature"):
         ax.plot(dofs[s], np.array(vals[s]) / 1e9, **style[s])
-    ax.axhline(ref_consts["e_x"] / 1e9, color="black", linewidth=1.0,
-               linestyle=":", label=ref_label)
+    ax.axhline(
+        ref_consts["e_x"] / 1e9,
+        color="black",
+        linewidth=1.0,
+        linestyle=":",
+        label=ref_label,
+    )
     ax.set_xscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"$E_x$ (in-plane)  [GPa]")
@@ -276,12 +334,19 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for s in ("centroid", "quadrature"):
         ax.plot(dofs[s], np.array(vals[s]) / 1e9, **style[s])
-    ax.axhline(ref_consts["e_z"] / 1e9, color="black", linewidth=1.0,
-               linestyle=":", label=ref_label)
+    ax.axhline(
+        ref_consts["e_z"] / 1e9,
+        color="black",
+        linewidth=1.0,
+        linestyle=":",
+        label=ref_label,
+    )
     ax.set_xscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"$E_z$ (through-thickness)  [GPa]")
-    ax.set_title("Through-thickness modulus convergence — 2x2 plain weave, periodic RVE")
+    ax.set_title(
+        "Through-thickness modulus convergence — 2x2 plain weave, periodic RVE"
+    )
     ax.legend(loc="best", frameon=False, fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
@@ -320,8 +385,13 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for s in ("centroid", "quadrature"):
         ax.plot(dofs_vf[s], vals_vf[s], **style[s])
-    ax.axhline(true_vf, color="black", linewidth=1.0, linestyle=":",
-               label=f"true $V_f$ (Monte Carlo, 200k) = {true_vf:.4f}")
+    ax.axhline(
+        true_vf,
+        color="black",
+        linewidth=1.0,
+        linestyle=":",
+        label=f"true $V_f$ (Monte Carlo, 200k) = {true_vf:.4f}",
+    )
     ax.set_xscale("log")
     ax.set_xlabel("displacement DOFs")
     ax.set_ylabel(r"yarn volume fraction $V_f$ seen by sampler")
@@ -349,10 +419,21 @@ def main() -> None:
     deg_xticklabels = [f"deg {d}\n{GPS_PER_TET[d]} GP/tet" for d in deg_x]
 
     fig, ax = plt.subplots(figsize=(6.4, 4.4))
-    ax.plot(deg_x, deg_y, marker="s", linestyle="-", color="#1b9e77",
-            label=f"C at GPs, tet, fixed n=({DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[1]})")
-    ax.axhline(centroid_baseline_err, color="#d95f02", linewidth=1.0,
-               linestyle="--", label="C at cell centroid (1 sample/cell), same mesh")
+    ax.plot(
+        deg_x,
+        deg_y,
+        marker="s",
+        linestyle="-",
+        color="#1b9e77",
+        label=f"C at GPs, tet, fixed n=({DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[0]},{DEGREE_SWEEP_MESH[1]})",
+    )
+    ax.axhline(
+        centroid_baseline_err,
+        color="#d95f02",
+        linewidth=1.0,
+        linestyle="--",
+        label="C at cell centroid (1 sample/cell), same mesh",
+    )
     ax.set_yscale("log")
     ax.set_xticks(deg_x)
     ax.set_xticklabels(deg_xticklabels, fontsize=8)
@@ -366,18 +447,39 @@ def main() -> None:
     plt.close(fig)
 
     # Hex vs tet at matched DOFs (Frobenius error)
-    tet_centroid = [(r["n_dofs_disp"], frob_err(np.asarray(r["C"])))
-                    for r in runs if r["sampling"] == "centroid"]
-    tet_quad = [(r["n_dofs_disp"], frob_err(np.asarray(r["C"])))
-                for r in runs if r["sampling"] == "quadrature"]
+    tet_centroid = [
+        (r["n_dofs_disp"], frob_err(np.asarray(r["C"])))
+        for r in runs
+        if r["sampling"] == "centroid"
+    ]
+    tet_quad = [
+        (r["n_dofs_disp"], frob_err(np.asarray(r["C"])))
+        for r in runs
+        if r["sampling"] == "quadrature"
+    ]
     hex_quad = [(r["n_dofs_disp"], frob_err(np.asarray(r["C"]))) for r in hex_runs]
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
-    ax.plot(*zip(*tet_centroid, strict=True), marker="o", linestyle="--",
-            color="#d95f02", label="tet, C at centroid (1 sample/cell)")
-    ax.plot(*zip(*tet_quad, strict=True), marker="s", linestyle="-",
-            color="#1b9e77", label="tet, C at GPs, q=2 (4 samples/cell)")
-    ax.plot(*zip(*hex_quad, strict=True), marker="^", linestyle="-",
-            color="#7570b3", label="hex, C at GPs, q=2 (8 samples/cell)")
+    ax.plot(
+        *zip(*tet_centroid, strict=True),
+        marker="o",
+        linestyle="--",
+        color="#d95f02",
+        label="tet, C at centroid (1 sample/cell)",
+    )
+    ax.plot(
+        *zip(*tet_quad, strict=True),
+        marker="s",
+        linestyle="-",
+        color="#1b9e77",
+        label="tet, C at GPs, q=2 (4 samples/cell)",
+    )
+    ax.plot(
+        *zip(*hex_quad, strict=True),
+        marker="^",
+        linestyle="-",
+        color="#7570b3",
+        label="hex, C at GPs, q=2 (8 samples/cell)",
+    )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("displacement DOFs")
@@ -390,18 +492,37 @@ def main() -> None:
     plt.close(fig)
 
     # Wall-clock per solve vs DOFs
-    tet_centroid_t = [(r["n_dofs_disp"], r["elapsed_s"])
-                      for r in runs if r["sampling"] == "centroid"]
-    tet_quad_t = [(r["n_dofs_disp"], r["elapsed_s"])
-                  for r in runs if r["sampling"] == "quadrature"]
+    tet_centroid_t = [
+        (r["n_dofs_disp"], r["elapsed_s"]) for r in runs if r["sampling"] == "centroid"
+    ]
+    tet_quad_t = [
+        (r["n_dofs_disp"], r["elapsed_s"])
+        for r in runs
+        if r["sampling"] == "quadrature"
+    ]
     hex_quad_t = [(r["n_dofs_disp"], r["elapsed_s"]) for r in hex_runs]
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
-    ax.plot(*zip(*tet_centroid_t, strict=True), marker="o", linestyle="--",
-            color="#d95f02", label="tet, C at centroid (1 sample/cell)")
-    ax.plot(*zip(*tet_quad_t, strict=True), marker="s", linestyle="-",
-            color="#1b9e77", label="tet, C at GPs, q=2 (4 samples/cell)")
-    ax.plot(*zip(*hex_quad_t, strict=True), marker="^", linestyle="-",
-            color="#7570b3", label="hex, C at GPs, q=2 (8 samples/cell)")
+    ax.plot(
+        *zip(*tet_centroid_t, strict=True),
+        marker="o",
+        linestyle="--",
+        color="#d95f02",
+        label="tet, C at centroid (1 sample/cell)",
+    )
+    ax.plot(
+        *zip(*tet_quad_t, strict=True),
+        marker="s",
+        linestyle="-",
+        color="#1b9e77",
+        label="tet, C at GPs, q=2 (4 samples/cell)",
+    )
+    ax.plot(
+        *zip(*hex_quad_t, strict=True),
+        marker="^",
+        linestyle="-",
+        color="#7570b3",
+        label="hex, C at GPs, q=2 (8 samples/cell)",
+    )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("displacement DOFs")
@@ -413,7 +534,9 @@ def main() -> None:
     fig.savefig(out_dir / "convergence_weave_runtime.png", dpi=180)
     plt.close(fig)
 
-    print("wrote convergence_weave_{e_xx,e_zz,frobenius,vf,degree_sweep,hex_vs_tet,runtime}.png")
+    print(
+        "wrote convergence_weave_{e_xx,e_zz,frobenius,vf,degree_sweep,hex_vs_tet,runtime}.png"
+    )
 
 
 if __name__ == "__main__":
