@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +12,11 @@ from numpy.typing import NDArray
 
 @dataclass(frozen=True)
 class HomogenizationResult:
-    effective_stiffness: NDArray[np.float64]
-    loadcase_strains: NDArray[np.float64]
-    loadcase_stresses: NDArray[np.float64]
-    metadata: dict[str, Any]
+    effective_stiffness: NDArray[np.float64] | None = None
+    effective_conductivity: NDArray[np.float64] | None = None
+    loadcase_strains: NDArray[np.float64] | None = None
+    loadcase_stresses: NDArray[np.float64] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name, arr in (
@@ -23,21 +24,42 @@ class HomogenizationResult:
             ("loadcase_strains", self.loadcase_strains),
             ("loadcase_stresses", self.loadcase_stresses),
         ):
+            if arr is None:
+                continue
             a = np.asarray(arr, dtype=float)
-            if a.shape != (6, 6):
-                raise ValueError(f"{name} must have shape (6, 6), got {a.shape}")
+            if name == "effective_stiffness":
+                if a.shape != (6, 6):
+                    raise ValueError(f"{name} must have shape (6, 6), got {a.shape}")
+            elif a.ndim != 2 or a.shape[0] != a.shape[1]:
+                # loadcase arrays: (6, 6) elastic, (3, 3) thermal
+                raise ValueError(f"{name} must be square, got {a.shape}")
             object.__setattr__(self, name, a)
+        if self.effective_conductivity is not None:
+            k = np.asarray(self.effective_conductivity, dtype=float)
+            if k.shape != (3, 3):
+                raise ValueError(
+                    f"effective_conductivity must have shape (3, 3), got {k.shape}"
+                )
+            object.__setattr__(self, "effective_conductivity", k)
 
     def save_npz(self, path: str | Path) -> None:
-        np.savez(
-            path,
-            effective_stiffness=self.effective_stiffness,
-            loadcase_strains=self.loadcase_strains,
-            loadcase_stresses=self.loadcase_stresses,
-        )
+        kwargs: dict[str, np.ndarray] = {}
+        if self.effective_stiffness is not None:
+            kwargs["effective_stiffness"] = self.effective_stiffness
+        if self.loadcase_strains is not None:
+            kwargs["loadcase_strains"] = self.loadcase_strains
+        if self.loadcase_stresses is not None:
+            kwargs["loadcase_stresses"] = self.loadcase_stresses
+        if self.effective_conductivity is not None:
+            kwargs["effective_conductivity"] = self.effective_conductivity
+        np.savez(path, **kwargs)
 
     def engineering_constants(self) -> dict[str, float]:
         """Return engineering constants assuming the stiffness is orthotropic."""
+        if self.effective_stiffness is None:
+            raise ValueError(
+                "effective_stiffness is not set; cannot compute engineering constants"
+            )
         S = np.linalg.inv(self.effective_stiffness)
         e_x = 1.0 / S[0, 0]
         e_y = 1.0 / S[1, 1]

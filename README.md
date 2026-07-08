@@ -35,6 +35,8 @@ A data-driven generator layer turns a fabric spec into implicit yarns (see
 - **`ncf`** — multi-axial non-crimp fabric: straight inlay plies at arbitrary angles +
   tricot/pillar stitch (`ncf_tricot_stitched`).
 - **`braid`** — triaxial braid: axial + ±bias yarns (`triaxial_braid`).
+- **`cylinder_yarn`** — single UD tow (cylinder); the simplest case (`examples/ud_tow.yaml`).
+- **`multi_straight_yarn`** — hand-listed straight tows (manual control / validation).
 
 The example set mirrors the [TexGenScripts](https://github.com/louisepb/TexGenScripts)
 fabric library in SI metres. The legacy `plain_weave` / `parametric_plain_weave` /
@@ -68,7 +70,7 @@ Regenerate: `b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml -o res
   generating training data. Compressed tows at crossovers come out stiffer
   because their local Vf is higher (fibre area is conserved).
 - **Two FE backends**, each with KUBC and periodic BCs:
-  - **DOLFINx + dolfinx_mpc** (canonical, default). Tet and hex elements;
+  - **DOLFINx + dolfinx_mpc** (fully supported). Tet and hex elements;
     cascading periodic-MPC pattern with non-overlapping per-axis slave masks
     and an interior translation pin.
   - **PyMFEM** (alternative). Tet and hex elements; periodic BCs implemented

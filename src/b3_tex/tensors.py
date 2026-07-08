@@ -353,3 +353,84 @@ def tensor_strain_to_voigt(strain_tensor: ArrayLike) -> NDArray[np.float64]:
 def tensor_stress_to_voigt(stress_tensor: ArrayLike) -> NDArray[np.float64]:
     t = _check_3x3(stress_tensor, name="stress_tensor")
     return np.array([t[0, 0], t[1, 1], t[2, 2], t[1, 2], t[0, 2], t[0, 1]])
+
+
+# ---------------------------------------------------------------------------
+# Thermal conductivity tensor utilities
+# ---------------------------------------------------------------------------
+
+
+def isotropic_conductivity(k: float) -> NDArray[np.float64]:
+    """Build a (3, 3) isotropic thermal conductivity tensor from scalar k."""
+    if k <= 0:
+        raise ValueError("thermal conductivity must be positive")
+    return np.eye(3, dtype=float) * k
+
+
+def orthotropic_conductivity(
+    k1: float, k2: float, k3: float
+) -> NDArray[np.float64]:
+    """Build a (3, 3) orthotropic conductivity tensor."""
+    for name, value in [("k1", k1), ("k2", k2), ("k3", k3)]:
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
+    return np.diag(np.array([k1, k2, k3], dtype=float))
+
+
+def transverse_isotropic_conductivity(
+    k_l: float, k_t: float
+) -> NDArray[np.float64]:
+    """Build a (3, 3) transverse-isotropic conductivity tensor.
+
+    The local 1-axis is the symmetry axis: k_parallel = k_l,
+    k_perp = k_t (in both transverse directions).
+    """
+    return orthotropic_conductivity(k_l, k_t, k_t)
+
+
+def rotate_conductivity(k_voigt: ArrayLike, rotation: ArrayLike) -> NDArray[np.float64]:
+    """Rotate a (3, 3) conductivity tensor by R.
+
+    k_rot = R @ k @ R^T.  Works on the 3x3 tensor directly (no Voigt
+    conversion needed — conductivity is a 2nd-rank tensor).
+    """
+    R = _check_3x3(rotation, name="rotation")
+    if not np.allclose(R.T @ R, np.eye(3), atol=1e-8):
+        raise ValueError("rotation must be orthogonal (R^T R = I)")
+    k = np.asarray(k_voigt, dtype=float)
+    if k.shape == (3, 3):
+        return R @ k @ R.T
+    if k.shape == (6, 6):
+        # Convenience: accept a (6,6) conductivity stiffness-like block and
+        # extract the in-plane 3x3 conductivity block (the top-left 3x3).
+        k = k[:3, :3]
+        return R @ k @ R.T
+    raise ValueError(f"conductivity must be (3,3) or (6,6), got {k.shape}")
+
+
+def rotate_conductivity_batch(
+    k_voigt: ArrayLike, rotations: ArrayLike
+) -> NDArray[np.float64]:
+    """Apply N rotations to N conductivity tensors; return (N, 3, 3).
+
+    k_voigt can be (3, 3) for a single tensor or (N, 3, 3) for per-point.
+    rotations must be (N, 3, 3).
+    """
+    k = np.asarray(k_voigt, dtype=float)
+    R = np.asarray(rotations, dtype=float)
+    if R.ndim != 3 or R.shape[1:] != (3, 3):
+        raise ValueError(f"rotations must have shape (N, 3, 3), got {R.shape}")
+    if k.ndim == 3 and k.shape[0] != R.shape[0]:
+        # (N, 3, 3) vs (N, 3, 3)
+        if k.shape[0] == 3 and k.shape[1] == 3:
+            # Single tensor broadcast
+            k = np.broadcast_to(k, R.shape)
+        else:
+            raise ValueError(
+                f"k must be (3,3) or (N,3,3) matching rotations {R.shape}, got {k.shape}"
+            )
+    if k.shape == (3, 3):
+        return R @ k @ R.transpose(0, 2, 1)  # (N, 3, 3)
+    if k.ndim == 4 and k.shape[1:] == (3, 3) and k.shape[0] == R.shape[0]:
+        return np.einsum("nij,njk,nlk->nil", R, k, R, optimize=True)  # (N, 3, 3)
+    raise ValueError(f"k shape {k.shape} not supported with rotations {R.shape}")
