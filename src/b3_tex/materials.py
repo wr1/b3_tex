@@ -20,6 +20,9 @@ from b3_tex.tensors import (
 class Material:
     name: str
     stiffness: NDArray[np.float64]
+    conductivity_k: float | None = None  # scalar (isotropic) conductivity
+    k_l: float | None = None  # longitudinal conductivity (yarns)
+    k_t: float | None = None  # transverse conductivity (yarns)
 
     def __post_init__(self) -> None:
         c = np.asarray(self.stiffness, dtype=float)
@@ -170,6 +173,27 @@ class Material:
 
     def rotated(self, rotation: ArrayLike) -> NDArray[np.float64]:
         return rotate_stiffness(self.stiffness, rotation)
+
+    @property
+    def conductivity(self) -> NDArray[np.float64]:
+        """Return a (3, 3) conductivity tensor.
+
+        - If ``k_l`` and ``k_t`` are set: transverse-isotropic (yarn/bundle).
+        - Else if ``conductivity_k`` is set: isotropic (matrix).
+        - Else: raises ValueError.
+        """
+        if self.k_l is not None and self.k_t is not None:
+            from b3_tex.tensors import transverse_isotropic_conductivity
+
+            return transverse_isotropic_conductivity(self.k_l, self.k_t)
+        if self.conductivity_k is not None:
+            from b3_tex.tensors import isotropic_conductivity
+
+            return isotropic_conductivity(self.conductivity_k)
+        raise ValueError(
+            f"Material {self.name!r} has no thermal conductivity defined "
+            "(set conductivity_k for isotropic, or k_l/k_t for transverse-isotropic)"
+        )
 
 
 @dataclass(frozen=True)
