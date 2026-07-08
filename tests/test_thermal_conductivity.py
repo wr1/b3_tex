@@ -155,23 +155,21 @@ def test_result_accepts_conductivity():
 
 def _thermal_solver():
     """Periodic thermal solver from whichever FE backend is importable."""
-    try:
-        import dolfinx  # noqa: F401
-        import dolfinx_mpc  # noqa: F401
+    from importlib.util import find_spec
 
-        solve_thermal_periodic = _thermal_solver()
+    if find_spec("dolfinx") and find_spec("dolfinx_mpc"):
+        from b3_tex.backends.dolfinx_periodic_backend import (
+            solve_thermal_periodic,
+        )
+
         return solve_thermal_periodic
-    except ImportError:
-        pass
-    try:
-        import mfem.ser  # noqa: F401
+    if find_spec("mfem"):
         from b3_tex.backends.mfem_backend import solve_thermal_periodic
 
         return solve_thermal_periodic
-    except ImportError:
-        import pytest
+    import pytest
 
-        pytest.skip("no FE backend importable (dolfinx or mfem)")
+    pytest.skip("no FE backend importable (dolfinx or mfem)")
 
 
 def test_thermal_homogeneous_recovers_scalar_to_machine_precision():
@@ -261,18 +259,24 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
     matrix = problem.materials["matrix"]
     yarn = problem.materials["yarn"]
 
-    vf_yarn = float(np.pi * 0.4**2)
     k_matrix = matrix.conductivity[0, 0]
     k_yarn_l = yarn.conductivity[0, 0]
     k_yarn_t = yarn.conductivity[1, 1]
+
+    result = solve_thermal_periodic(problem)
+    k_eff = result.effective_conductivity
+
+    # Bounds must be evaluated at the volume fraction of the field AS
+    # INTEGRATED (quadrature-sampled staircase), not the analytic pi*r^2 —
+    # otherwise voxelization error masquerades as a bound violation.
+    vf_yarn = result.metadata.get("volume_fractions", {}).get(
+        "yarn", float(np.pi * 0.4**2)
+    )
 
     k_voigt_x = vf_yarn * k_yarn_l + (1 - vf_yarn) * k_matrix
     k_voigt_yz = vf_yarn * k_yarn_t + (1 - vf_yarn) * k_matrix
     k_reuss_x = 1.0 / (vf_yarn / k_yarn_l + (1 - vf_yarn) / k_matrix)
     k_reuss_yz = 1.0 / (vf_yarn / k_yarn_t + (1 - vf_yarn) / k_matrix)
-
-    result = solve_thermal_periodic(problem)
-    k_eff = result.effective_conductivity
 
     assert k_reuss_x - k_eff[0, 0] < 1e-4, (
         f"k_eff[{0},{0}]={k_eff[0, 0]} < k_reuss={k_reuss_x}"
@@ -306,6 +310,9 @@ def test_thermal_result_contains_metadata():
     solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
-    assert result.metadata["backend"] == "dolfinx_periodic_thermal"
+    assert result.metadata["backend"] in {
+        "dolfinx_periodic_thermal",
+        "mfem_periodic_thermal",
+    }
     assert "mesh_resolution" in result.metadata
     assert "volume" in result.metadata

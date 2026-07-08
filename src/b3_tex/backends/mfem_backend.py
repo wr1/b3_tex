@@ -736,7 +736,6 @@ def _collect_conductivity_at_gps(
     mesh, fespace, problem: RVEProblem, gp_coords: NDArray[np.float64]
 ) -> NDArray[np.float64]:
     """Sample conductivity tensor (N, 3, 3) at physical GP coordinates."""
-    from b3_tex.materials import MicromechanicalMaterial
     from b3_tex.tensors import rotate_conductivity_batch
 
     names = problem.field.material_names()
@@ -860,9 +859,16 @@ class MfemThermalPeriodicSession:
         fespace = mfem.FiniteElementSpace(mesh, fec, 1)  # scalar temperature
 
         data = _collect_element_scalar_gp_data(mesh, fespace)
-        k_per_gp = _collect_conductivity_at_gps(
-            mesh, fespace, problem, data.gp_coords
-        )
+        k_per_gp = _collect_conductivity_at_gps(mesh, fespace, problem, data.gp_coords)
+
+        # Quadrature-weighted volume fractions of the field AS INTEGRATED —
+        # bounds checks must use these, not the nominal (analytic) fractions.
+        ids, _ = problem.field.sample_arrays(data.gp_coords)
+        self.volume = float(data.gp_weights.sum())
+        self.volume_fractions = {
+            name: float(data.gp_weights[ids == k].sum() / self.volume)
+            for k, name in enumerate(problem.field.material_names())
+        }
 
         # --- Diffusion bilinear form: ∫ k ∇φ·∇ψ dV ---
         a = mfem.BilinearForm(fespace)
@@ -948,7 +954,11 @@ class MfemThermalPeriodicSession:
         self._nv = nv
         self._lu = lu
         self._C = C
-        self._delta = {"x": np.zeros(n_constraints), "y": np.zeros(n_constraints), "z": np.zeros(n_constraints)}
+        self._delta = {
+            "x": np.zeros(n_constraints),
+            "y": np.zeros(n_constraints),
+            "z": np.zeros(n_constraints),
+        }
         self.n_periodic_constraints = n_constraints
 
     @property
@@ -978,7 +988,6 @@ class MfemThermalPeriodicSession:
         Actually we want: q = -k_eff * grad  =>  k_eff[:, dir] = -q_vol
         but in thermal we collect: flux = k · total_grad, and k_eff[:, dir_i] = flux_vec.
         """
-        mfem = self._mfem
         data = self._data
         P_NC = self._P_NC
 
@@ -1033,9 +1042,7 @@ class MfemThermalPeriodicSession:
         return flux_vec
 
 
-def _make_diffusion_integrator(
-    k_per_gp: NDArray[np.float64], data: _ScalarGPData
-):
+def _make_diffusion_integrator(k_per_gp: NDArray[np.float64], data: _ScalarGPData):
     """PyBilinearFormIntegrator for scalar diffusion: ∫ k ∇φ·∇ψ dV."""
     import mfem.ser as mfem
 
@@ -1046,7 +1053,6 @@ def _make_diffusion_integrator(
             e = T.ElementNo
             elmat.SetSize(nd)
             local = np.zeros((nd, nd), dtype=float)
-            ir = mfem.IntRules.Get(fe.GetGeomType(), 2 * fe.GetOrder())
             for q in range(nq):
                 dsh_phys = data.gp_dshapes[e * nq + q]  # (nd, 3)
                 w = data.gp_weights[e * nq + q]
@@ -1054,9 +1060,7 @@ def _make_diffusion_integrator(
 
                 for i in range(nd):
                     for j in range(nd):
-                        local[i, j] += (
-                            dsh_phys[i] @ k_val @ dsh_phys[j] * w
-                        )
+                        local[i, j] += dsh_phys[i] @ k_val @ dsh_phys[j] * w
             elmat.GetDataArray()[:] = local
 
     return _DiffusionInt()
@@ -1065,7 +1069,7 @@ def _make_diffusion_integrator(
 def solve_thermal_periodic(problem: RVEProblem) -> HomogenizationResult:
     """Compute effective thermal conductivity via steady-state diffusion.
 
-    Solves −∇·(k(x) ∇T) = 0 with T = −g·x + T_tilde(x) for three unit-gradient
+    Solves -∇·(k(x) ∇T) = 0 with T = -g·x + T_tilde(x) for three unit-gradient
     loadcases g = e_x, e_y, e_z, and extracts the effective conductivity from
     the volume-averaged flux:  k_eff[:, g_dir] = <k·(g+∇T_tilde)>.
 
@@ -1096,6 +1100,8 @@ def solve_thermal_periodic(problem: RVEProblem) -> HomogenizationResult:
             "n_cells": int(session.mesh.GetNE()),
             "n_dofs": int(session.fespace.GetTrueVSize()),
             "n_periodic_constraints": session.n_periodic_constraints,
+            "volume": session.volume,
+            "volume_fractions": session.volume_fractions,
         },
     )
 
