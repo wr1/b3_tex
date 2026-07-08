@@ -27,7 +27,11 @@ class HomogenizationResult:
             if arr is None:
                 continue
             a = np.asarray(arr, dtype=float)
-            if a.ndim != 2 or a.shape[0] != a.shape[1]:
+            if name == "effective_stiffness":
+                if a.shape != (6, 6):
+                    raise ValueError(f"{name} must have shape (6, 6), got {a.shape}")
+            elif a.ndim != 2 or a.shape[0] != a.shape[1]:
+                # loadcase arrays: (6, 6) elastic, (3, 3) thermal
                 raise ValueError(f"{name} must be square, got {a.shape}")
             object.__setattr__(self, name, a)
         if self.effective_conductivity is not None:
