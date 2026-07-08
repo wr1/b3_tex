@@ -121,14 +121,34 @@ class Material:
         name = str(config["name"])
         kind = str(config.get("type", ""))
         if kind == "isotropic":
-            return cls.isotropic(
-                name,
-                youngs_modulus=float(config["youngs_modulus"]),
-                poisson_ratio=float(config["poisson_ratio"]),
+            return cls(
+                name=name,
+                stiffness=isotropic_stiffness(
+                    float(config["youngs_modulus"]),
+                    float(config["poisson_ratio"]),
+                ),
+                conductivity_k=float(config["conductivity_k"])
+                if "conductivity_k" in config
+                else None,
             )
         if kind == "transverse_isotropic":
             keys = ("e_l", "e_t", "g_lt", "nu_lt", "nu_tt")
-            return cls.transverse_isotropic(name, **{k: float(config[k]) for k in keys})
+            extra: dict[str, float] = {}
+            if "k_l" in config:
+                extra["k_l"] = float(config["k_l"])
+            if "k_t" in config:
+                extra["k_t"] = float(config["k_t"])
+            return cls(
+                name=name,
+                stiffness=transverse_isotropic_stiffness(
+                    e_l=float(config["e_l"]),
+                    e_t=float(config["e_t"]),
+                    g_lt=float(config["g_lt"]),
+                    nu_lt=float(config["nu_lt"]),
+                    nu_tt=float(config["nu_tt"]),
+                ),
+                **extra,
+            )
         if kind == "orthotropic":
             keys = ("e1", "e2", "e3", "nu12", "nu13", "nu23", "g12", "g13", "g23")
             return cls.orthotropic(name, **{k: float(config[k]) for k in keys})
