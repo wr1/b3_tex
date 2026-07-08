@@ -887,18 +887,27 @@ class MfemThermalPeriodicSession:
         master_of_vertex = _periodic_vertex_master_map(mesh, domain_size)
         nv = mesh.GetNV()
 
+        # Get node coordinates for thermal periodic BC: T(slave)=T(master)+g·(x_s-x_m)
+        node_coords = np.zeros((nv, 3), dtype=float)
+        for i in range(nv):
+            node_coords[i] = mesh.GetVertexArray(i)
+
         rows: list[int] = []
         cols: list[int] = []
         vals: list[float] = []
+        slave_nodes: list[int] = []
+        master_nodes: list[int] = []
         n_constraints = 0
 
-        def add_row(row_sparse) -> None:
+        def add_row(row_sparse, slave_v: int, master_v: int) -> None:
             nonlocal n_constraints
             coo = row_sparse.tocoo()
             for c, v in zip(coo.col, coo.data, strict=True):
                 rows.append(n_constraints)
                 cols.append(int(c))
                 vals.append(float(v))
+            slave_nodes.append(slave_v)
+            master_nodes.append(master_v)
             n_constraints += 1
 
         is_hanging = np.zeros(nv, dtype=bool)
@@ -916,16 +925,18 @@ class MfemThermalPeriodicSession:
             l_master = m
             diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
             if diff_row.nnz > 0:
-                add_row(diff_row)
+                add_row(diff_row, l_slave, l_master)
 
         # Pin origin vertex to remove the rigid-body constant mode
-        add_row(P_NC.getrow(0))
+        add_row(P_NC.getrow(0), 0, 0)
 
         C = sp.coo_matrix((vals, (rows, cols)), shape=(n_constraints, n_T)).tocsr()
         Z = sp.csr_matrix((n_constraints, n_constraints))
         A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
         lu = spla.splu(A_aug)
 
+        # For the fluctuation φ formulation: T(x) = -g·x + φ(x), with φ periodic.
+        # The saddle-point RHS is (b_L, 0) since φ_s = φ_m (no affine shift).
         self.mesh = mesh
         self.fespace = fespace
         self._data = data
@@ -936,6 +947,8 @@ class MfemThermalPeriodicSession:
         self._n_scalar_L = n_scalar_L
         self._nv = nv
         self._lu = lu
+        self._C = C
+        self._delta = {"x": np.zeros(n_constraints), "y": np.zeros(n_constraints), "z": np.zeros(n_constraints)}
         self.n_periodic_constraints = n_constraints
 
     @property
@@ -973,16 +986,17 @@ class MfemThermalPeriodicSession:
         g_vec = np.zeros(3, dtype=float)
         g_vec[grad_index] = 1.0
 
-        # Assemble RHS: f_i = -∫ k · g · ∇ψ dV
+        # Assemble RHS from weak form: ∫ k·∇φ·∇ψ dV = ∫ k·g·∇ψ dV
+        # b_j = +∫ (k·g)·∇ψ_j dV
         b_L = np.zeros(self._n_T, dtype=float)
         for e in range(data.n_elem):
             for q in range(data.nq):
                 idx = e * data.nq + q
                 k_val = self._k_per_gp[idx]  # (3, 3)
-                rhs_vec = k_val @ g_vec  # (3,)
+                rhs_vec = k_val @ g_vec  # (3,) = k·g
                 w = data.gp_weights[idx]
                 for i in range(data.nd):
-                    local_rhs = -(data.gp_dshapes[idx, i] @ rhs_vec) * w
+                    local_rhs = (data.gp_dshapes[idx, i] @ rhs_vec) * w
                     global_idx = data.elem_vdofs[e, i]
                     P_NC_row = P_NC.getrow(global_idx)
                     if P_NC_row.nnz > 0:
@@ -991,24 +1005,29 @@ class MfemThermalPeriodicSession:
                         ):
                             b_L[int(c_idx)] += local_rhs * c_val
 
-        b_aug = np.concatenate([b_L, np.zeros(self._n_constraints)])
+        # Periodic thermal BC: T(slave) = T(master) + g · (x_s - x_m)
+        # Constraint RHS: delta[i] = g · dx[i] where dx[i] = x_slave[i] - x_master[i]
+        dir_names = ["x", "y", "z"]
+        dir_name = dir_names[grad_index]
+        delta = self._delta[dir_name]
+        b_aug = np.concatenate([b_L, delta])
         sol = self._lu.solve(b_aug)
         phi_L = P_NC @ sol[: self._n_T]
 
-        # Compute volume-averaged flux: <q> = <k · (g + ∇φ)>
-        total_grad = np.empty((data.n_elem * data.nq, 3), dtype=float)
+        # ∇T = -g + ∇φ  =>  q = -k·∇T = k·(g - ∇φ)
+        # k_eff[:, dir_i] = <q> = <k·(g - ∇φ)>
+        # Compute ∇φ at GPs
+        grad_phi = np.zeros((data.n_elem * data.nq, 3), dtype=float)
         for idx in range(data.n_elem * data.nq):
             e = idx // data.nq
             phi_elem = phi_L[data.elem_vdofs[e]]
             for i in range(data.nd):
-                total_grad[idx] += phi_elem[i] * data.gp_dshapes[idx, i]
-        total_grad += g_vec  # add applied gradient
+                grad_phi[idx] += phi_elem[i] * data.gp_dshapes[idx, i]
 
-        # q_vec = -<k · total_grad> => k_eff[:, dir] = <k · total_grad>
         flux_vec = np.zeros(3, dtype=float)
         for idx in range(data.n_elem * data.nq):
             k_val = self._k_per_gp[idx]
-            flux_vec += data.gp_weights[idx] * (k_val @ total_grad[idx])
+            flux_vec += data.gp_weights[idx] * (k_val @ (g_vec - grad_phi[idx]))
         flux_vec /= data.gp_weights.sum()
 
         return flux_vec
