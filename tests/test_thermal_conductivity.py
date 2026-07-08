@@ -76,12 +76,18 @@ def test_rotate_conductivity_batch_matches_loop():
     R_batch = np.stack(
         [
             np.array(
-                [[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]]
+                [
+                    [np.cos(a), -np.sin(a), 0.0],
+                    [np.sin(a), np.cos(a), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
             )
             for a in angles
         ]
     )
-    expected = np.stack([rotate_conductivity(k_local, R_batch[i]) for i in range(len(angles))])
+    expected = np.stack(
+        [rotate_conductivity(k_local, R_batch[i]) for i in range(len(angles))]
+    )
     got = rotate_conductivity_batch(k_local, R_batch)
     np.testing.assert_allclose(got, expected, rtol=1e-12)
 
@@ -107,7 +113,9 @@ def test_material_conductivity_isotropic():
 
 
 def test_material_conductivity_transverse_isotropic():
-    m = Material.transverse_isotropic("mat", e_l=100.0, e_t=10.0, g_lt=5.0, nu_lt=0.3, nu_tt=0.35)
+    m = Material.transverse_isotropic(
+        "mat", e_l=100.0, e_t=10.0, g_lt=5.0, nu_lt=0.3, nu_tt=0.35
+    )
     m2 = Material(name=m.name, stiffness=m.stiffness, k_l=5.0, k_t=0.5)
     k = m2.conductivity
     assert k.shape == (3, 3)
@@ -145,11 +153,30 @@ def test_result_accepts_conductivity():
 # ---------------------------------------------------------------------------
 
 
+def _thermal_solver():
+    """Periodic thermal solver from whichever FE backend is importable."""
+    try:
+        import dolfinx  # noqa: F401
+        import dolfinx_mpc  # noqa: F401
+
+        solve_thermal_periodic = _thermal_solver()
+        return solve_thermal_periodic
+    except ImportError:
+        pass
+    try:
+        import mfem.ser  # noqa: F401
+        from b3_tex.backends.mfem_backend import solve_thermal_periodic
+
+        return solve_thermal_periodic
+    except ImportError:
+        import pytest
+
+        pytest.skip("no FE backend importable (dolfinx or mfem)")
+
+
 @pytest.mark.fenicsx
 def test_thermal_homogeneous_recovers_scalar_to_machine_precision():
     """A uniform-material RVE should recover k_eff ≈ k_iso * I."""
-    import dolfinx
-
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
     cfg["materials"] = [
         {
@@ -163,7 +190,7 @@ def test_thermal_homogeneous_recovers_scalar_to_machine_precision():
     cfg["field"]["yarn_material"] = "matrix"
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     expected = 0.5 * np.eye(3)
@@ -178,7 +205,7 @@ def test_thermal_cylindrical_ud_tow_axial_conductivity():
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     k_eff = result.effective_conductivity
@@ -195,14 +222,12 @@ def test_thermal_cylindrical_ud_tow_transverse_symmetric():
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     k_eff = result.effective_conductivity
 
-    np.testing.assert_allclose(
-        k_eff[1, 1], k_eff[2, 2], rtol=1e-3, atol=1e-4
-    )
+    np.testing.assert_allclose(k_eff[1, 1], k_eff[2, 2], rtol=1e-3, atol=1e-4)
 
 
 @pytest.mark.fenicsx
@@ -211,7 +236,7 @@ def test_thermal_cylindrical_ud_tow_symmetric_tensor():
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     k_eff = result.effective_conductivity
@@ -224,7 +249,7 @@ def test_thermal_cylindrical_ud_tow_positive_definite():
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     eigvals = np.linalg.eigvalsh(result.effective_conductivity)
@@ -237,7 +262,7 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
     cfg = _ud_tow_config(mesh_n=10, radius=0.4)
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     matrix = problem.materials["matrix"]
     yarn = problem.materials["yarn"]
@@ -255,11 +280,19 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
     result = solve_thermal_periodic(problem)
     k_eff = result.effective_conductivity
 
-    assert k_reuss_x - k_eff[0, 0] < 1e-4, f"k_eff[{0},{0}]={k_eff[0,0]} < k_reuss={k_reuss_x}"
-    assert k_eff[0, 0] - k_voigt_x < 1e-4, f"k_eff[{0},{0}]={k_eff[0,0]} > k_voigt={k_voigt_x}"
+    assert k_reuss_x - k_eff[0, 0] < 1e-4, (
+        f"k_eff[{0},{0}]={k_eff[0, 0]} < k_reuss={k_reuss_x}"
+    )
+    assert k_eff[0, 0] - k_voigt_x < 1e-4, (
+        f"k_eff[{0},{0}]={k_eff[0, 0]} > k_voigt={k_voigt_x}"
+    )
 
-    assert k_reuss_yz - k_eff[1, 1] < 1e-4, f"k_eff[{1},{1}]={k_eff[1,1]} < k_reuss={k_reuss_yz}"
-    assert k_eff[1, 1] - k_voigt_yz < 1e-4, f"k_eff[{1},{1}]={k_eff[1,1]} > k_voigt={k_voigt_yz}"
+    assert k_reuss_yz - k_eff[1, 1] < 1e-4, (
+        f"k_eff[{1},{1}]={k_eff[1, 1]} < k_reuss={k_reuss_yz}"
+    )
+    assert k_eff[1, 1] - k_voigt_yz < 1e-4, (
+        f"k_eff[{1},{1}]={k_eff[1, 1]} > k_voigt={k_voigt_yz}"
+    )
 
 
 @pytest.mark.fenicsx
@@ -277,7 +310,7 @@ def test_thermal_result_contains_metadata():
     cfg["field"]["yarn_material"] = "matrix"
     problem = RVEProblem.from_config(cfg)
 
-    from b3_tex.backends.dolfinx_periodic_backend import solve_thermal_periodic
+    solve_thermal_periodic = _thermal_solver()
 
     result = solve_thermal_periodic(problem)
     assert result.metadata["backend"] == "dolfinx_periodic_thermal"
