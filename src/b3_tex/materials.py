@@ -20,6 +20,9 @@ from b3_tex.tensors import (
 class Material:
     name: str
     stiffness: NDArray[np.float64]
+    conductivity_k: float | None = None  # scalar (isotropic) conductivity
+    k_l: float | None = None  # longitudinal conductivity (yarns)
+    k_t: float | None = None  # transverse conductivity (yarns)
 
     def __post_init__(self) -> None:
         c = np.asarray(self.stiffness, dtype=float)
@@ -118,14 +121,34 @@ class Material:
         name = str(config["name"])
         kind = str(config.get("type", ""))
         if kind == "isotropic":
-            return cls.isotropic(
-                name,
-                youngs_modulus=float(config["youngs_modulus"]),
-                poisson_ratio=float(config["poisson_ratio"]),
+            return cls(
+                name=name,
+                stiffness=isotropic_stiffness(
+                    float(config["youngs_modulus"]),
+                    float(config["poisson_ratio"]),
+                ),
+                conductivity_k=float(config["conductivity_k"])
+                if "conductivity_k" in config
+                else None,
             )
         if kind == "transverse_isotropic":
             keys = ("e_l", "e_t", "g_lt", "nu_lt", "nu_tt")
-            return cls.transverse_isotropic(name, **{k: float(config[k]) for k in keys})
+            extra: dict[str, float] = {}
+            if "k_l" in config:
+                extra["k_l"] = float(config["k_l"])
+            if "k_t" in config:
+                extra["k_t"] = float(config["k_t"])
+            return cls(
+                name=name,
+                stiffness=transverse_isotropic_stiffness(
+                    e_l=float(config["e_l"]),
+                    e_t=float(config["e_t"]),
+                    g_lt=float(config["g_lt"]),
+                    nu_lt=float(config["nu_lt"]),
+                    nu_tt=float(config["nu_tt"]),
+                ),
+                **extra,
+            )
         if kind == "orthotropic":
             keys = ("e1", "e2", "e3", "nu12", "nu13", "nu23", "g12", "g13", "g23")
             return cls.orthotropic(name, **{k: float(config[k]) for k in keys})
@@ -170,6 +193,27 @@ class Material:
 
     def rotated(self, rotation: ArrayLike) -> NDArray[np.float64]:
         return rotate_stiffness(self.stiffness, rotation)
+
+    @property
+    def conductivity(self) -> NDArray[np.float64]:
+        """Return a (3, 3) conductivity tensor.
+
+        - If ``k_l`` and ``k_t`` are set: transverse-isotropic (yarn/bundle).
+        - Else if ``conductivity_k`` is set: isotropic (matrix).
+        - Else: raises ValueError.
+        """
+        if self.k_l is not None and self.k_t is not None:
+            from b3_tex.tensors import transverse_isotropic_conductivity
+
+            return transverse_isotropic_conductivity(self.k_l, self.k_t)
+        if self.conductivity_k is not None:
+            from b3_tex.tensors import isotropic_conductivity
+
+            return isotropic_conductivity(self.conductivity_k)
+        raise ValueError(
+            f"Material {self.name!r} has no thermal conductivity defined "
+            "(set conductivity_k for isotropic, or k_l/k_t for transverse-isotropic)"
+        )
 
 
 @dataclass(frozen=True)
