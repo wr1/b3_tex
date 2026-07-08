@@ -174,7 +174,6 @@ def _thermal_solver():
         pytest.skip("no FE backend importable (dolfinx or mfem)")
 
 
-@pytest.mark.fenicsx
 def test_thermal_homogeneous_recovers_scalar_to_machine_precision():
     """A uniform-material RVE should recover k_eff ≈ k_iso * I."""
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
@@ -199,7 +198,6 @@ def test_thermal_homogeneous_recovers_scalar_to_machine_precision():
     )
 
 
-@pytest.mark.fenicsx
 def test_thermal_cylindrical_ud_tow_axial_conductivity():
     """For a UD tow aligned along X, k_eff[0,0] ≈ rule-of-mixtures upper bound."""
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
@@ -216,7 +214,6 @@ def test_thermal_cylindrical_ud_tow_axial_conductivity():
     assert abs(k_eff[0, 0] - k_x_voigt) / k_x_voigt < 0.05
 
 
-@pytest.mark.fenicsx
 def test_thermal_cylindrical_ud_tow_transverse_symmetric():
     """For a UD tow along X, k_eff[1,1] ≈ k_eff[2,2]."""
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
@@ -230,7 +227,6 @@ def test_thermal_cylindrical_ud_tow_transverse_symmetric():
     np.testing.assert_allclose(k_eff[1, 1], k_eff[2, 2], rtol=1e-3, atol=1e-4)
 
 
-@pytest.mark.fenicsx
 def test_thermal_cylindrical_ud_tow_symmetric_tensor():
     """k_eff should be symmetric."""
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
@@ -243,7 +239,6 @@ def test_thermal_cylindrical_ud_tow_symmetric_tensor():
     np.testing.assert_allclose(k_eff, k_eff.T, rtol=1e-6, atol=1e-4)
 
 
-@pytest.mark.fenicsx
 def test_thermal_cylindrical_ud_tow_positive_definite():
     """k_eff should be positive definite (all eigenvalues > 0)."""
     cfg = _ud_tow_config(mesh_n=8, radius=0.4)
@@ -256,7 +251,6 @@ def test_thermal_cylindrical_ud_tow_positive_definite():
     assert np.all(eigvals > 0), f"eigenvalues: {eigvals}"
 
 
-@pytest.mark.fenicsx
 def test_thermal_cylindrical_ud_tow_within_bounds():
     """k_eff should be between Reuss and Voigt bounds."""
     cfg = _ud_tow_config(mesh_n=10, radius=0.4)
@@ -295,7 +289,6 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
     )
 
 
-@pytest.mark.fenicsx
 def test_thermal_result_contains_metadata():
     cfg = _ud_tow_config(mesh_n=4, radius=0.001)
     cfg["materials"] = [
