@@ -36,7 +36,7 @@ import math
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,12 +52,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 
 # Try design_space.yaml from sibling b3_micromech repo, then fall back.
 _MICRO_DESIGN = SCRIPT_DIR.parent / "b3_micromech" / "design_space.yaml"
-DESIGN_SPACE_PATH = _MICRO_DESIGN if _MICRO_DESIGN.exists() else Path(__file__).with_name("design_space.yaml")
+DESIGN_SPACE_PATH = (
+    _MICRO_DESIGN
+    if _MICRO_DESIGN.exists()
+    else Path(__file__).with_name("design_space.yaml")
+)
 
 
 # ---------------------------------------------------------------------------
 # Design-space reader (mirrors b3_micromech runner for schema parity)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class FibreSpec:
@@ -171,6 +176,7 @@ def _load_design_space(path: str | Path) -> DesignSpace:
 # b3_tex config builder helpers
 # ---------------------------------------------------------------------------
 
+
 def _vf_range_for_weave(ds: DesignSpace, weave_name: str) -> tuple[float, float]:
     """Return (vf_min, vf_max) for a weave from the design space."""
     for vfr in ds.vf_ranges:
@@ -187,7 +193,6 @@ def _weave_to_field_type(weave: WeaveSpec) -> str:
 
 def _coprime_shift(n: int) -> int:
     """Find smallest shift > 1 that is coprime with n."""
-    import math
     for s in range(2, n):
         if math.gcd(n, s) == 1:
             return s
@@ -288,8 +293,9 @@ def _build_b3_tex_config(
     return config
 
 
-def _weave_woven_field_cfg(weave: WeaveSpec, pattern_cfg: dict,
-                           domain_size: list[float], vf: float) -> dict[str, Any]:
+def _weave_woven_field_cfg(
+    weave: WeaveSpec, pattern_cfg: dict, domain_size: list[float], vf: float
+) -> dict[str, Any]:
     """Build field config for 2D woven weaves (plain, satin, braid)."""
     field_cfg: dict[str, Any] = {
         "type": "woven",
@@ -322,8 +328,9 @@ def _weave_woven_field_cfg(weave: WeaveSpec, pattern_cfg: dict,
     return field_cfg
 
 
-def _weave_orthogonal_field_cfg(weave: WeaveSpec, domain_size: list[float],
-                                vf: float) -> dict[str, Any]:
+def _weave_orthogonal_field_cfg(
+    weave: WeaveSpec, domain_size: list[float], vf: float
+) -> dict[str, Any]:
     """Build field config for 3D orthogonal weave."""
     typical = weave.typical
     field_cfg: dict[str, Any] = {
@@ -353,8 +360,9 @@ def _weave_orthogonal_field_cfg(weave: WeaveSpec, domain_size: list[float],
     return field_cfg
 
 
-def _weave_ncf_field_cfg(weave: WeaveSpec, domain_size: list[float],
-                         vf: float) -> dict[str, Any]:
+def _weave_ncf_field_cfg(
+    weave: WeaveSpec, domain_size: list[float], vf: float
+) -> dict[str, Any]:
     """Build field config for non-crimp fabric (NCF)."""
     field_cfg: dict[str, Any] = {
         "type": "ncf",
@@ -365,10 +373,20 @@ def _weave_ncf_field_cfg(weave: WeaveSpec, domain_size: list[float],
         "nominal_fibre_volume_fraction": vf,
         "max_fibre_volume_fraction": 0.90,
         "plies": [
-            {"angle_deg": 0, "z_center": 0.01, "width": 0.16, "height": 0.02,
-             "spacing": 0.16667},
-            {"angle_deg": 90, "z_center": 0.03, "width": 0.16, "height": 0.02,
-             "spacing": 0.16667},
+            {
+                "angle_deg": 0,
+                "z_center": 0.01,
+                "width": 0.16,
+                "height": 0.02,
+                "spacing": 0.16667,
+            },
+            {
+                "angle_deg": 90,
+                "z_center": 0.03,
+                "width": 0.16,
+                "height": 0.02,
+                "spacing": 0.16667,
+            },
         ],
         "stitch": {
             "pattern": "pillar",
@@ -381,8 +399,9 @@ def _weave_ncf_field_cfg(weave: WeaveSpec, domain_size: list[float],
     return field_cfg
 
 
-def _weave_braid_field_cfg(weave: WeaveSpec, domain_size: list[float],
-                           vf: float) -> dict[str, Any]:
+def _weave_braid_field_cfg(
+    weave: WeaveSpec, domain_size: list[float], vf: float
+) -> dict[str, Any]:
     """Build field config for triaxial braid.
 
     Uses the braid generator (type: braid) with a small unit cell
@@ -400,8 +419,7 @@ def _weave_braid_field_cfg(weave: WeaveSpec, domain_size: list[float],
         "bias_width": 0.00045,
         "bias_height": 0.00013,
         "z_amplitude": 0.00006,
-        "axial": {"enabled": True, "count": 2, "width": 0.0006,
-                  "height": 0.00015},
+        "axial": {"enabled": True, "count": 2, "width": 0.0006, "height": 0.00015},
         "nominal_fibre_volume_fraction": vf,
         "max_fibre_volume_fraction": 0.90,
     }
@@ -418,6 +436,7 @@ def write_sweep_yaml(cfg: dict[str, Any], path: str | Path) -> None:
 # ---------------------------------------------------------------------------
 # Sample generator -- presets
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Sample:
@@ -438,16 +457,22 @@ def _samples_for_preset(preset: str, ds: DesignSpace) -> list[Sample]:
         fb = ds.fibres[0]
         mt = ds.matrices[0]
         vf_range = ds.vf_ranges[0] if ds.vf_ranges else (0.30, 0.70)
-        vf = (vf_range.vf_min + vf_range.vf_max) / 2.0 if isinstance(vf_range, VfRange) else 0.50
+        vf = (
+            (vf_range.vf_min + vf_range.vf_max) / 2.0
+            if isinstance(vf_range, VfRange)
+            else 0.50
+        )
         for wv in ds.weaves:
-            samples.append(Sample(
-                fibre_name=fb.name,
-                matrix_name=mt.name,
-                weave_name=wv.name,
-                vf=vf,
-                resolution_xy=24,
-                resolution_z=max(3, round(24 * 0.35)),
-            ))
+            samples.append(
+                Sample(
+                    fibre_name=fb.name,
+                    matrix_name=mt.name,
+                    weave_name=wv.name,
+                    vf=vf,
+                    resolution_xy=24,
+                    resolution_z=max(3, round(24 * 0.35)),
+                )
+            )
 
     elif preset == "constituent_focus":
         # First fibre x first matrix x first weave at 3 Vf points
@@ -459,30 +484,42 @@ def _samples_for_preset(preset: str, ds: DesignSpace) -> list[Sample]:
         vf_max = vf_range.vf_max if isinstance(vf_range, VfRange) else 0.65
         vfs = np.linspace(vf_min, vf_max, 3).tolist()
         for vf in vfs:
-            samples.append(Sample(
-                fibre_name=fb.name,
-                matrix_name=mt.name,
-                weave_name=wv.name,
-                vf=float(vf),
-                resolution_xy=24,
-                resolution_z=max(3, round(24 * 0.35)),
-            ))
+            samples.append(
+                Sample(
+                    fibre_name=fb.name,
+                    matrix_name=mt.name,
+                    weave_name=wv.name,
+                    vf=float(vf),
+                    resolution_xy=24,
+                    resolution_z=max(3, round(24 * 0.35)),
+                )
+            )
 
     elif preset == "weave_sensitivity":
         # One fibre x matrix at one Vf for each of the first few weaves
         fb = ds.fibres[0]
         mt = ds.matrices[0]
-        vf_range = ds.vf_ranges[0] if ds.vf_ranges else VfRange(ds.weaves[0].name if ds.weaves else "plain", 0.30, 0.65)
-        vf = (vf_range.vf_min + vf_range.vf_max) / 2.0 if isinstance(vf_range, VfRange) else 0.50
+        vf_range = (
+            ds.vf_ranges[0]
+            if ds.vf_ranges
+            else VfRange(ds.weaves[0].name if ds.weaves else "plain", 0.30, 0.65)
+        )
+        vf = (
+            (vf_range.vf_min + vf_range.vf_max) / 2.0
+            if isinstance(vf_range, VfRange)
+            else 0.50
+        )
         for wv in ds.weaves[:3]:  # Just the first 3 weaves for a quick sweep
-            samples.append(Sample(
-                fibre_name=fb.name,
-                matrix_name=mt.name,
-                weave_name=wv.name,
-                vf=vf,
-                resolution_xy=24,
-                resolution_z=max(3, round(24 * 0.35)),
-            ))
+            samples.append(
+                Sample(
+                    fibre_name=fb.name,
+                    matrix_name=mt.name,
+                    weave_name=wv.name,
+                    vf=vf,
+                    resolution_xy=24,
+                    resolution_z=max(3, round(24 * 0.35)),
+                )
+            )
     else:
         raise ValueError(f"unknown preset {preset!r}")
 
@@ -493,12 +530,15 @@ def _samples_for_preset(preset: str, ds: DesignSpace) -> list[Sample]:
 # Main runner
 # ---------------------------------------------------------------------------
 
+
 def _git_sha() -> str:
     """Return the current git short SHA (or 'unknown')."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return out.stdout.strip() if out.returncode == 0 else "unknown"
     except Exception:
@@ -513,7 +553,7 @@ def _resolve_backend() -> str:
         ("dolfinx-periodic", "dolfinx"),
     ]
 
-    for backend_name, lib_name in candidates:
+    for backend_name, _lib_name in candidates:
         try:
             if backend_name.startswith("mfem"):
                 __import__("mfem")
@@ -534,6 +574,7 @@ def _run_solve(config: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     """
     # Write temp YAML
     import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         tmp_path = f.name
@@ -541,23 +582,30 @@ def _run_solve(config: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     try:
         # Load problem
         from b3_tex.problem import RVEProblem
+
         problem = RVEProblem.from_config(config)
 
         # Dispatch solver
         backend_name = config.get("solver", {}).get("backend", "mfem-periodic")
-        canonical = {"dolfinx": "dolfinx-periodic", "mfem": "mfem-periodic"}.get(backend_name, backend_name)
+        canonical = {"dolfinx": "dolfinx-periodic", "mfem": "mfem-periodic"}.get(
+            backend_name, backend_name
+        )
 
         if canonical == "dolfinx-periodic":
             from b3_tex.backends.dolfinx_periodic_backend import solve as solve_fn
+
             lib_label = "DOLFINx"
         elif canonical == "dolfinx-kubc":
             from b3_tex.backends.dolfinx_backend import solve as solve_fn
+
             lib_label = "DOLFINx"
         elif canonical == "mfem-periodic":
             from b3_tex.backends.mfem_backend import solve_periodic as solve_fn
+
             lib_label = "PyMFEM"
         elif canonical == "mfem-kubc":
             from b3_tex.backends.mfem_backend import solve as solve_fn
+
             lib_label = "PyMFEM"
         else:
             raise ValueError(f"unknown backend {canonical}")
@@ -578,8 +626,9 @@ def _run_solve(config: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
         os.unlink(tmp_path)
 
 
-def _run(samples: list[Sample], out_dir: Path, design_path: Path,
-         design_space: DesignSpace) -> Path:
+def _run(
+    samples: list[Sample], out_dir: Path, design_path: Path, design_space: DesignSpace
+) -> Path:
     """Run end-to-end homogenisation for all samples. Returns the NPZ path."""
 
     backend = _resolve_backend()
@@ -597,8 +646,10 @@ def _run(samples: list[Sample], out_dir: Path, design_path: Path,
         fb = fibre_map.get(sample.fibre_name)
         mt = matrix_map.get(sample.matrix_name)
         if fb is None or mt is None:
-            print(f"  [{i+1}] SKIP: fibre={sample.fibre_name}, matrix={sample.matrix_name}",
-                  flush=True)
+            print(
+                f"  [{i + 1}] SKIP: fibre={sample.fibre_name}, matrix={sample.matrix_name}",
+                flush=True,
+            )
             continue
 
         # Build config from real spec values
@@ -617,10 +668,12 @@ def _run(samples: list[Sample], out_dir: Path, design_path: Path,
         write_sweep_yaml(cfg, tmp_yaml)
 
         # Run solve
-        print(f"[{i+1}/{len(samples)}] solving {sample.fibre_name}/{sample.matrix_name} "
-              f"on {sample.weave_name} vf={sample.vf:.3f} "
-              f"({sample.resolution_xy}x{sample.resolution_xy}x{sample.resolution_z}) ...",
-              flush=True)
+        print(
+            f"[{i + 1}/{len(samples)}] solving {sample.fibre_name}/{sample.matrix_name} "
+            f"on {sample.weave_name} vf={sample.vf:.3f} "
+            f"({sample.resolution_xy}x{sample.resolution_xy}x{sample.resolution_z}) ...",
+            flush=True,
+        )
 
         try:
             C0, sol_meta = _run_solve(cfg)
@@ -628,49 +681,55 @@ def _run(samples: list[Sample], out_dir: Path, design_path: Path,
 
             # Features: (vf, E_m, nu_m, E_Lf, E_Tf, G_LTf, nu_LTf, G_TTf)
             # For weave: geometry features too
-            features = np.array([
-                sample.vf,
-                3.0e9,      # E_m
-                0.35,       # nu_m
-                230.0e9,    # E_Lf
-                15.0e9,     # E_Tf
-                15.0e9,     # G_LTf
-                0.20,       # nu_LTf
-                6.0e9,      # G_TTf
-            ])
+            features = np.array(
+                [
+                    sample.vf,
+                    3.0e9,  # E_m
+                    0.35,  # nu_m
+                    230.0e9,  # E_Lf
+                    15.0e9,  # E_Tf
+                    15.0e9,  # G_LTf
+                    0.20,  # nu_LTf
+                    6.0e9,  # G_TTf
+                ]
+            )
             all_features.append(features)
             all_stiffness.append(C0)
 
-            results.append({
-                "index": i,
-                "fibre": sample.fibre_name,
-                "matrix": sample.matrix_name,
-                "weave": sample.weave_name,
-                "vf": sample.vf,
-                "resolution_xy": sample.resolution_xy,
-                "resolution_z": sample.resolution_z,
-                "C_eff": C0.tolist(),
-                "feature": features.tolist(),
-                "metadata": {**sol_meta, "backend_type": backend},
-            })
+            results.append(
+                {
+                    "index": i,
+                    "fibre": sample.fibre_name,
+                    "matrix": sample.matrix_name,
+                    "weave": sample.weave_name,
+                    "vf": sample.vf,
+                    "resolution_xy": sample.resolution_xy,
+                    "resolution_z": sample.resolution_z,
+                    "C_eff": C0.tolist(),
+                    "feature": features.tolist(),
+                    "metadata": {**sol_meta, "backend_type": backend},
+                }
+            )
             print(
-                f"  -> C_eff[0,0] = {C0[0,0] / 1e9:.4f} GPa, "
+                f"  -> C_eff[0,0] = {C0[0, 0] / 1e9:.4f} GPa, "
                 f"backend={sol_meta.get('lib', '?')}",
                 flush=True,
             )
 
         except Exception as exc:
             print(f"  -> FAILED: {exc}", flush=True)
-            results.append({
-                "index": i,
-                "fibre": sample.fibre_name,
-                "matrix": sample.matrix_name,
-                "weave": sample.weave_name,
-                "vf": sample.vf,
-                "resolution_xy": sample.resolution_xy,
-                "resolution_z": sample.resolution_z,
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "index": i,
+                    "fibre": sample.fibre_name,
+                    "matrix": sample.matrix_name,
+                    "weave": sample.weave_name,
+                    "vf": sample.vf,
+                    "resolution_xy": sample.resolution_xy,
+                    "resolution_z": sample.resolution_z,
+                    "error": str(exc),
+                }
+            )
 
         # Clean up temp
         tmp_yaml.unlink(missing_ok=True)
@@ -688,28 +747,40 @@ def _run(samples: list[Sample], out_dir: Path, design_path: Path,
         npz_path,
         X=X_out,
         C=C_out,
-        feature_names=np.array(["vf", "E_m", "nu_m", "E_Lf", "E_Tf",
-                                 "G_LTf", "nu_LTf", "G_TTf"]),
+        feature_names=np.array(
+            ["vf", "E_m", "nu_m", "E_Lf", "E_Tf", "G_LTf", "nu_LTf", "G_TTf"]
+        ),
     )
     meta_path = out_dir / "sweep_results.meta.json"
-    meta_path.write_text(json.dumps({
-        "project": "b3_tex",
-        "design_space": str(design_path),
-        "design_space_version": "1",
-        "git_sha": _git_sha(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "backend_used": backend,
-        "n_samples": len(samples),
-        "n_solved": len(results) - sum(1 for r in results if "error" in r),
-        "n_failed": sum(1 for r in results if "error" in r),
-        "samples": [
-            {"fibre": s.fibre_name, "matrix": s.matrix_name,
-             "weave": s.weave_name, "vf": s.vf,
-             "resolution_xy": s.resolution_xy, "resolution_z": s.resolution_z}
-            for s in samples
-        ],
-        "results": results,
-    }, indent=2), encoding="utf-8")
+    meta_path.write_text(
+        json.dumps(
+            {
+                "project": "b3_tex",
+                "design_space": str(design_path),
+                "design_space_version": "1",
+                "git_sha": _git_sha(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "backend_used": backend,
+                "n_samples": len(samples),
+                "n_solved": len(results) - sum(1 for r in results if "error" in r),
+                "n_failed": sum(1 for r in results if "error" in r),
+                "samples": [
+                    {
+                        "fibre": s.fibre_name,
+                        "matrix": s.matrix_name,
+                        "weave": s.weave_name,
+                        "vf": s.vf,
+                        "resolution_xy": s.resolution_xy,
+                        "resolution_z": s.resolution_z,
+                    }
+                    for s in samples
+                ],
+                "results": results,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     print(f"\nWrote {npz_path}")
     print(f"Meta: {meta_path}")
@@ -750,14 +821,31 @@ def main() -> None:
         "--resolution",
         type=int,
         default=None,
-        help="Override mesh resolution (n_xy) for all solves.",
+        help="Override mesh resolution (n_xy) for all solves. "
+        "Default: 6 (wiring-test scale) unless --full-res is given.",
+    )
+    parser.add_argument(
+        "--full-res",
+        action="store_true",
+        help="Use the preset/design-space resolution (24 -> ~30 min/sample). "
+        "Meant for a stronger machine, not the GB10.",
     )
     args = parser.parse_args()
 
+    if args.resolution is None and not args.full_res:
+        args.resolution = 6
+        print(
+            "NOTE: defaulting to res 6 wiring-test meshes; "
+            "pass --full-res (or --resolution N) for real accuracy runs.",
+            flush=True,
+        )
+
     # Load design space
     ds = _load_design_space(args.design_space)
-    print(f"Loaded design space: {len(ds.fibres)} fibres, "
-          f"{len(ds.matrices)} matrices, {len(ds.weaves)} weaves")
+    print(
+        f"Loaded design space: {len(ds.fibres)} fibres, "
+        f"{len(ds.matrices)} matrices, {len(ds.weaves)} weaves"
+    )
 
     # Generate samples
     samples = _samples_for_preset(args.preset, ds)
@@ -771,12 +859,12 @@ def main() -> None:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine backend
-    backend = args.backend if args.backend else _resolve_backend()
+    # Determine backend (early availability check; _run resolves internally)
+    args.backend if args.backend else _resolve_backend()
 
     # Build sample configs and run
     built_samples = []
-    for i, sample in enumerate(samples):
+    for sample in samples:
         fb = None
         for f in ds.fibres:
             if f.name == sample.fibre_name:
@@ -792,25 +880,34 @@ def main() -> None:
             if w.name == sample.weave_name:
                 wv = w
                 break
+        del wv
 
         if fb is None:
-            print(f"WARNING: fibre {sample.fibre_name} not found in design space, skipping", flush=True)
+            print(
+                f"WARNING: fibre {sample.fibre_name} not found in design space, skipping",
+                flush=True,
+            )
             continue
         if mt is None:
-            print(f"WARNING: matrix {sample.matrix_name} not found in design space, skipping", flush=True)
+            print(
+                f"WARNING: matrix {sample.matrix_name} not found in design space, skipping",
+                flush=True,
+            )
             continue
 
         resolution_xy = args.resolution if args.resolution else sample.resolution_xy
         resolution_z = max(3, round(resolution_xy * 0.35))
 
-        built_samples.append(Sample(
-            fibre_name=sample.fibre_name,
-            matrix_name=sample.matrix_name,
-            weave_name=sample.weave_name,
-            vf=sample.vf,
-            resolution_xy=resolution_xy,
-            resolution_z=resolution_z,
-        ))
+        built_samples.append(
+            Sample(
+                fibre_name=sample.fibre_name,
+                matrix_name=sample.matrix_name,
+                weave_name=sample.weave_name,
+                vf=sample.vf,
+                resolution_xy=resolution_xy,
+                resolution_z=resolution_z,
+            )
+        )
 
     if not built_samples:
         print("No valid samples after filtering. Exiting.", file=sys.stderr)
@@ -821,7 +918,7 @@ def main() -> None:
     # Verify output
     if npz_path.exists():
         data = np.load(npz_path)
-        print(f"\nVerification:")
+        print("\nVerification:")
         print(f"  X shape: {data['X'].shape}")
         print(f"  C shape: {data['C'].shape}")
         meta = json.loads(
@@ -830,7 +927,7 @@ def main() -> None:
         print(f"  solved: {meta['n_solved']}/{meta['n_samples']}")
         print(f"  git sha: {meta['git_sha']}")
         print(f"  backend: {meta['backend_used']}")
-        print(f"\nDone.")
+        print("\nDone.")
     else:
         print("ERROR: no output produced.", file=sys.stderr)
         sys.exit(1)
