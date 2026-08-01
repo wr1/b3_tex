@@ -1,0 +1,83 @@
+---
+title: Convergence and cost
+description: Mesh / AMR ladder for efficient but defensible stiffness.
+---
+
+There is **no automatic stop on stiffness residual**. AMR stops on iteration count,
+threshold, and DOF budget. Use the ladder below, then optionally re-run one notch finer
+and compare `E_x` / Frobenius norms.
+
+## Cost / quality ladder
+
+| Mode | Mesh (order) | AMR | Use |
+|------|--------------|-----|-----|
+| **smoke** | ~16–20 × z~4–5 | off or 1 | Agent iteration, FD sweeps |
+| **standard** | ~24×24×6 | 2 @ 0.2 | FEA card + datasheet |
+| **publish** | finer base / AMR 3 | 2–3 | Paper-grade; compare ΔE to standard |
+
+Measured order of magnitude on a laptop-class box (twill SI domain, MFEM hex):
+
+| Setup | Wall time (approx.) | Notes |
+|-------|---------------------|--------|
+| 20×20×5 uniform | ~10 s | Smoke |
+| 16×16×4 + AMR 1 | ~50 s | AMR overhead on tiny bases |
+| 24×24×6 + AMR 2 | ~1–3 min | Standard target |
+
+## Recommended solver block
+
+```yaml
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}
+  amr:
+    enabled: true
+    max_iterations: 2
+    threshold: 0.2
+    dof_budget: 200000
+```
+
+CLI override:
+
+```bash
+b3-tex solve examples/weave_twill_2x2.yaml \
+  --amr-iterations 2 --amr-threshold 0.20 \
+  -o results/weave_twill_2x2
+```
+
+## Thin / anisotropic domains
+
+SI weaves from TexGen (e.g. twill `0.02 × 0.02 × 0.0024` m) need **fewer z cells**
+than in-plane. Do **not** force a cubic `N³` default. Prefer aspect-aware
+`mesh_resolution` (see example YAMLs and `examples/make_fabric_gifs.py` overrides).
+
+## Manual convergence check
+
+1. Run **standard** → save `C_eff.npz` + meta.
+2. Re-run with `amr.max_iterations + 1` or ~1.5× in-plane mesh.
+3. Compare:
+
+```python
+import numpy as np
+from b3_tex.result import HomogenizationResult
+
+a = HomogenizationResult.load_npz("results/run_a/C_eff.npz")
+b = HomogenizationResult.load_npz("results/run_b/C_eff.npz")
+Ca, Cb = a.effective_stiffness, b.effective_stiffness
+rel_F = np.linalg.norm(Ca - Cb, "fro") / np.linalg.norm(Cb, "fro")
+ea, eb = a.engineering_constants(), b.engineering_constants()
+dEx = abs(ea["e_x"] - eb["e_x"]) / abs(eb["e_x"])
+print(f"rel Frobenius = {rel_F:.2%},  ΔE_x/E_x = {dEx:.2%}")
+```
+
+Target for standard work: **ΔE_x / E_x ≲ 2%**.
+
+## Deeper studies
+
+| Script | Output |
+|--------|--------|
+| `examples/convergence_study_weave.py` | Mesh × sampling × tet/hex panels |
+| `examples/mfem_weave_amr.py` | AMR convergence (E_x, E_z vs GPs) |
+| `results/convergence_weave_*.png` | Committed plain-weave panels |
+
+These are plain-weave-centric; transfer heuristics to twill / satin with care.

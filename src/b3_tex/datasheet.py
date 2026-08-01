@@ -229,17 +229,47 @@ def _build_analysis_rows(
     raw_config: dict[str, Any],
     *,
     amr_panel: str | None = None,
+    solve_provenance: dict[str, Any] | None = None,
 ) -> list[tuple[str, str]]:
-    """Analysis table: homogenization settings vs optional AMR illustration panel."""
+    """Analysis table: homogenization settings vs optional AMR illustration panel.
+
+    When ``solve_provenance`` is set (from a prior ``C_eff.meta.json``), mesh /
+    backend / AMR rows describe the *actual* homogenization run rather than the
+    YAML (or datasheet default mesh override).
+    """
     solver = problem.solver
     amr = dict(solver.get("amr", {}))
     sampling = solver.get("material_sampling", {})
+    backend = str(solver.get("backend", "mfem-periodic"))
+    cell_type = str(solver.get("cell_type", "tetrahedron"))
+    mesh_label = " x ".join(str(v) for v in problem.mesh_resolution)
+    mesh_note = ""
+
+    if solve_provenance is not None:
+        if "backend" in solve_provenance:
+            backend = str(solve_provenance["backend"])
+        if "cell_type" in solve_provenance:
+            cell_type = str(solve_provenance["cell_type"])
+        mr = solve_provenance.get("mesh_resolution")
+        if mr is not None:
+            mesh_label = " x ".join(str(v) for v in mr)
+            mesh_note = " (from C_eff.meta.json)"
+        else:
+            mesh_label = "unknown"
+            mesh_note = " (C_eff reused; no meta)"
+        samp = solve_provenance.get("material_sampling")
+        if isinstance(samp, dict) and samp:
+            sampling = samp
+        if "amr" in solve_provenance:
+            prov_amr = solve_provenance.get("amr")
+            amr = dict(prov_amr) if isinstance(prov_amr, dict) else {}
+
     rows: list[tuple[str, str]] = [
-        ("backend", str(solver.get("backend", "mfem-periodic"))),
-        ("cell type", str(solver.get("cell_type", "tetrahedron"))),
+        ("backend", backend),
+        ("cell type", cell_type),
         (
             "homogenization mesh",
-            " x ".join(str(v) for v in problem.mesh_resolution),
+            mesh_label + mesh_note,
         ),
         ("BC", "periodic (3-axis MPC / saddle-point)"),
         ("material sampling", str(sampling.get("strategy", "default"))),
@@ -263,6 +293,15 @@ def _build_analysis_rows(
         )
     else:
         rows.append(("homogenization AMR", "off (uniform mesh)"))
+    if solve_provenance and not solve_provenance.get("mesh_resolution"):
+        rows.append(
+            (
+                "C_eff source",
+                "reused NPZ (mesh unknown — no C_eff.meta.json)",
+            )
+        )
+    elif solve_provenance:
+        rows.append(("C_eff source", "reused NPZ + meta"))
     rows.append(
         (
             "AMR figure (right)",
@@ -278,6 +317,7 @@ def collect_spec(
     *,
     config_path: str,
     amr_panel: str | None = None,
+    solve_provenance: dict[str, Any] | None = None,
 ) -> DatasheetSpec:
     raw_field = raw_config["field"]
 
@@ -290,7 +330,12 @@ def collect_spec(
     ]
 
     micro_rows = _material_rows(problem.materials, raw_config.get("materials", []))
-    analysis_rows = _build_analysis_rows(problem, raw_config, amr_panel=amr_panel)
+    analysis_rows = _build_analysis_rows(
+        problem,
+        raw_config,
+        amr_panel=amr_panel,
+        solve_provenance=solve_provenance,
+    )
 
     field_kind = str(raw_field.get("type", ""))
     title_map = {
@@ -580,10 +625,37 @@ def generate(
         spec.amr_illustration = amr_panel_desc
 
     if c_eff_npz is not None:
-        data = np.load(c_eff_npz)
-        c = np.asarray(data["effective_stiffness"], dtype=float)
+        from b3_tex.result import HomogenizationResult, meta_path_for_npz
+
+        loaded = HomogenizationResult.load_npz(c_eff_npz)
+        if loaded.effective_stiffness is None:
+            raise ValueError(
+                f"{c_eff_npz} has no 'effective_stiffness' array (Voigt 6x6 C in Pa)"
+            )
+        c = loaded.effective_stiffness
         spec.c_eff_gpa = c / 1e9
         spec.engineering_constants = engineering_constants_from_S(np.linalg.inv(c))
+        # Rebuild analysis rows with actual solve provenance when meta exists.
+        if loaded.metadata:
+            spec.analysis_rows = _build_analysis_rows(
+                problem,
+                raw,
+                amr_panel=amr_panel_desc,
+                solve_provenance=loaded.metadata,
+            )
+        else:
+            meta_p = meta_path_for_npz(c_eff_npz)
+            print(
+                f"Warning: no provenance file at {meta_p}; "
+                "datasheet mesh/backend may not match the C_eff run.",
+                flush=True,
+            )
+            spec.analysis_rows = _build_analysis_rows(
+                problem,
+                raw,
+                amr_panel=amr_panel_desc,
+                solve_provenance={"mesh_resolution": None},
+            )
     elif not skip_solve:
         print(
             "Homogenizing (this may take several minutes on fine meshes)...", flush=True

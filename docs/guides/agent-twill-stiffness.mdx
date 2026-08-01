@@ -1,0 +1,110 @@
+---
+title: Twill 2×2 stiffness
+description: Agent path — full FEA C_eff for a twill weave from fibre, resin, and Vf.
+---
+
+Goal: given **fibre**, **resin (matrix)**, and **in-tow Vf**, produce a defensible
+homogenized stiffness for a **twill 2×2** weave, ready for FEA.
+
+## One-shot path
+
+Edit constituents in `examples/weave_twill_2x2.yaml` (`materials` block), then:
+
+```bash
+b3-tex validate examples/weave_twill_2x2.yaml
+b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+b3-tex datasheet examples/weave_twill_2x2.yaml \
+  -o results/datasheet_weave_twill_2x2.pdf \
+  --c-eff results/weave_twill_2x2/C_eff.npz
+```
+
+### What `solve` prints
+
+- Backend, mesh, AMR status
+- Micromodel name and kind (`chamis (analytical)` by default)
+- Full 6×6 `C` in Pa
+- Engineering constants in GPa (`E_x`, `E_y`, `E_z`, `G_ij`, Poisson ratios)
+- Yarn volume fraction (Monte-Carlo estimate)
+- Paths to `C_eff.npz` and `C_eff.meta.json`
+
+### Load the FEA card in Python
+
+```python
+import numpy as np
+from b3_tex.result import HomogenizationResult
+
+r = HomogenizationResult.load_npz("results/weave_twill_2x2/C_eff.npz")
+C = r.effective_stiffness          # (6, 6) Pa — key name is not "C_eff"
+ec = r.engineering_constants()     # e_x, e_y, … in Pa
+print(r.metadata["micromechanics"])  # from C_eff.meta.json
+```
+
+Voigt order: `(11, 22, 33, 23, 13, 12)` with **engineering shear**.
+
+## YAML knobs (fibre / resin / Vf)
+
+```yaml
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.5e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic,
+     e_l: 230.0e9, e_t: 15.0e9, g_lt: 15.0e9, nu_lt: 0.20, nu_tt: 0.30}
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre,
+     micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.55,
+     max_fibre_volume_fraction: 0.90}
+
+field:
+  type: woven
+  pattern: {kind: twill, n_over: 2, n_under: 2, step: 1, n_warp: 4, n_weft: 4}
+  # … geometry, compaction, nest …
+```
+
+- **In-tow Vf** drives yarn stiffness via micromechanics (local Vf rises under compaction).
+- **Yarn Vf** (bundle volume / RVE) is a geometric outcome — printed by `validate` / `solve`.
+
+## Solver defaults in the twill example
+
+| Key | Value | Why |
+|-----|-------|-----|
+| `mesh_resolution` | `[24, 24, 6]` | Moderate base for thin SI domain (~0.02×0.02×0.0024 m) |
+| `backend` | `mfem-periodic` | Hex + NCMesh AMR |
+| `cell_type` | `hexahedron` | Efficient weave meshing |
+| `amr` | 2 iters @ 0.2 | Interface resolution without full fine grid |
+
+Smoke (~10 s class): set mesh to `[20, 20, 5]` and `amr.enabled: false`.
+
+## Geometry sanity (optional)
+
+```bash
+python examples/make_fabric_gifs.py --arch weave_twill_2x2
+```
+
+Outputs section-sweep / AMR gifs under `results/weave_twill_2x2_*`.
+
+## Micromechanics provenance
+
+| `micromodel` | Kind | Notes |
+|--------------|------|--------|
+| `chamis` | analytical | Default baseline |
+| `mori_tanaka` | analytical | Second opinion / smoother transverse |
+| registered FEA name (e.g. `fea_hex`) | registered / surrogate | Requires `b3_micromech` session registration |
+
+`validate` and `C_eff.meta.json` both report micromodel **name** and **kind**.
+
+## What this path does *not* do yet
+
+| Need | Status |
+|------|--------|
+| Automatic ΔE convergence badge | Planned (`--check-convergence`) |
+| Finite-diff sensitivities ∂E/∂Vf | Planned (`b3-tex sensitivity`) |
+| Abaqus engineering-constants card export | Stretch |
+
+See [Convergence](/docs/guides/convergence) for manual mesh checks.
+
+## Checklist for agents
+
+1. Edit fibre / matrix / Vf in YAML (do not hardcode in Python unless needed).
+2. `validate` — confirm micromodel and AMR.
+3. `solve` — read printed `E_x` and meta path.
+4. `datasheet --c-eff` — mesh line must say `(from C_eff.meta.json)`.
+5. Hand off `effective_stiffness` + meta, not a bare matrix dump.

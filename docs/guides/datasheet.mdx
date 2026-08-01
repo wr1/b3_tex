@@ -1,0 +1,80 @@
+---
+title: Material datasheet
+description: One-page Typst PDF documenting RVE setup, micromechanics, and C_eff.
+---
+
+`b3_tex` can emit a **one-page technical material datasheet** (Typst PDF) for any
+RVE YAML. The sheet documents how the textile is modelled, how it was analysed,
+and the homogenized stiffness.
+
+## Sections on the one-pager
+
+| Block | Content |
+|-------|---------|
+| **RVE settings** | Domain size, weave geometry (`n_warp`, tow section, compaction, …) |
+| **Micromechanics** | Matrix and fibre moduli, micromodel name, nominal/max in-tow Vf, yarn Vf |
+| **Analysis** | Backend, cell type, periodic BCs, sampling, **homogenization** mesh + AMR |
+| **Modelled weave** | Mid-plane slice: local in-tow $V_f$ + fibre-direction quiver |
+| **AMR mesh (right)** | Illustration only (coarse `10×10×3` base + mid-plane cuts) |
+| **Outputs** | Engineering constants and full $6\times6$ $C_\mathrm{eff}$ in GPa |
+
+Voigt order: `(11, 22, 33, 23, 13, 12)` with engineering shear.
+$\sigma_\mathrm{voigt} = C_\mathrm{eff}\,\varepsilon_\mathrm{voigt}$.
+
+## Preferred workflow (reuse C_eff)
+
+```bash
+b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+
+b3-tex datasheet examples/weave_twill_2x2.yaml \
+  -o results/datasheet_weave_twill_2x2.pdf \
+  --c-eff results/weave_twill_2x2/C_eff.npz
+```
+
+When `C_eff.meta.json` sits next to the NPZ, the **Analysis** table shows the
+actual solve mesh / backend / AMR (labelled `from C_eff.meta.json`). Without meta,
+the sheet warns and marks mesh as unknown rather than inventing `24×24×8`.
+
+## CLI flags
+
+| Flag | Meaning |
+|------|---------|
+| `--c-eff path.npz` | Reuse homogenization (`effective_stiffness` key) |
+| `--full-mesh` | Homogenize on YAML `mesh_resolution` (slow) |
+| `--skip-solve` | Layout only — no stiffness table |
+| `--skip-amr` | Omit AMR illustration panel |
+| `--solve-amr-iterations N` | AMR during on-the-fly homogenization |
+| `--amr-iterations N` | AMR for the **illustration** panel only |
+| `--axis {x,y,z}` | Normal to the mid-plane fibre quiver |
+
+Boolean flags are store-true style: `b3-tex datasheet CFG --skip-solve` (no `true` value).
+
+Default on-the-fly mesh (when neither `--c-eff` nor `--full-mesh`): **`24×24×8`**.
+
+## Showcase regenerate
+
+```bash
+b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml \
+  -o results/datasheet_plain_weave_compacted.pdf \
+  --amr-iterations 2
+```
+
+Or the example driver:
+
+```bash
+python examples/material_datasheet.py \
+  --config examples/plain_weave_compacted_high_vf.yaml \
+  --out results/datasheet_plain_weave_compacted.pdf
+```
+
+## Prerequisites
+
+- **Typst** on `PATH` (`typst compile`)
+- **MFEM** for AMR figure and `mfem-periodic` solves
+- **matplotlib** for embedded PNGs
+
+## Implementation
+
+- Package: `src/b3_tex/datasheet.py`
+- Driver: `examples/material_datasheet.py`
+- CLI: `b3-tex datasheet`

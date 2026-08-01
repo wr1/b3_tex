@@ -1,0 +1,6 @@
+{
+  "name": "b3_tex",
+  "title": "b3_tex — textile RVE homogenization",
+  "description": "Implicit modelling and FE homogenization of textile-composite RVEs (MFEM + DOLFINx) with AMR, pluggable micromechanics, and material datasheets.",
+  "github": null
+}

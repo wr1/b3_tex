@@ -1,0 +1,73 @@
+---
+title: YAML schema
+description: Field types, materials, domain, and solver blocks.
+---
+
+Top-level keys:
+
+```yaml
+domain:
+  size: [Lx, Ly, Lz]
+  mesh_resolution: [nx, ny, nz]
+periodic_tolerance: 1.0e-8
+materials: [ ... ]
+field: { type: ..., ... }
+solver: { backend: ..., ... }
+```
+
+## Field types (`field.type`)
+
+| Type | Architecture | Example |
+|------|--------------|---------|
+| `woven` | 2D plain / twill / satin / basket | `weave_twill_2x2.yaml` |
+| `orthogonal` | 3D orthogonal | `woven_3d_orthogonal.yaml` |
+| `layer_to_layer` | 3D L2L interlock | `woven_layer_to_layer.yaml` |
+| `ncf` | Multi-axial NCF + stitch | `ncf_tricot_stitched.yaml` |
+| `braid` | Triaxial braid | `triaxial_braid.yaml` |
+| `cylinder_yarn` | Single UD tow | `ud_tow.yaml` |
+| `multi_straight_yarn` | Hand-listed tows | validation |
+
+Deprecated aliases still load with warnings: `plain_weave`, `parametric_plain_weave`,
+`satin_weave`, `weave`, `stitched_biaxial`.
+
+### `woven` pattern block
+
+| `kind` | Keys |
+|--------|------|
+| `plain` | `n_warp`, `n_weft` (even, ≥2) |
+| `twill` | `n_over`, `n_under`, `step`, optional `n_warp`, `n_weft` |
+| `satin` | `n`, `shift` (coprime), optional `warp_faced` |
+| `basket` | `n`, optional counts |
+| `matrix` | custom interlacing grid |
+
+Common geometry keys: `warp_width`, `warp_height` (full extents), `power`,
+`compaction`, `nest: true`, `nominal_fibre_volume_fraction`, `max_fibre_volume_fraction`.
+
+## Materials
+
+| `type` | Role |
+|--------|------|
+| `isotropic` | Matrix (E, ν) |
+| `transverse_isotropic` | Fibre (E_l, E_t, G_lt, ν_lt, ν_tt) |
+| `micromechanical` | Yarn via micromodel + local Vf |
+| `chamis` | Fixed-Vf yarn (baked) |
+
+Declare matrix and fibre **before** the yarn that references them.
+
+## Solver
+
+```yaml
+solver:
+  backend: mfem-periodic   # or dolfinx-periodic, *-kubc
+  cell_type: hexahedron
+  material_sampling:
+    strategy: local_cloud  # exact | cell_constant | local_cloud
+    resolution: 6
+  amr:
+    enabled: true
+    max_iterations: 2
+    threshold: 0.2
+    dof_budget: 200000
+```
+
+Hex AMR requires an `mfem-*` backend. See [Convergence](/docs/guides/convergence).

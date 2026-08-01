@@ -47,7 +47,22 @@ unified `woven` / `ncf` generators.
 
 [![Technical material datasheet](results/datasheet_plain_weave_compacted.png)](results/datasheet_plain_weave_compacted.pdf)
 
-Regenerate: `b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml -o results/datasheet_plain_weave_compacted.pdf` — see [docs/technical_datasheet.md](docs/technical_datasheet.md).
+Regenerate: `b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml -o results/datasheet_plain_weave_compacted.pdf` — see [docs/guides/datasheet.mdx](docs/guides/datasheet.mdx).
+
+## Documentation site (DocKB)
+
+Public docs are Fumadocs MDX under `docs/`. Serve with the shared DocKB runtime:
+
+```bash
+make docs              # dockb on PORT=3000 (auto-skips busy ports)
+make docs PORT=3011
+make help              # self-documenting targets
+# equivalent: dockb   (needs ~/apps/dockb-runtime + dockb on PATH)
+```
+
+- Guides: getting started, [twill 2×2 agent path](docs/guides/agent-twill-stiffness.mdx), datasheet, convergence
+- Reference: architecture, CLI, micromechanics, YAML schema
+- Internal **Dev KB** (`kb/`, gitignored from main repo): agent-path gap log, runbooks — open the **Dev KB** tab when `kb/` is present
 
 ## What's in
 
@@ -128,14 +143,20 @@ b3-tex solve     examples/plain_weave_high_vf.yaml \
                  --amr-iterations 3 --amr-threshold 0.20
 b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml \
                  -o results/datasheet_plain_weave_compacted.pdf
+# Twill 2×2 stiffness card + datasheet (reuses C_eff provenance)
+b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+b3-tex datasheet examples/weave_twill_2x2.yaml \
+                 -o results/datasheet_weave_twill_2x2.pdf \
+                 --c-eff results/weave_twill_2x2/C_eff.npz
 ```
 
-Backend choices: `dolfinx-periodic` (default), `dolfinx-kubc`,
-`mfem-periodic`, `mfem-kubc`. AMR is wired through the YAML
+Backend choices: `mfem-periodic` (CLI default, recommended for hex AMR),
+`mfem-kubc`, `dolfinx-periodic`, `dolfinx-kubc`. AMR is wired through the YAML
 (`solver.amr.enabled`) or `--amr-iterations`. Hex AMR requires an `mfem-*`
 backend (DOLFINx 0.10's `refine_plaza` is tet-only).
 
-`solve` writes `C_eff.npz` and prints the 6×6 effective stiffness.
+`solve` writes `C_eff.npz` (array key `effective_stiffness`, Pa) plus
+`C_eff.meta.json` provenance, and prints the 6×6 matrix and engineering constants.
 
 ## Picking a backend
 

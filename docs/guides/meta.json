@@ -1,0 +1,9 @@
+{
+  "title": "Guides",
+  "pages": [
+    "getting-started",
+    "agent-twill-stiffness",
+    "datasheet",
+    "convergence"
+  ]
+}
