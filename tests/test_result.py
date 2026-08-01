@@ -36,13 +36,29 @@ def test_result_validates_shapes():
 def test_result_save_npz_round_trip(tmp_path: Path):
     result = _basic_result()
     path = tmp_path / "C.npz"
-    result.save_npz(path)
+    meta_path = result.save_npz(path)
+    assert meta_path is not None
+    assert meta_path.name == "C.meta.json"
     loaded = np.load(path)
     np.testing.assert_allclose(
         loaded["effective_stiffness"], result.effective_stiffness
     )
     np.testing.assert_allclose(loaded["loadcase_strains"], result.loadcase_strains)
     np.testing.assert_allclose(loaded["loadcase_stresses"], result.loadcase_stresses)
+    round_trip = HomogenizationResult.load_npz(path)
+    np.testing.assert_allclose(
+        round_trip.effective_stiffness, result.effective_stiffness
+    )
+    assert round_trip.metadata.get("backend") == "test"
+
+
+def test_with_metadata_merge():
+    result = _basic_result()
+    updated = result.with_metadata(wall_time_s=1.5, backend="mfem-periodic")
+    assert updated.metadata["backend"] == "mfem-periodic"
+    assert updated.metadata["wall_time_s"] == 1.5
+    # original unchanged (frozen)
+    assert result.metadata["backend"] == "test"
 
 
 def test_engineering_constants_recover_isotropic_inputs():

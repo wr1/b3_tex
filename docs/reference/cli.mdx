@@ -1,0 +1,64 @@
+---
+title: CLI
+description: b3-tex validate, reference, solve, and datasheet.
+---
+
+```bash
+b3-tex validate  CONFIG.yaml
+b3-tex reference CONFIG.yaml
+b3-tex solve     CONFIG.yaml [options]
+b3-tex datasheet CONFIG.yaml [options]
+```
+
+## validate
+
+Load the RVE without solving. Prints:
+
+- Domain size, mesh resolution, materials, field type
+- Backend / cell type, AMR status
+- Micromodel name + kind (`analytical` / `registered` / fixed stiffness)
+- In-tow Vf range, yarn Vf MC estimate
+- Efficiency hint when AMR is off
+
+## reference
+
+Voigt / Reuss bounds from estimated yarn Vf. Mori–Tanaka closed form only for
+`cylinder_yarn` fields.
+
+## solve
+
+Run 6 macro-strain loadcases; write FEA card + provenance.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `-o, --out` | `results` | Output directory |
+| `-b, --backend` | `mfem-periodic` | Solver backend |
+| `-c, --cell-type` | YAML | `tetrahedron` / `hexahedron` |
+| `--amr-iterations` | `0` | If &gt; 0, enable AMR with this max iters (YAML AMR otherwise left as-is) |
+| `--amr-threshold` | `0.20` | Heterogeneity threshold |
+
+### Outputs
+
+| File | Content |
+|------|---------|
+| `C_eff.npz` | `effective_stiffness` (6×6 Pa); optional loadcase strains/stresses |
+| `C_eff.meta.json` | backend, mesh, AMR, micromodel, yarn Vf, git sha, wall time, units |
+
+Stdout also prints engineering constants (GPa).
+
+## datasheet
+
+One-page Typst PDF + PNG thumbnail.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `-o, --out` | `results/datasheet.pdf` | PDF path |
+| `--c-eff` | empty | Reuse NPZ (+ meta for mesh provenance) |
+| `--full-mesh` | off | Use YAML mesh instead of 24×24×8 |
+| `--skip-solve` | off | No stiffness table |
+| `--skip-amr` | off | No AMR illustration |
+| `--amr-iterations` | `2` | Illustration panel only |
+| `--solve-amr-iterations` | `0` | Homogenization AMR if solving |
+| `--axis` | `z` | Mid-plane normal |
+
+See [Material datasheet](/docs/guides/datasheet).

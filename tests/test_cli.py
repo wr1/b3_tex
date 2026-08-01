@@ -28,6 +28,18 @@ def test_cli_validate_example(capsys: pytest.CaptureFixture[str]):
     out = capsys.readouterr().out
     assert "OK" in out
     assert "matrix" in out and "yarn" in out
+    assert "yarn Vf" in out
+    assert "backend" in out
+
+
+def test_cli_validate_twill_shows_micromodel(capsys: pytest.CaptureFixture[str]):
+    twill = REPO_ROOT / "examples" / "weave_twill_2x2.yaml"
+    _run_cli(["validate", str(twill)])
+    out = capsys.readouterr().out
+    assert "OK" in out
+    assert "chamis" in out
+    assert "analytical" in out
+    assert "AMR" in out
 
 
 def test_cli_reference_example(capsys: pytest.CaptureFixture[str]):

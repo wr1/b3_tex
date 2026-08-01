@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +11,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+def meta_path_for_npz(npz_path: str | Path) -> Path:
+    """Sidecar path for provenance: ``C_eff.npz`` → ``C_eff.meta.json``."""
+    p = Path(npz_path)
+    return p.with_name(p.stem + ".meta.json")
+
+
 @dataclass(frozen=True)
 class HomogenizationResult:
+    """Homogenization output.
+
+    ``effective_stiffness`` is the Voigt ``(6, 6)`` matrix ``C`` in Pa such that
+    ``σ = C @ ε`` with engineering shear strains.  Load with::
+
+        data = np.load("C_eff.npz")
+        C = data["effective_stiffness"]  # key name — not "C_eff"
+    """
+
     effective_stiffness: NDArray[np.float64] | None = None
     effective_conductivity: NDArray[np.float64] | None = None
     loadcase_strains: NDArray[np.float64] | None = None
@@ -41,8 +57,20 @@ class HomogenizationResult:
                     f"effective_conductivity must have shape (3, 3), got {k.shape}"
                 )
             object.__setattr__(self, "effective_conductivity", k)
+        # Frozen dataclass: ensure metadata is a plain dict copy.
+        object.__setattr__(self, "metadata", dict(self.metadata or {}))
 
-    def save_npz(self, path: str | Path) -> None:
+    def with_metadata(self, **updates: Any) -> HomogenizationResult:
+        """Return a copy with ``metadata`` updated (shallow merge)."""
+        meta = {**self.metadata, **updates}
+        return replace(self, metadata=meta)
+
+    def save_npz(self, path: str | Path, *, write_meta: bool = True) -> Path | None:
+        """Write arrays to ``path`` and optional sidecar ``*.meta.json``.
+
+        Returns the meta path when written, else ``None``.
+        """
+        path = Path(path)
         kwargs: dict[str, np.ndarray] = {}
         if self.effective_stiffness is not None:
             kwargs["effective_stiffness"] = self.effective_stiffness
@@ -52,7 +80,51 @@ class HomogenizationResult:
             kwargs["loadcase_stresses"] = self.loadcase_stresses
         if self.effective_conductivity is not None:
             kwargs["effective_conductivity"] = self.effective_conductivity
+        if not kwargs:
+            raise ValueError("nothing to save: all array fields are None")
+        path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(path, **kwargs)
+        if write_meta and self.metadata:
+            meta_path = meta_path_for_npz(path)
+            meta_path.write_text(
+                json.dumps(self.metadata, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return meta_path
+        return None
+
+    @classmethod
+    def load_npz(cls, path: str | Path) -> HomogenizationResult:
+        """Load arrays from NPZ and optional sidecar ``*.meta.json``."""
+        path = Path(path)
+        data = np.load(path)
+        meta: dict[str, Any] = {}
+        meta_path = meta_path_for_npz(path)
+        if meta_path.is_file():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        return cls(
+            effective_stiffness=(
+                np.asarray(data["effective_stiffness"], dtype=float)
+                if "effective_stiffness" in data.files
+                else None
+            ),
+            effective_conductivity=(
+                np.asarray(data["effective_conductivity"], dtype=float)
+                if "effective_conductivity" in data.files
+                else None
+            ),
+            loadcase_strains=(
+                np.asarray(data["loadcase_strains"], dtype=float)
+                if "loadcase_strains" in data.files
+                else None
+            ),
+            loadcase_stresses=(
+                np.asarray(data["loadcase_stresses"], dtype=float)
+                if "loadcase_stresses" in data.files
+                else None
+            ),
+            metadata=meta,
+        )
 
     def engineering_constants(self) -> dict[str, float]:
         """Return engineering constants assuming the stiffness is orthotropic."""

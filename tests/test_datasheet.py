@@ -50,6 +50,35 @@ def test_analysis_amr_panel_consistent(compacted_problem):
     assert analysis["AMR figure (right)"] == panel
 
 
+def test_analysis_rows_use_c_eff_provenance(compacted_problem):
+    from b3_tex.datasheet import _build_analysis_rows
+
+    problem, raw = compacted_problem
+    prov = {
+        "backend": "mfem-periodic",
+        "cell_type": "hexahedron",
+        "mesh_resolution": [20, 20, 5],
+        "amr": None,
+        "material_sampling": {"strategy": "local_cloud", "resolution": 6},
+    }
+    rows = dict(_build_analysis_rows(problem, raw, solve_provenance=prov))
+    assert rows["homogenization mesh"].startswith("20 x 20 x 5")
+    assert "meta" in rows["homogenization mesh"]
+    assert rows["homogenization AMR"] == "off (uniform mesh)"
+    assert rows["C_eff source"] == "reused NPZ + meta"
+
+
+def test_analysis_rows_unknown_mesh_without_meta(compacted_problem):
+    from b3_tex.datasheet import _build_analysis_rows
+
+    problem, raw = compacted_problem
+    rows = dict(
+        _build_analysis_rows(problem, raw, solve_provenance={"mesh_resolution": None})
+    )
+    assert rows["homogenization mesh"].startswith("unknown")
+    assert "mesh unknown" in rows["C_eff source"]
+
+
 def test_build_typst_contains_sections(compacted_problem):
     problem, raw = compacted_problem
     spec = collect_spec(problem, raw, config_path="plain_weave_compacted_high_vf.yaml")

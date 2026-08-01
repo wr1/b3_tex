@@ -1,0 +1,85 @@
+---
+title: Micromechanics
+description: Pluggable yarn models — Chamis, Mori–Tanaka, FEA surrogates.
+---
+
+Yarn stiffness is either **fixed** (isotropic / transverse-isotropic / baked Chamis)
+or **micromechanical**: recomputed from local in-tow fibre volume fraction.
+
+## Built-in models
+
+| Name | Kind | Role |
+|------|------|------|
+| `chamis` | analytical | Baseline rule-of-mixtures (default) |
+| `mori_tanaka` | analytical | Cylinder estimate; smoother transverse |
+
+YAML:
+
+```yaml
+- name: yarn
+  type: micromechanical
+  matrix: matrix
+  fibre: fibre
+  micromodel: chamis
+  nominal_fibre_volume_fraction: 0.55
+  max_fibre_volume_fraction: 0.90
+```
+
+Fixed single-Vf shortcut (no compaction path):
+
+```yaml
+- name: yarn
+  type: chamis
+  matrix: matrix
+  fibre: fibre
+  fibre_volume_fraction: 0.60
+```
+
+## Local Vf under compaction
+
+Fibre area is conserved along a tow. Compressed sections (crossovers) raise local Vf:
+
+\[
+V_{f,\mathrm{local}}(s) = \mathrm{clip}\!\left(
+  V_{f,\mathrm{nom}}\,A_\mathrm{nom}/A(s),\;
+  V_{f,\mathrm{nom}},\; V_{f,\mathrm{max}}
+\right)
+\]
+
+Assembly uses a Vf-binned LUT (`stiffness_batch` → rotate per GP). All models share
+this path — swap `micromodel` only.
+
+## FEA / surrogate registration
+
+From sibling package `b3_micromech` (same Python session — not a YAML path loader):
+
+```python
+from b3_micromech.mesomech import register_fea_micromech
+
+register_fea_micromech(
+    "results/surrogate_demo/surrogate_model.joblib",  # or None → FEA on-the-fly
+    name="fea_hex",
+    n_jobs=4,
+)
+```
+
+```yaml
+micromodel: fea_hex
+```
+
+- Trained joblib → vectorized MLP `stiffness_batch`
+- Missing joblib → MFEM homogenization at LUT bins (cached)
+
+CLI: `b3-micromech register-fea-micromech [MODEL.joblib] --name fea_hex`
+
+Registered models appear as kind **`registered`** in `validate` / meta (not
+`analytical`).
+
+## Provenance
+
+Always check:
+
+1. YAML `micromodel:` field
+2. `b3-tex validate` micromodel line
+3. `C_eff.meta.json` → `micromechanics`
+4. Datasheet **Micromechanics** table

@@ -5,6 +5,10 @@ a textile-composites specialist** drive `b3_tex` end to end: "give me accurate
 stiffness properties for a high-Vf carbon plain weave" should become a correct,
 runnable setup and a defensible stiffness tensor.
 
+**Full docs (DocKB):** from the repo root run `dockb` → http://localhost:3000 —
+guides (twill agent path, datasheet, convergence) and reference (CLI, YAML,
+micromechanics). Internal gap log under **Dev KB** when `kb/` is present.
+
 `b3_tex` homogenizes a textile **RVE** (representative volume element) using
 *implicit* yarn geometry — yarns are defined by a centerline + a cross-section and
 queried point-by-point, so there is **no body-fitted meshing** and tows may touch,
@@ -179,26 +183,52 @@ needs an `mfem-*` backend; DOLFINx AMR is tet-only (`refine_plaza`).
 
 ---
 
-## 5. Worked example — high-Vf carbon plain weave
+## 5. Worked examples
+
+### 5a. High-Vf carbon plain weave (showcase)
 
 `examples/plain_weave_compacted_high_vf.yaml` is the canonical setup. Drive it with:
 
 ```bash
-# Validate the setup (no solve): prints size, mesh, materials, field, solver block
+# Validate the setup (no solve): prints size, mesh, materials, micromodel, AMR, yarn Vf
 b3-tex validate examples/plain_weave_compacted_high_vf.yaml
 
 # Analytical references (Voigt/Reuss bounds, Mori-Tanaka where applicable)
 b3-tex reference examples/plain_weave_compacted_high_vf.yaml
 
-# Homogenize (hex + AMR via MFEM); writes results/C_eff.npz
+# Homogenize (hex + AMR via MFEM); writes C_eff.npz + C_eff.meta.json
 # AMR is already enabled in the YAML; flags below override/confirm it.
 b3-tex solve examples/plain_weave_compacted_high_vf.yaml \
     --backend mfem-periodic --cell-type hexahedron \
-    --amr-iterations 2 --amr-threshold 0.20
+    --amr-iterations 2 --amr-threshold 0.20 \
+    -o results/plain_weave_compacted
 
-# One-page technical datasheet (Typst PDF + PNG thumbnail)
-b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml -o results/datasheet.pdf
+# One-page technical datasheet (Typst PDF + PNG thumbnail); reuse prior C_eff
+b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml \
+    -o results/datasheet.pdf \
+    --c-eff results/plain_weave_compacted/C_eff.npz
 ```
+
+### 5b. Twill 2×2 carbon/epoxy (full FEA stiffness card)
+
+Given fibre / resin / Vf (already set in the YAML — edit the `materials` block):
+
+```bash
+b3-tex validate examples/weave_twill_2x2.yaml
+b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+# prints E_x, E_y, E_z, micromodel (chamis, analytical), yarn Vf
+# writes results/weave_twill_2x2/C_eff.npz
+#   key: effective_stiffness  (Voigt 6×6, Pa)
+#   sidecar: C_eff.meta.json  (mesh, backend, micromodel, git sha, …)
+
+b3-tex datasheet examples/weave_twill_2x2.yaml \
+    -o results/datasheet_weave_twill_2x2.pdf \
+    --c-eff results/weave_twill_2x2/C_eff.npz
+```
+
+Twill YAML already uses `mfem-periodic` + hex + AMR 2 @ 0.2 on a `24×24×6` base
+(thin SI domain: do **not** force a cubic mesh). Smoke: set
+`mesh_resolution: [20, 20, 5]` and `amr.enabled: false` (~10 s class).
 
 Compare five high-Vf architectures (plain, satin 5H/8H, NCF) with geometry diagnostics +
 solve in one go:
@@ -209,10 +239,22 @@ python examples/high_vf_architectures.py
 
 **Interpreting `C_eff`** (Voigt order `11,22,33,23,13,12`, engineering shear):
 `E_x = 1/S[0,0]`, `E_y = 1/S[1,1]`, `E_z = 1/S[2,2]`, `G_xy = 1/S[5,5]` where `S = inv(C_eff)`.
-A balanced plain weave is `x↔y` symmetric (`E_x ≈ E_y`), much stiffer in-plane than
+Load from disk: `np.load("C_eff.npz")["effective_stiffness"]` (not key `"C_eff"`).
+A balanced plain/twill weave is `x↔y` symmetric (`E_x ≈ E_y`), much stiffer in-plane than
 through-thickness (`E_x ≫ E_z`). Sanity checks: `C_eff` symmetric and positive definite;
 bounded above by the KUBC result; in-plane modulus between the cross-ply rule-of-mixtures
 and the bare-matrix value.
+
+### 5c. Cost / quality ladder (stiffness)
+
+| Mode | Mesh (order) | AMR | Typical use |
+|---|---|---|---|
+| smoke | ~20×20×5 | off | agent iteration / FD sweeps |
+| standard | ~24×24×6 | 2 @ 0.2 | FEA material card + datasheet |
+| publish | finer base / AMR 3 | 2–3 | paper-grade; compare ΔE to standard |
+
+There is no automatic “run until converged”; re-run with +1 AMR iteration or a finer base
+and check `ΔE_x/E_x` (target ≲ 2 % for standard work).
 
 ---
 

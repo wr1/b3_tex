@@ -3,10 +3,21 @@
 # the diagonal interlacing expressed as a WeavePattern.twill instead of swap calls.
 # TexGen mm dimensions mapped to metres: spacing 5 mm -> 0.005, width 4 mm -> 0.004,
 # height 0.8 mm -> 0.0008, thickness ~2 mm.
+#
+# Solver defaults follow SKILL.md §4 (mfem-periodic hex + AMR): moderate base mesh
+# refined at yarn/matrix interfaces. For a faster smoke run (~10 s), set
+# mesh_resolution to [20, 20, 5] and amr.enabled: false.
+#
+# Agent path:
+#   b3-tex validate examples/weave_twill_2x2.yaml
+#   b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+#   b3-tex datasheet examples/weave_twill_2x2.yaml \
+#       -o results/datasheet_weave_twill_2x2.pdf \
+#       --c-eff results/weave_twill_2x2/C_eff.npz
 
 domain:
   size: [0.02, 0.02, 0.0024]      # 4 x 4 tows at 5 mm pitch; ~2.4 mm thick
-  mesh_resolution: [48, 48, 10]
+  mesh_resolution: [24, 24, 6]    # standard quality; was [48,48,10] uniform (slow)
 
 periodic_tolerance: 1.0e-8
 
@@ -34,3 +45,8 @@ solver:
   backend: mfem-periodic
   cell_type: hexahedron
   material_sampling: {strategy: local_cloud, resolution: 6}
+  amr:
+    enabled: true
+    max_iterations: 2
+    threshold: 0.2
+    dof_budget: 200000

@@ -1,0 +1,68 @@
+---
+title: Getting started
+description: Install b3_tex and run validate / solve on an example RVE.
+---
+
+## Requirements
+
+| Need | Notes |
+|------|--------|
+| **Python** | 3.12 recommended |
+| **micromamba / conda** | DOLFINx from conda-forge (optional if you only use MFEM) |
+| **PyMFEM** | Recommended backend (`mfem-periodic` + hex AMR) |
+| **treeparse** | CLI |
+| **Typst** | Optional; datasheet PDF only |
+
+## Install
+
+```bash
+micromamba create -n b3-tex -c conda-forge \
+    python=3.12 fenics-dolfinx dolfinx_mpc mpich numpy pyyaml pytest scipy
+micromamba activate b3-tex
+pip install treeparse pymfem
+pip install -e .
+```
+
+`pymfem` builds on first install (~5 min). Skip DOLFINx packages if you only need MFEM.
+
+## First commands
+
+```bash
+# Load + sanity (micromodel, AMR, yarn Vf estimate)
+b3-tex validate examples/ud_tow.yaml
+
+# Analytical bounds
+b3-tex reference examples/ud_tow.yaml
+
+# Homogenize → C_eff.npz + C_eff.meta.json
+b3-tex solve examples/ud_tow.yaml -o results/ud_tow
+
+# One-page datasheet (reuse prior C_eff)
+b3-tex datasheet examples/ud_tow.yaml \
+  -o results/datasheet_ud_tow.pdf \
+  --c-eff results/ud_tow/C_eff.npz
+```
+
+## Recommended defaults
+
+| Setting | Prefer |
+|---------|--------|
+| Backend | `mfem-periodic` (CLI default) |
+| Cell type | `hexahedron` for weaves + AMR |
+| Sampling | `local_cloud`, resolution ≥ 6 |
+| AMR | `max_iterations: 2`, `threshold: 0.2` |
+
+See [Convergence & cost](/docs/guides/convergence) for smoke vs publish meshes.
+
+## Documentation site
+
+```bash
+make docs              # DocKB via dockb (PORT=3000)
+make docs-static       # list MDX tree only
+```
+
+## Next
+
+- [Twill 2×2 FEA stiffness card](/docs/guides/agent-twill-stiffness) — end-to-end agent path
+- [CLI reference](/docs/reference/cli)
+- [YAML schema](/docs/reference/yaml-schema)
