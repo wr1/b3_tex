@@ -16,6 +16,11 @@ Built-in models:
 The :class:`SurrogateModel` shows the contract a learned model must satisfy;
 :func:`synthetic_chamis_dataset` generates ``(Vf, C)`` pairs from Chamis for
 training/validating such a surrogate.
+
+FEA surrogates from sibling package ``b3_micromech`` (``mlp`` / ``physics`` /
+``mf_gp``) register via ``b3_micromech.mesomech.register_fea_micromech`` and
+expose a tensorized ``stiffness_batch`` used by
+:meth:`MicromechanicalMaterial.build_lut`.
 """
 
 from __future__ import annotations
@@ -150,6 +155,12 @@ class SurrogateModel:
     def stiffness_batch(
         self, *, matrix: Material, fibre: Material, vf: NDArray[np.float64]
     ) -> NDArray[np.float64]:
+        """``(K, 6, 6)`` stiffness — prefers one tensorized ``predict((K, F))`` call.
+
+        Works with batch-aware callables from ``b3_micromech`` (``mlp`` /
+        ``physics`` / ``mf_gp`` via ``as_predict_callable``) and falls back to a
+        per-row loop for scalar-only predictors.
+        """
         vf_arr = np.asarray(vf, dtype=float).ravel()
         features = self._feature_matrix(matrix, fibre, vf_arr)
         n = vf_arr.shape[0]

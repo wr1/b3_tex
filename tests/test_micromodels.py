@@ -276,6 +276,72 @@ def test_fea_micromech_build_lut_reuses_micromodel_batch(tmp_path):
     assert len(micromodel._mem_cache) == calls_before + 1
 
 
+@pytest.mark.parametrize("kind", ["physics", "mf_gp"])
+def test_physics_surrogate_kinds_tensorized_lut_in_b3_tex(tmp_path, kind):
+    """physics / mf_gp joblibs from b3_micromech drive tensorized yarn LUTs."""
+    pytest.importorskip("sklearn")
+    pytest.importorskip("b3_micromech")
+    from b3_micromech.mesomech import register_fea_micromech
+    from b3_micromech.physics_surrogate import train_surrogate
+    from b3_micromech.reference import chamis_engineering_constants_from_features
+    from b3_micromech.tensors import transverse_isotropic_stiffness
+
+    rng = np.random.default_rng(11)
+    n_train = 40
+    features = rng.uniform(
+        low=[0.25, 2.8e9, 0.32, 220e9, 14e9, 12e9, 0.18, 5.5e9],
+        high=[0.85, 3.4e9, 0.38, 240e9, 16e9, 16e9, 0.22, 6.5e9],
+        size=(n_train, 8),
+    )
+    base = chamis_engineering_constants_from_features(features)
+    vf = features[:, 0]
+    stiffness = np.empty((n_train, 6, 6), dtype=float)
+    for i in range(n_train):
+        stiffness[i] = transverse_isotropic_stiffness(
+            e_l=float(base["e_l"][i] * np.exp(0.01 * vf[i])),
+            e_t=float(base["e_t"][i] * np.exp(0.05 + 0.1 * vf[i])),
+            g_lt=float(base["g_lt"][i] * np.exp(0.04 + 0.08 * vf[i])),
+            nu_lt=float(base["nu_lt"][i]),
+            nu_tt=float(base["nu_tt"][i] + 0.01 * vf[i]),
+        )
+    train_kw = {"n_restarts": 0, "min_rows": 8} if kind == "mf_gp" else {}
+    model = train_surrogate(features, stiffness, kind=kind, **train_kw)
+    path = tmp_path / f"{kind}.joblib"
+    model.save(path)
+
+    name = f"test_{kind}_lut"
+    micromodel = register_fea_micromech(path, name=name, disk_cache=False)
+    assert getattr(micromodel.model, "kind", None) == kind
+
+    matrix, fibre = _constituents()
+    yarn = MicromechanicalMaterial.from_constituents(
+        "yarn",
+        matrix=matrix,
+        fibre=fibre,
+        micromodel=micromodel,
+        nominal_vf=0.5,
+        max_vf=0.9,
+    )
+    # from_constituents already filled a 1-point cache entry for nominal Vf.
+    n_cache_after_nominal = len(micromodel._mem_cache)
+    centers, table = yarn.build_lut(n_bins=32)
+    assert centers.shape == (32,)
+    assert table.shape == (32, 6, 6)
+    assert np.isfinite(table).all()
+    # Full bin grid is one extra tensorized stiffness_batch call.
+    assert len(micromodel._mem_cache) == n_cache_after_nominal + 1
+    # Second LUT hit reuses the micromodel memory cache.
+    yarn.build_lut(n_bins=32)
+    assert len(micromodel._mem_cache) == n_cache_after_nominal + 1
+
+    # SurrogateModel adapter with batch-aware callable.
+    sm = SurrogateModel(predict=model.as_predict_callable(), name=f"sm_{kind}")
+    register_micromodel(sm)
+    batch = sm.stiffness_batch(matrix=matrix, fibre=fibre, vf=centers)
+    via_mm = micromodel.stiffness_batch(matrix=matrix, fibre=fibre, vf=centers)
+    np.testing.assert_allclose(batch, via_mm, rtol=1e-10, atol=1.0)
+
+
 def test_synthetic_dataset_shapes():
     matrix, fibre = _constituents()
     vf_grid = np.linspace(0.3, 0.8, 11)

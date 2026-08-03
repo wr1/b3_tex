@@ -137,13 +137,27 @@ A high-Vf **carbon** tow is typically: matrix epoxy `E≈3 GPa, ν≈0.35`; fibr
 ### FEA surrogate from `b3_micromech` (mesomech integration)
 
 Train on hex periodic MFEM homogenization sweeps, then register by name before the
-weave solve (same Python session — no YAML path loader):
+weave solve (same Python session — no YAML path loader). All three surrogate
+**kinds** share the same registration path and a **tensorized**
+`stiffness_batch` → Vf LUT (one vectorized predict for all bin centres):
+
+| kind | Train flag | Form |
+|------|------------|------|
+| `mlp` | `--kind mlp` (default) | black-box multi-output MLP |
+| `physics` | `--kind physics` | Chamis base × ridge residual on eng. constants |
+| `mf_gp` | `--kind mf_gp` | Chamis base × GP residual (optional κ) |
+
+```sh
+b3-micromech train-surrogate results/dataset.npz -o results/surrogate_model.joblib
+b3-micromech train-surrogate results/dataset.npz -o results/physics.joblib --kind physics
+b3-micromech train-surrogate results/dataset.npz -o results/mf_gp.joblib --kind mf_gp
+```
 
 ```python
 from b3_micromech.mesomech import register_fea_micromech
 
 register_fea_micromech(
-    "results/surrogate_demo/surrogate_model.joblib",  # or None → FEA on-the-fly
+    "results/physics.joblib",  # mlp / physics / mf_gp joblib, or None → FEA
     name="fea_hex",
     n_jobs=4,
 )
@@ -153,13 +167,14 @@ register_fea_micromech(
 micromodel: fea_hex   # after register_fea_micromech(..., name="fea_hex")
 ```
 
-**Modes:** trained joblib → vectorized MLP `stiffness_batch` (fast LUT build).
+**Modes:** trained joblib → vectorized surrogate `stiffness_batch` (fast LUT build).
 Missing joblib → MFEM homogenization at LUT bin centres (~256 solves first time),
 cached in memory and on disk (`results/fea_lut_cache/`).
 
 **CLI:** `b3-micromech register-fea-micromech [MODEL.joblib] --name fea_hex`
 
-Full workflow: `b3_micromech` skill `mesomech-surrogate` or `make demo-mesomech-batch`.
+Full workflow: sibling package root skill `b3_micromech/SKILL.md`, or
+`make demo-mesomech-batch` / `make demo-surrogate` in that repo.
 
 ---
 
