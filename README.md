@@ -2,25 +2,27 @@
 
 # b3_tex
 
-Implicit modelling and homogenization of textile-composite RVEs on FEniCSx
-**and** MFEM, with adaptive mesh refinement and a backend-agnostic
-post-processing layer.
+**Robust, automated** textile RVE homogenization — implicit geometry, adaptive
+meshing, and a one-command path from fabric YAML to **C_eff** / datasheet.
 
-`b3_tex` represents the textile geometry **implicitly** — phase membership and
-local fibre orientation are evaluated as a 3D field at any point — and uses a
-structured FE mesh whose Gauss-point material lookup samples that field. No
-yarn-surface meshing is needed, and the same field can drive an AMR marker
-that refines around interfaces.
+Built for cases where body-fitted yarn meshing fails: high fibre packing,
+tow contact / interpenetration, and architecture sweeps that must re-mesh
+reliably without hand-edited CAD.
 
-## Intent 
-<!-- user written -> flesh out proper -->
-Implicit modelling with AMR enables:
-- Modelling robustness for high Vf textile structures with contact, meshing always feasible. 
-- Convergence information included. 
-- Fast to solve. 
-- Extensible, yarn formulations not dependent on mesher. 
+## Intent
 
+| Goal | How |
+|------|-----|
+| **Robustness** | Geometry is an *implicit field* (phase + fibre direction at any point). No yarn-surface mesh. High-Vf contact stays discretizable. AMR refines interfaces; interiors stay coarse. |
+| **Automation** | One YAML → validate → solve (periodic, 6 loadcases) → `C_eff.npz` + optional datasheet. Fabric generators (`woven` / `ncf` / `braid` / 3D) share the same pipeline. |
+| **Consistency** | Yarn cards from `b3_micromech` (or Chamis) plug in as `micromodel`; local Vf at crossovers is automatic. Same Voigt / fibre-axis conventions end-to-end. |
+| **Speed where it matters** | Background hex mesh + MFEM NCMesh AMR (or DOLFINx tets); material sampling and solvers are scriptable for sweeps and agent runs. |
 
+```text
+fabric YAML  →  implicit field  →  AMR mesh  →  6 unit strains  →  C_eff + datasheet
+                      ↑
+              yarn micromodel (chamis | fea_hex | …)
+```
 
 ## Fabric architectures
 
