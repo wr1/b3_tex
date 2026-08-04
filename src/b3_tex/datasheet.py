@@ -16,7 +16,11 @@ from b3_tex.materials import Material, MicromechanicalMaterial
 from b3_tex.postprocess import engineering_constants_from_S
 from b3_tex.problem import RVEProblem
 from b3_tex.result import HomogenizationResult
-from b3_tex.viz.slices import render_amr_snapshot, render_midplane_field
+from b3_tex.viz.slices import (
+    render_amr_snapshot,
+    render_midplane_field,
+    render_midplane_orientation,
+)
 from b3_tex.viz.theme import DATASHEET_THEME
 
 _PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
@@ -41,6 +45,7 @@ class DatasheetSpec:
     mesh_n_gp: int | None = None
     amr_illustration: str | None = None
     figure_field: Path | None = None
+    figure_orientation: Path | None = None  # dual Vf | OOP e1·n mid-plane
     figure_mesh: Path | None = None
     figure_col_fracs: tuple[float, float] = (0.48, 0.52)
 
@@ -446,10 +451,20 @@ def build_typst(spec: DatasheetSpec) -> str:
 
     # Figure panels: present columns adapt to how many images exist so a single
     # panel (e.g. AMR skipped) still spans the full width instead of half.
+    # Prefer the dual Vf | OOP orientation plot when present (shows out-of-plane
+    # fibre tilt as a field); fall back to the single mid-plane Vf panel.
     col_l, col_r = spec.figure_col_fracs
     panels: list[tuple[str, float]] = []
-    if spec.figure_field and spec.figure_field.is_file():
-        panels.append((_figure_image(spec.figure_field.name), col_l))
+    field_img = None
+    if spec.figure_orientation and spec.figure_orientation.is_file():
+        field_img = spec.figure_orientation
+        # Orientation dual-panel is wider — give it more column weight.
+        col_l = max(col_l, 0.55)
+        col_r = 1.0 - col_l
+    elif spec.figure_field and spec.figure_field.is_file():
+        field_img = spec.figure_field
+    if field_img is not None:
+        panels.append((_figure_image(field_img.name), col_l))
     if spec.figure_mesh and spec.figure_mesh.is_file():
         panels.append((_figure_image(spec.figure_mesh.name), col_r))
 
@@ -617,11 +632,20 @@ def generate(
         problem, raw, config_path=str(config_path), amr_panel=amr_panel_desc
     )
     spec.figure_col_fracs = _figure_column_fracs(problem, axis=axis)
+    # Dual panel: Vf + in-plane quiver | explicit out-of-plane e1·n field.
+    spec.figure_orientation = render_midplane_orientation(
+        problem,
+        work / "field_orientation.png",
+        axis=axis,
+        theme=DATASHEET_THEME,
+    )
+    # Keep single mid-plane for callers that still look for figure_field.
     spec.figure_field = render_midplane_field(
         problem,
         work / "field_midplane.png",
         axis=axis,
         theme=DATASHEET_THEME,
+        colour_oop=True,
     )
     if amr_panel_desc:
         spec.figure_mesh = mesh_path

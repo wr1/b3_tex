@@ -145,6 +145,158 @@ def render_midplane_field(
     return out_path
 
 
+def _midplane_arrays(
+    problem,
+    *,
+    axis: str = "z",
+    grid: int = 140,
+):
+    """Shared sampling for mid-plane Vf / fibre-director panels."""
+    from b3_tex.viz.sampling import vf_clim
+
+    field = problem.field
+    sampler = getattr(field, "sample_local_vf", None)
+    sweep = {"x": 0, "y": 1, "z": 2}[axis]
+    u_ax, v_ax = _PLANE_AXES[sweep]
+    Lu, Lv, Lsweep = problem.size[u_ax], problem.size[v_ax], problem.size[sweep]
+    u = np.linspace(0, Lu, grid)
+    v = np.linspace(0, Lv, grid)
+    U, V = np.meshgrid(u, v)
+    pts = np.zeros((U.size, 3))
+    pts[:, sweep] = 0.5 * Lsweep
+    pts[:, u_ax] = U.ravel()
+    pts[:, v_ax] = V.ravel()
+    ids, rot = field.sample_arrays(pts)
+    yarn = ids.reshape(grid, grid) != 0
+    e1 = np.asarray(rot, dtype=float)[:, :, 0]
+    eu = np.where(yarn, e1[:, u_ax].reshape(grid, grid), np.nan)
+    ev = np.where(yarn, e1[:, v_ax].reshape(grid, grid), np.nan)
+    en = np.where(yarn, e1[:, sweep].reshape(grid, grid), np.nan)
+    if sampler is not None:
+        vf = np.asarray(sampler(pts), dtype=float).reshape(grid, grid)
+    else:
+        vf = np.where(yarn, 1.0, np.nan)
+    vf = np.where(yarn, vf, np.nan)
+    vmin, vmax = vf_clim(problem) if sampler is not None else (0.0, 1.0)
+    return {
+        "sweep": sweep,
+        "u_ax": u_ax,
+        "v_ax": v_ax,
+        "Lu": float(Lu),
+        "Lv": float(Lv),
+        "u": u,
+        "v": v,
+        "U": U,
+        "V": V,
+        "vf": vf,
+        "eu": eu,
+        "ev": ev,
+        "en": en,
+        "vf_clim": (vmin, vmax),
+    }
+
+
+def render_midplane_orientation(
+    problem,
+    out_path: Path,
+    *,
+    axis: str = "z",
+    grid: int = 140,
+    quiver_step: int = 7,
+    theme: Theme = DEFAULT_THEME,
+) -> Path:
+    """Dual mid-plane panel: local Vf + fibre quiver | out-of-plane e1·n map.
+
+    Left: in-tow Vf with in-plane fibre projection (arrows).
+    Right: signed out-of-plane component e1·n (crimp / stitch tilt) with the
+    same arrows overlaid — the dedicated plot that makes OOP readable as a
+    field, not only as arrow colour.
+    """
+    from b3_tex.viz._deps import require_matplotlib
+
+    plt = require_matplotlib()
+    d = _midplane_arrays(problem, axis=axis, grid=grid)
+    s = quiver_step
+    n_name = _AXIS_NAME[d["sweep"]]
+    u_name, v_name = _AXIS_NAME[d["u_ax"]], _AXIS_NAME[d["v_ax"]]
+    Us, Vs = d["U"][::s, ::s], d["V"][::s, ::s]
+    EUs, EVs = d["eu"][::s, ::s], d["ev"][::s, ::s]
+
+    plt.rcParams.update(
+        {"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5}
+    )
+    # Two square-ish panels side by side.
+    side = 2.65
+    fig, (ax_l, ax_r) = plt.subplots(
+        1,
+        2,
+        figsize=(side * 2.15, side * 1.05),
+        constrained_layout=True,
+    )
+
+    m_vf = ax_l.pcolormesh(
+        d["u"],
+        d["v"],
+        d["vf"],
+        cmap=theme.cmap_vf,
+        vmin=d["vf_clim"][0],
+        vmax=d["vf_clim"][1],
+        shading="nearest",
+    )
+    ax_l.quiver(
+        Us,
+        Vs,
+        EUs,
+        EVs,
+        color=theme.fibre_color,
+        scale=22,
+        width=0.004,
+        pivot="mid",
+    )
+    fig.colorbar(m_vf, ax=ax_l, fraction=0.046, pad=0.03, label=r"$V_f$")
+    ax_l.set_title(f"mid-{axis}  $V_f$ + in-plane $e_1$", pad=2)
+    ax_l.set_xlabel(u_name)
+    ax_l.set_ylabel(v_name)
+    ax_l.set_aspect("equal")
+
+    m_n = ax_r.pcolormesh(
+        d["u"],
+        d["v"],
+        d["en"],
+        cmap=theme.cmap_oop,
+        vmin=theme.oop_clim[0],
+        vmax=theme.oop_clim[1],
+        shading="nearest",
+    )
+    ax_r.quiver(
+        Us,
+        Vs,
+        EUs,
+        EVs,
+        color=theme.fibre_color,
+        scale=22,
+        width=0.004,
+        pivot="mid",
+    )
+    fig.colorbar(
+        m_n,
+        ax=ax_r,
+        fraction=0.046,
+        pad=0.03,
+        label=rf"$e_1\cdot {n_name}$  (out-of-plane)",
+    )
+    ax_r.set_title(f"mid-{axis}  out-of-plane $e_1\\cdot {n_name}$", pad=2)
+    ax_r.set_xlabel(u_name)
+    ax_r.set_ylabel(v_name)
+    ax_r.set_aspect("equal")
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=_FIG_DPI)
+    plt.close(fig)
+    return out_path
+
+
 def _hex_slice_rectangles(mesh, axis: int, pos: float, *, tol: float = 1e-9):
     from matplotlib.patches import Rectangle
 

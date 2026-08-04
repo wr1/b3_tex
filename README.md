@@ -229,10 +229,20 @@ driven through `b3_tex.postprocess`.
 | `examples/mfem_weave_amr.py` | Headline AMR demo: hex (NCMesh) and tet (Plaza) on the same plain-weave problem. Convergence panel with E_x, E_z vs total Gauss points. |
 | `examples/_export_amr_mesh_for_paraview.py` | One-shot diagnostic: AMR mesh + 6 stress-controlled loadcases worth of u/σ/ε arrays exported to VTK. Runs the cross-check + sampling-uniformity reports. |
 
-### Showcase (theme: cividis Vf · YlOrRd AMR · OrRd |von Mises|)
+### Showcase (theme: cividis Vf · coolwarm/RdBu OOP · YlOrRd AMR · OrRd |von Mises|)
 
 Shared palette in [`src/b3_tex/viz/theme.py`](src/b3_tex/viz/theme.py)
-(`DEFAULT_THEME` / `STUDIO_THEME`). Stills under [`docs/images/`](docs/images/).
+(`DEFAULT_THEME` / `STUDIO_THEME` / `DATASHEET_THEME`). Stills under
+[`docs/images/`](docs/images/).
+
+**Fibre orientation (in-plane + out-of-plane)** — mid-plane dual panel:
+left = local \(V_f\) + in-plane \(e_1\) quiver; right = signed out-of-plane
+\(e_1\cdot n\) (weave crimp / stitch tilt) with the same arrows
+([`render_midplane_orientation`](src/b3_tex/viz/slices.py)):
+
+<p align="center">
+  <img src="docs/images/plain_weave_orientation_oop.png" width="720" alt="Mid-plane Vf and out-of-plane fibre component e1·n"/>
+</p>
 
 **Section sweep** — local fibre direction and in-tow Vf on a cut plane
 ([`section_sweep_gif.py`](examples/section_sweep_gif.py)):
