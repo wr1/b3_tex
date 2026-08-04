@@ -17,6 +17,7 @@ from b3_tex.postprocess import engineering_constants_from_S
 from b3_tex.problem import RVEProblem
 from b3_tex.result import HomogenizationResult
 from b3_tex.viz.slices import render_amr_snapshot, render_midplane_field
+from b3_tex.viz.theme import DATASHEET_THEME
 
 _PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
 
@@ -603,6 +604,7 @@ def generate(
             base_mesh=base,
             iters=mesh_iters,
             threshold=amr_threshold,
+            theme=DATASHEET_THEME,
         )
         Lx, Ly, Lz = (float(s) for s in problem.size)
         amr_panel_desc = (
@@ -616,7 +618,10 @@ def generate(
     )
     spec.figure_col_fracs = _figure_column_fracs(problem, axis=axis)
     spec.figure_field = render_midplane_field(
-        problem, work / "field_midplane.png", axis=axis
+        problem,
+        work / "field_midplane.png",
+        axis=axis,
+        theme=DATASHEET_THEME,
     )
     if amr_panel_desc:
         spec.figure_mesh = mesh_path
