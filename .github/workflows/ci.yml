@@ -34,10 +34,29 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy scipy pyyaml treeparse matplotlib pytest
+          python -m pip install numpy scipy pyyaml treeparse matplotlib pytest pytest-cov
 
       - name: Run tests
         run: PYTHONPATH=src python -m pytest -q
+
+      # Coverage once per matrix (report + Codecov); FE backends auto-skip here.
+      - name: Coverage (XML + terminal)
+        if: matrix.python-version == '3.12'
+        run: |
+          PYTHONPATH=src python -m pytest -q \
+            --cov=b3_tex \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          flags: unittests
+          name: b3_tex-py3.12
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     name: lint (pre-commit)
