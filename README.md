@@ -2,6 +2,12 @@
 
 # b3_tex
 
+[![CI](https://github.com/wr1/b3_tex/actions/workflows/ci.yml/badge.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+
 **Robust, automated** textile RVE homogenization — implicit geometry, adaptive
 meshing, and a one-command path from fabric YAML to **C_eff** / datasheet.
 
@@ -216,26 +222,55 @@ driven through `b3_tex.postprocess`.
 | `examples/ncf_biaxial_high_vf.yaml` | High-Vf stitched biaxial NCF (straight carbon plies + z-stitches). |
 | `examples/high_vf_architectures.py` | Builds plain / satin-5H / satin-8H / NCF, reports yarn Vf and in-tow local-Vf range, solves each, and plots the engineering constants. |
 | `examples/material_datasheet.py` | One-page **technical material datasheet** (Typst PDF): RVE + micromechanics + fibre quiver + AMR mesh + $C_\mathrm{eff}$. → [results/datasheet_plain_weave_compacted.pdf](results/datasheet_plain_weave_compacted.pdf) |
-| `examples/section_sweep_gif.py` | Animated cut-plane sweep through an RVE: quiver of the local **fibre direction** over a colour map of the local **in-tow Vf**. Pure field visualisation (no FE solve). `--axis {x,y,z}`. → [results/section_sweep.gif](results/section_sweep.gif) |
-| `examples/amr_development_gif.py` | Animated **AMR refinement development** (two panels per frame): left = hex footprints at a mid-slice coloured by heterogeneity score (mesh concentrating on the tow/matrix interface); right = a **line-quiver of the fibre director at the cells that land in bundle material**, coloured by local Vf, densifying as the mesh refines. Needs the MFEM backend. → [results/amr_development.gif](results/amr_development.gif) |
+| `examples/section_sweep_gif.py` | Animated cut-plane sweep through an RVE: quiver of the local **fibre direction** over a colour map of the local **in-tow Vf**. Pure field visualisation (no FE solve). `--axis {x,y,z}`. → [docs/images/section_sweep.gif](docs/images/section_sweep.gif) |
+| `examples/amr_development_gif.py` | Animated **AMR refinement development** (two panels per frame): left = hex footprints at a mid-slice coloured by heterogeneity score (mesh concentrating on the tow/matrix interface); right = a **line-quiver of the fibre director at the cells that land in bundle material**, coloured by local Vf, densifying as the mesh refines. Needs the MFEM backend. → [docs/images/amr_development.gif](docs/images/amr_development.gif) |
 | `examples/mesomech_2yarns.yaml` | Two non-parallel straight yarns; multi-material Chamis. |
 | `examples/convergence_study_weave.py` | Mesh sweep × quadrature degree × (tet vs hex) × (centroid vs GP-lookup) — produces 7 panels. |
 | `examples/mfem_weave_amr.py` | Headline AMR demo: hex (NCMesh) and tet (Plaza) on the same plain-weave problem. Convergence panel with E_x, E_z vs total Gauss points. |
 | `examples/_export_amr_mesh_for_paraview.py` | One-shot diagnostic: AMR mesh + 6 stress-controlled loadcases worth of u/σ/ε arrays exported to VTK. Runs the cross-check + sampling-uniformity reports. |
 
-### Output (GIFs)
+### Showcase (theme: cividis Vf · YlOrRd AMR · OrRd |von Mises|)
 
-**Section sweep** — local fibre direction and in-tow Vf on a moving cut plane
+Shared palette in [`src/b3_tex/viz/theme.py`](src/b3_tex/viz/theme.py)
+(`DEFAULT_THEME` / `STUDIO_THEME`). Stills under [`docs/images/`](docs/images/).
+
+**Section sweep** — local fibre direction and in-tow Vf on a cut plane
 ([`section_sweep_gif.py`](examples/section_sweep_gif.py)):
 
-![Section sweep through an RVE: fibre quiver and local Vf](results/section_sweep.gif)
+<p align="center">
+  <img src="docs/images/section_sweep.gif" width="480" alt="Section sweep: fibre quiver and local Vf"/>
+  &nbsp;
+  <img src="docs/images/section_sweep_mid.png" width="360" alt="Section sweep mid-frame still"/>
+</p>
 
-**AMR development** — mesh heterogeneity map and bundle fibre directors as
+**AMR development** — heterogeneity map and bundle fibre directors as
 refinement progresses ([`amr_development_gif.py`](examples/amr_development_gif.py)):
 
-![AMR development: heterogeneity score and fibre directors](results/amr_development.gif)
+<p align="center">
+  <img src="docs/images/amr_development.gif" width="560" alt="AMR development: heterogeneity and fibre directors"/>
+  &nbsp;
+  <img src="docs/images/amr_development_final.png" width="360" alt="AMR final iteration still"/>
+</p>
 
-## Repo conventions 
+**Weave overview · mesh evolution · uniaxial response**
+
+<p align="center">
+  <img src="docs/images/weave_overview.png" width="360" alt="Plain weave overview"/>
+  <img src="docs/images/weave_mesh_evolution.png" width="360" alt="AMR mesh evolution"/>
+  <img src="docs/images/uniaxial_deformation_iso.png" width="360" alt="Uniaxial deformation isosurface"/>
+</p>
+
+**Architecture library** (mid cut-plane Vf + fibre quiver; same colour scale)
+
+| Twill 2×2 | Basket 2×2 | Satin 4H | Satin 5H |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/images/weave_twill_2x2_section_sweep_mid.png" width="180" alt="Twill 2×2"/> | <img src="docs/images/weave_basket_2x2_section_sweep_mid.png" width="180" alt="Basket 2×2"/> | <img src="docs/images/weave_satin_4h_section_sweep_mid.png" width="180" alt="Satin 4H"/> | <img src="docs/images/satin_5h_section_sweep_mid.png" width="180" alt="Satin 5H"/> |
+
+| NCF tricot | Triaxial braid | 3D orthogonal | Twill 3D section |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/images/ncf_tricot_stitched_section_sweep_mid.png" width="180" alt="NCF tricot"/> | <img src="docs/images/triaxial_braid_section_sweep_mid.png" width="180" alt="Triaxial braid"/> | <img src="docs/images/woven_3d_orthogonal_section_sweep_mid.png" width="180" alt="3D orthogonal"/> | <img src="docs/images/weave_twill_2x2_3d_section_mid.png" width="180" alt="Twill 3D section"/> |
+
+## Repo conventions
 
 - `src/b3_tex/backends/` is the **only** place that imports `dolfinx`,
   `dolfinx_mpc`, `ufl`, `mpi4py`, `petsc4py`, or `mfem`. Everything else

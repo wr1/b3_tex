@@ -309,7 +309,7 @@ def weave_explainer(
     mod_actor = pl.add_mesh(
         modulus,
         scalars="E_GPa",
-        cmap="inferno",
+        cmap=theme.cmap_vm,
         smooth_shading=True,
         specular=0.6,
         specular_power=15,
@@ -490,7 +490,7 @@ def weave_explainer(
         "fmt": "{:.2f}",
     }
     E_legend = {
-        "cmap": "inferno",
+        "cmap": theme.cmap_vm,
         "vmin": min(Ex, Ey, Ez),
         "vmax": max(Ex, Ey, Ez),
         "title": "E [GPa]",

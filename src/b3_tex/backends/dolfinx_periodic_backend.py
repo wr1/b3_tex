@@ -412,15 +412,20 @@ def solve_thermal_periodic(problem: RVEProblem) -> HomogenizationResult:
     # ---- Periodic MPC for scalar field ----
     # Pin T at the geometric minimum corner to remove the constant mode.
     bbox = mesh.geometry.x
-    cx, cy, cz = (float(bbox[:, 0].min()), float(bbox[:, 1].min()),
-                  float(bbox[:, 2].min()))
+    cx, cy, cz = (
+        float(bbox[:, 0].min()),
+        float(bbox[:, 1].min()),
+        float(bbox[:, 2].min()),
+    )
 
     bcs: list = []
 
     def at_pin(x):
-        return (np.isclose(x[0], cx, atol=tol)
-                & np.isclose(x[1], cy, atol=tol)
-                & np.isclose(x[2], cz, atol=tol))
+        return (
+            np.isclose(x[0], cx, atol=tol)
+            & np.isclose(x[1], cy, atol=tol)
+            & np.isclose(x[2], cz, atol=tol)
+        )
 
     dof = dolfinx.fem.locate_dofs_geometrical(V, at_pin)
     zero_func = dolfinx.fem.Function(V)
@@ -431,81 +436,100 @@ def solve_thermal_periodic(problem: RVEProblem) -> HomogenizationResult:
     # 3 face + 3 edge + 1 corner constraints (same pattern as solve())
     # Face x = Lx (interior of face, excluding edges)
     def face_x(x):
-        return (np.isclose(x[0], Lx, atol=tol)
-                & (x[1] < Ly - tol) & (x[2] < Lz - tol))
+        return np.isclose(x[0], Lx, atol=tol) & (x[1] < Ly - tol) & (x[2] < Lz - tol)
+
     def rel_face_x(x):
         out = x.copy()
         out[0] -= Lx
         return out
+
     mpc.create_periodic_constraint_geometrical(V, face_x, rel_face_x, bcs=bcs)
 
     # Face y = Ly
     def face_y(x):
-        return (np.isclose(x[1], Ly, atol=tol)
-                & (x[0] < Lx - tol) & (x[2] < Lz - tol))
+        return np.isclose(x[1], Ly, atol=tol) & (x[0] < Lx - tol) & (x[2] < Lz - tol)
+
     def rel_face_y(x):
         out = x.copy()
         out[1] -= Ly
         return out
+
     mpc.create_periodic_constraint_geometrical(V, face_y, rel_face_y, bcs=bcs)
 
     # Face z = Lz
     def face_z(x):
-        return (np.isclose(x[2], Lz, atol=tol)
-                & (x[0] < Lx - tol) & (x[1] < Ly - tol))
+        return np.isclose(x[2], Lz, atol=tol) & (x[0] < Lx - tol) & (x[1] < Ly - tol)
+
     def rel_face_z(x):
         out = x.copy()
         out[2] -= Lz
         return out
+
     mpc.create_periodic_constraint_geometrical(V, face_z, rel_face_z, bcs=bcs)
 
     # Edge xy (x=Lx, y=Ly, interior of edge)
     def edge_xy(x):
-        return (np.isclose(x[0], Lx, atol=tol)
-                & np.isclose(x[1], Ly, atol=tol)
-                & (x[2] < Lz - tol))
+        return (
+            np.isclose(x[0], Lx, atol=tol)
+            & np.isclose(x[1], Ly, atol=tol)
+            & (x[2] < Lz - tol)
+        )
+
     def rel_edge_xy(x):
         out = x.copy()
         out[0] -= Lx
         out[1] -= Ly
         return out
+
     mpc.create_periodic_constraint_geometrical(V, edge_xy, rel_edge_xy, bcs=bcs)
 
     # Edge xz (x=Lx, z=Lz, interior of edge)
     def edge_xz(x):
-        return (np.isclose(x[0], Lx, atol=tol)
-                & np.isclose(x[2], Lz, atol=tol)
-                & (x[1] < Ly - tol))
+        return (
+            np.isclose(x[0], Lx, atol=tol)
+            & np.isclose(x[2], Lz, atol=tol)
+            & (x[1] < Ly - tol)
+        )
+
     def rel_edge_xz(x):
         out = x.copy()
         out[0] -= Lx
         out[2] -= Lz
         return out
+
     mpc.create_periodic_constraint_geometrical(V, edge_xz, rel_edge_xz, bcs=bcs)
 
     # Edge yz (y=Ly, z=Lz, interior of edge)
     def edge_yz(x):
-        return (np.isclose(x[1], Ly, atol=tol)
-                & np.isclose(x[2], Lz, atol=tol)
-                & (x[0] < Lx - tol))
+        return (
+            np.isclose(x[1], Ly, atol=tol)
+            & np.isclose(x[2], Lz, atol=tol)
+            & (x[0] < Lx - tol)
+        )
+
     def rel_edge_yz(x):
         out = x.copy()
         out[1] -= Ly
         out[2] -= Lz
         return out
+
     mpc.create_periodic_constraint_geometrical(V, edge_yz, rel_edge_yz, bcs=bcs)
 
     # Corner (x=Lx, y=Ly, z=Lz)
     def corner(x):
-        return (np.isclose(x[0], Lx, atol=tol)
-                & np.isclose(x[1], Ly, atol=tol)
-                & np.isclose(x[2], Lz, atol=tol))
+        return (
+            np.isclose(x[0], Lx, atol=tol)
+            & np.isclose(x[1], Ly, atol=tol)
+            & np.isclose(x[2], Lz, atol=tol)
+        )
+
     def rel_corner(x):
         out = x.copy()
         out[0] -= Lx
         out[1] -= Ly
         out[2] -= Lz
         return out
+
     mpc.create_periodic_constraint_geometrical(V, corner, rel_corner, bcs=bcs)
 
     mpc.finalize()
@@ -560,10 +584,8 @@ def solve_thermal_periodic(problem: RVEProblem) -> HomogenizationResult:
         # k_eff[:, dir_i] = −<q> = <k · total_grad>
         flux_forms = []
         for j in range(3):
-            flux_expr = (ufl.ZerothOrderTensor(k_func)
-                         @ (g_const + grad_T_tilde))
-            flux_forms.append(
-                dolfinx.fem.form(flux_expr[j] * dx_q))
+            flux_expr = ufl.ZerothOrderTensor(k_func) @ (g_const + grad_T_tilde)
+            flux_forms.append(dolfinx.fem.form(flux_expr[j] * dx_q))
 
         flux_vec = np.zeros(3, dtype=float)
         for j, form in enumerate(flux_forms):
@@ -601,7 +623,6 @@ def _sample_conductivity_at_points(
     points: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Sample conductivity tensor (N, 3, 3) at physical points."""
-    from b3_tex.materials import MicromechanicalMaterial
 
     names = problem.field.material_names()
     ids, rotations = problem.field.sample_arrays(points)

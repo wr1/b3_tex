@@ -1,60 +1,35 @@
 """MFEM backend (serial) with anisotropic per-GP stiffness.
 
-The dolfinx_periodic_backend remains the canonical b3_tex backend (full
-validation suite, dolfinx_mpc periodic constraints, faster C++ assembly).
-The MFEM backend exists to give the hex-AMR experiment a working framework
-alongside it: MFEM's NCMesh supports hex AMR with hanging nodes natively,
-which DOLFINx 0.10 does not.
+Preferred default for hex + NCMesh AMR. DOLFINx remains the fast lane for
+uniform tetrahedral meshes without AMR (compiled FFCx assembly).
 
-Code reuse with the DOLFINx backend. The two backends share the per-GP
-stiffness lookup (b3_tex.quadrature.global_stiffness_at_points) and the
-Voigt B-matrix construction (b3_tex.tensors.voigt_b_matrix). Both
-abstractions are framework-agnostic: they take physical coordinates and
-shape-function derivatives and return numpy arrays. Implementation drift
-between "how DOLFINx samples C" and "how MFEM samples C" is impossible
-because both call the same function.
+Code reuse with the DOLFINx backend. Both share the per-GP stiffness lookup
+(``b3_tex.quadrature.global_stiffness_at_points``) and Voigt B-matrix
+construction (``b3_tex.tensors.voigt_b_matrix``).
 
-Performance design (batched pre-computation). The custom integrators here
-are Python-side, so the per-element call overhead matters. Both solvers
-follow the same pattern:
+Performance design (batched pre-computation + offline assembly):
 
   1. ONE pre-pass walks the mesh and collects every element's quadrature
-     coordinates, physical-space shape derivatives, and weight in three
-     numpy arrays of shape (n_elem * nq, ...).
-  2. ONE call to global_stiffness_at_points populates the (n_elem * nq, 6, 6)
-     stiffness tensor for the whole mesh.
-  3. The bilinear-form integrator's AssembleElementMatrix just slices into
-     the pre-computed arrays via T.ElementNo — no per-element field
-     evaluation.
-  4. RHS assembly (periodic only) reuses the same C array; only the
-     macro-stress vector C @ E_voigt changes per loadcase, computed in
-     one numpy einsum call.
-  5. Stress recovery walks the mesh once to extract grad(u) at every GP,
-     then assembles sigma_avg = <C @ (E + eps(u))> in pure numpy.
+     coordinates, physical-space shape derivatives, and weights.
+  2. ONE call to ``global_stiffness_at_points`` for the whole mesh.
+  3. Periodic path (default): offline CSR assembly of ``K_L`` via Numba
+     (``solver.assembly: numba|numpy|python``) — bypasses per-element
+     ``PyBilinearFormIntegrator`` SWIG callbacks. Legacy ``python`` mode
+     keeps the precomputed integrators for bit-exact comparison.
+  4. RHS (periodic) is the same offline path; only ``C @ E_voigt`` changes
+     per loadcase.
+  5. Stress recovery is pure NumPy einsum.
 
-This collapses what used to be ~17000 small global_stiffness_at_points
-calls (each handling 4 GPs) to ~1 big call (handling all 5000+ GPs at once).
-The dolfinx backend amortises the same way via its Quadrature Function;
-this module mirrors that pattern explicitly because the MFEM C++ form
-assembler doesn't read from a pre-populated function the way FFCx does.
+Hex AMR is wired through ``_apply_optional_refinement`` →
+``b3_tex.amr.iteratively_refine_mfem`` (NCMesh hanging nodes).
 
 Public entry points:
 
 - ``solve(problem)``           -- KUBC, u = E @ x on the boundary.
-- ``solve_periodic(problem)``  -- fluctuation split u = E @ x + u_tilde with
-                                  u_tilde periodic; mesh-level periodicity
-                                  via ``mfem.Mesh.MakePeriodic`` plus a
-                                  3-DOF pin at the origin vertex to remove
-                                  rigid-body translation.
+- ``solve_periodic(problem)``  -- fluctuation split with MPC-style
+                                  periodic constraints (survives NCMesh).
 
-Both functions support hex or tet box meshes (``solver.cell_type``),
-anisotropic per-GP stiffness, and any multi-material configuration the
-``PhaseField`` machinery can express.
-
-Not yet wired: marker-based hex AMR. ``b3_tex.amr.cell_heterogeneity_metric``
-is cell-type-agnostic; ``refine_flagged_cells`` is the only piece that
-needs an MFEM variant calling ``Mesh.GeneralRefinement`` -- see
-``notes/mind/mfem_backend_design.md``.
+Enable stage timers with ``solver.profile: true`` or ``B3_TEX_PROFILE=1``.
 """
 
 from __future__ import annotations
@@ -64,6 +39,12 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from b3_tex.backends._mfem_assemble import (
+    assemble_elasticity_csr,
+    assemble_macro_rhs,
+    resolve_assembly_mode,
+)
+from b3_tex.backends._profile import StageTimer, profiling_enabled
 from b3_tex.problem import RVEProblem
 from b3_tex.quadrature import (
     _resolve_material_sampling_spec,
@@ -121,7 +102,9 @@ def _apply_optional_refinement(mesh, problem: RVEProblem):
     if amr_cfg.get("enabled", False):
         from b3_tex.amr import amr_loop_kwargs, iteratively_refine_mfem
 
-        mesh = iteratively_refine_mfem(mesh, problem, **amr_loop_kwargs(amr_cfg))
+        mesh = iteratively_refine_mfem(
+            mesh, problem, **amr_loop_kwargs(amr_cfg, mfem=True)
+        )
     return mesh
 
 
@@ -157,24 +140,10 @@ def _build_cell_vertices_mfem(mesh) -> np.ndarray:
     sampling routines in b3_tex.quadrature need to map the regular
     reference material grid into each cell's AABB.
     """
-    n_elem = mesh.GetNE()
-    if n_elem == 0:
-        return np.empty((0, 0, 3), dtype=float)
-    el0 = mesh.GetElement(0)
-    n_verts = el0.GetNVertices()
-    verts = np.zeros((n_elem, n_verts, 3), dtype=float)
-    for e in range(n_elem):
-        el = mesh.GetElement(e)
-        vids = (
-            el.GetVerticesArray()
-        )  # modern PyMFEM API (returns array of vertex indices)
-        for v in range(n_verts):
-            vidx = int(vids[v])
-            pos = mesh.GetVertexArray(
-                vidx
-            )  # returns a usable array (not raw SwigPyObject)
-            verts[e, v] = [pos[0], pos[1], pos[2]]
-    return verts
+    # Reuse the bulk AMR gather (vertex coords once, then per-cell index).
+    from b3_tex.amr import _mfem_all_cell_vertices
+
+    return _mfem_all_cell_vertices(mesh)
 
 
 def _periodic_vertex_master_map(
@@ -525,82 +494,96 @@ class MfemPeriodicSession:
 
         self._mfem = mfem
         self.problem = problem
+        timer = StageTimer(enabled=profiling_enabled(problem.solver))
+        assembly_mode = resolve_assembly_mode(problem.solver)
+        self._assembly_mode = assembly_mode
 
-        mesh = _build_mesh(problem)
+        with timer.stage("mesh_amr"):
+            mesh = _build_mesh(problem)
         fec = mfem.H1_FECollection(1, mesh.Dimension())
         fespace = mfem.FiniteElementSpace(mesh, fec, 3)
-        data = _collect_element_gp_data(mesh, fespace)
 
-        spec = _resolve_material_sampling_spec(problem.solver)
-        if spec.get("strategy") == "local_cloud" and spec.get("resolution", 1) > 1:
-            cell_verts = _build_cell_vertices_mfem(mesh)
-            n_cells = data.n_elem
-            nq = data.nq
-            gp_cell_ids = np.repeat(np.arange(n_cells), nq)
-            c_per_gp = effective_stiffnesses_for_gauss_points(
-                problem, data.gp_coords, gp_cell_ids, cell_verts, spec=spec
-            )
-        else:
-            c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
+        with timer.stage("gp_collect"):
+            data = _collect_element_gp_data(mesh, fespace)
 
-        a = mfem.BilinearForm(fespace)
-        a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
-        a.Assemble()
-        a.Finalize()
+        with timer.stage("material"):
+            spec = _resolve_material_sampling_spec(problem.solver)
+            if spec.get("strategy") == "local_cloud" and spec.get("resolution", 1) > 1:
+                cell_verts = _build_cell_vertices_mfem(mesh)
+                n_cells = data.n_elem
+                nq = data.nq
+                gp_cell_ids = np.repeat(np.arange(n_cells), nq)
+                c_per_gp = effective_stiffnesses_for_gauss_points(
+                    problem, data.gp_coords, gp_cell_ids, cell_verts, spec=spec
+                )
+            else:
+                c_per_gp = global_stiffness_at_points(problem, data.gp_coords)
 
-        p_nc_mfem = fespace.GetConformingProlongation()
-        n_L = a.SpMat().Height()
-        if p_nc_mfem is None:
-            n_T = n_L
-            P_NC = sp.eye(n_L, format="csr")
-        else:
-            P_NC = _mfem_spmat_to_scipy(p_nc_mfem)
-            n_T = P_NC.shape[1]
+        with timer.stage("assemble_K"):
+            if assembly_mode == "python":
+                a = mfem.BilinearForm(fespace)
+                a.AddDomainIntegrator(_make_precomputed_integrator(c_per_gp, data))
+                a.Assemble()
+                a.Finalize()
+                n_L = a.SpMat().Height()
+                K_L = _mfem_spmat_to_scipy(a.SpMat())
+            else:
+                n_L = int(fespace.GetVSize())
+                K_L = assemble_elasticity_csr(data, c_per_gp, n_L, mode=assembly_mode)
 
-        K_L = _mfem_spmat_to_scipy(a.SpMat())
-        K_T = (P_NC.T @ K_L @ P_NC).tocsr()
+        with timer.stage("mpc_factor"):
+            p_nc_mfem = fespace.GetConformingProlongation()
+            if p_nc_mfem is None:
+                n_T = n_L
+                P_NC = sp.eye(n_L, format="csr")
+            else:
+                P_NC = _mfem_spmat_to_scipy(p_nc_mfem)
+                n_T = P_NC.shape[1]
 
-        n_scalar_L = fespace.GetNDofs()
-        master_of_vertex = _periodic_vertex_master_map(mesh, tuple(problem.size))
-        nv = mesh.GetNV()
+            K_T = (P_NC.T @ K_L @ P_NC).tocsr()
 
-        rows: list[int] = []
-        cols: list[int] = []
-        vals: list[float] = []
-        n_constraints = 0
+            n_scalar_L = fespace.GetNDofs()
+            master_of_vertex = _periodic_vertex_master_map(mesh, tuple(problem.size))
+            nv = mesh.GetNV()
 
-        def add_row(row_sparse) -> None:
-            nonlocal n_constraints
-            coo = row_sparse.tocoo()
-            for c, v in zip(coo.col, coo.data, strict=True):
-                rows.append(n_constraints)
-                cols.append(int(c))
-                vals.append(float(v))
-            n_constraints += 1
+            rows: list[int] = []
+            cols: list[int] = []
+            vals: list[float] = []
+            n_constraints = 0
 
-        is_hanging = np.zeros(nv, dtype=bool)
-        for v in range(nv):
-            row = P_NC.getrow(v)
-            if row.nnz != 1 or abs(row.data[0] - 1.0) > 1e-12:
-                is_hanging[v] = True
+            def add_row(row_sparse) -> None:
+                nonlocal n_constraints
+                coo = row_sparse.tocoo()
+                for c, v in zip(coo.col, coo.data, strict=True):
+                    rows.append(n_constraints)
+                    cols.append(int(c))
+                    vals.append(float(v))
+                n_constraints += 1
 
-        for v in range(nv):
-            m = int(master_of_vertex[v])
-            if m == v or is_hanging[v] or is_hanging[m]:
-                continue
+            is_hanging = np.zeros(nv, dtype=bool)
+            for v in range(nv):
+                row = P_NC.getrow(v)
+                if row.nnz != 1 or abs(row.data[0] - 1.0) > 1e-12:
+                    is_hanging[v] = True
+
+            for v in range(nv):
+                m = int(master_of_vertex[v])
+                if m == v or is_hanging[v] or is_hanging[m]:
+                    continue
+                for d in range(3):
+                    l_slave = v + d * n_scalar_L
+                    l_master = m + d * n_scalar_L
+                    diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
+                    if diff_row.nnz > 0:
+                        add_row(diff_row)
+
             for d in range(3):
-                l_slave = v + d * n_scalar_L
-                l_master = m + d * n_scalar_L
-                diff_row = P_NC.getrow(l_slave) - P_NC.getrow(l_master)
-                if diff_row.nnz > 0:
-                    add_row(diff_row)
+                add_row(P_NC.getrow(0 + d * n_scalar_L))
 
-        for d in range(3):
-            add_row(P_NC.getrow(0 + d * n_scalar_L))
-
-        C = sp.coo_matrix((vals, (rows, cols)), shape=(n_constraints, n_T)).tocsr()
-        Z = sp.csr_matrix((n_constraints, n_constraints))
-        A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
+            C = sp.coo_matrix((vals, (rows, cols)), shape=(n_constraints, n_T)).tocsr()
+            Z = sp.csr_matrix((n_constraints, n_constraints))
+            A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
+            lu = spla.splu(A_aug)
 
         self.mesh = mesh
         self.fespace = fespace
@@ -608,11 +591,15 @@ class MfemPeriodicSession:
         self._c_per_gp = c_per_gp
         self._P_NC = P_NC
         self._n_T = n_T
+        self._n_L = n_L
         self._n_constraints = n_constraints
         self._n_scalar_L = n_scalar_L
         self._nv = nv
-        self._lu = spla.splu(A_aug)
+        self._lu = lu
         self.n_periodic_constraints = n_constraints - 3
+        self.profile = timer.as_dict()
+        if self.profile:
+            self.profile["assembly_mode"] = assembly_mode
 
     # --- LoadcaseSolverSession protocol surface ---
 
@@ -655,12 +642,18 @@ class MfemPeriodicSession:
         P_NC = self._P_NC
         nv = self._nv
         n_scalar_L = self._n_scalar_L
+        mode = self._assembly_mode
 
         sigma_macro = np.einsum("nij,j->ni", c_per_gp, E_voigt)
-        b_lf = mfem.LinearForm(self.fespace)
-        b_lf.AddDomainIntegrator(_make_precomputed_rhs_integrator(sigma_macro, data))
-        b_lf.Assemble()
-        b_L = np.asarray(b_lf.GetDataArray()).copy()
+        if mode == "python":
+            b_lf = mfem.LinearForm(self.fespace)
+            b_lf.AddDomainIntegrator(
+                _make_precomputed_rhs_integrator(sigma_macro, data)
+            )
+            b_lf.Assemble()
+            b_L = np.asarray(b_lf.GetDataArray()).copy()
+        else:
+            b_L = assemble_macro_rhs(data, sigma_macro, self._n_L, mode=mode)
         b_T = P_NC.T @ b_L
         b_aug = np.concatenate([b_T, np.zeros(self._n_constraints)])
         sol = self._lu.solve(b_aug)
@@ -1117,16 +1110,20 @@ def solve_periodic(problem: RVEProblem) -> HomogenizationResult:
         ).macro_stress
     effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
 
+    meta: dict = {
+        "backend": "mfem_periodic_mpc",
+        "mesh_resolution": list(problem.mesh_resolution),
+        "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
+        "n_cells": int(session.mesh.GetNE()),
+        "n_dofs": session.n_dofs,
+        "n_periodic_constraints": session.n_periodic_constraints,
+        "assembly_mode": session._assembly_mode,
+    }
+    if session.profile:
+        meta["profile"] = session.profile
     return HomogenizationResult(
         effective_stiffness=effective_stiffness,
         loadcase_strains=loadcase_strains,
         loadcase_stresses=loadcase_stresses,
-        metadata={
-            "backend": "mfem_periodic_mpc",
-            "mesh_resolution": list(problem.mesh_resolution),
-            "cell_type": str(problem.solver.get("cell_type", "hexahedron")),
-            "n_cells": int(session.mesh.GetNE()),
-            "n_dofs": session.n_dofs,
-            "n_periodic_constraints": session.n_periodic_constraints,
-        },
+        metadata=meta,
     )

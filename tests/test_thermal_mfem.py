@@ -14,7 +14,10 @@ from b3_tex.problem import RVEProblem
 
 def _ud_tow_config(mesh_n: int = 8, radius: float = 0.4) -> dict:
     return {
-        "domain": {"size": [1.0, 1.0, 1.0], "mesh_resolution": [mesh_n, mesh_n, mesh_n]},
+        "domain": {
+            "size": [1.0, 1.0, 1.0],
+            "mesh_resolution": [mesh_n, mesh_n, mesh_n],
+        },
         "materials": [
             {
                 "name": "matrix",
@@ -152,7 +155,11 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
 
     # Compute actual yarn volume fraction from the discrete material field
     # (not the analytical cylinder formula) to match the RVE mesh
-    from b3_tex.backends.mfem_backend import _build_mesh, _collect_element_scalar_gp_data
+    from b3_tex.backends.mfem_backend import (
+        _build_mesh,
+        _collect_element_scalar_gp_data,
+    )
+
     mesh = _build_mesh(problem)
     fec = mfem.H1_FECollection(1, mesh.Dimension())
     fespace = mfem.FiniteElementSpace(mesh, fec, 1)
@@ -172,11 +179,11 @@ def test_thermal_cylindrical_ud_tow_within_bounds():
     result = solve_thermal_periodic(problem)
     k_eff = result.effective_conductivity
 
-    assert k_reuss_x - k_eff[0, 0] < 2e-3, f"k_xx={k_eff[0,0]} < k_reuss={k_reuss_x}"
-    assert k_eff[0, 0] - k_voigt_x < 2e-3, f"k_xx={k_eff[0,0]} > k_voigt={k_voigt_x}"
+    assert k_reuss_x - k_eff[0, 0] < 2e-3, f"k_xx={k_eff[0, 0]} < k_reuss={k_reuss_x}"
+    assert k_eff[0, 0] - k_voigt_x < 2e-3, f"k_xx={k_eff[0, 0]} > k_voigt={k_voigt_x}"
 
-    assert k_reuss_yz - k_eff[1, 1] < 2e-3, f"k_yy={k_eff[1,1]} < k_reuss={k_reuss_yz}"
-    assert k_eff[1, 1] - k_voigt_yz < 2e-3, f"k_yy={k_eff[1,1]} > k_voigt={k_voigt_yz}"
+    assert k_reuss_yz - k_eff[1, 1] < 2e-3, f"k_yy={k_eff[1, 1]} < k_reuss={k_reuss_yz}"
+    assert k_eff[1, 1] - k_voigt_yz < 2e-3, f"k_yy={k_eff[1, 1]} > k_voigt={k_voigt_yz}"
 
 
 @pytest.mark.mfem

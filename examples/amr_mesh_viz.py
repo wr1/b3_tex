@@ -92,7 +92,7 @@ def render_slice(
         show_edges=True,
         edge_color="black",
         line_width=0.6,
-        cmap="viridis",
+        cmap="YlOrRd",
         clim=[0.0, 0.5],
         scalar_bar_args={"title": "heterogeneity score", "n_labels": 3, "fmt": "%.2f"},
     )

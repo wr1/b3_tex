@@ -19,13 +19,20 @@ FAMILY_NAMES = ("warp", "weft", "stitch", "other")
 
 @dataclass(frozen=True)
 class Theme:
-    """Named colours / colormaps shared across all renderers."""
+    """Named colours / colormaps shared across all renderers.
 
-    cmap_vf: str = "inferno"  # local fibre volume fraction
-    cmap_het: str = "viridis"  # AMR heterogeneity metric
-    cmap_vm: str = "plasma"  # von Mises stress
+    Sequential maps avoid purple-heavy defaults (inferno / plasma / viridis
+    tails) so weave sections and 3D Vf surfaces read as warm / blue-yellow.
+    """
+
+    # cividis: blue→yellow, colourblind-safe, no magenta/purple band.
+    cmap_vf: str = "cividis"  # local fibre volume fraction
+    # YlOrRd: pale yellow→orange→red — AMR score without purple.
+    cmap_het: str = "YlOrRd"  # AMR heterogeneity metric
+    # OrRd: clean magnitude scale for von Mises / positive scalars.
+    cmap_vm: str = "OrRd"  # von Mises stress
     cmap_gp: str = "cividis"  # Gauss-point density / stiffness
-    cmap_stress: str = "coolwarm"  # signed loadcase response (diverging, red/blue)
+    cmap_stress: str = "RdBu_r"  # signed loadcase (red tension / blue compression)
     het_clim: tuple[float, float] = (0.0, 0.5)
 
     fibre_color: str = "#39d0ff"  # fibre-direction quiver / glyphs (cyan)
@@ -40,31 +47,29 @@ class Theme:
         "#bbbbbb",
     )
 
-    # Per-tow palette: distinct but muted qualitative colours (Tableau-20) for
-    # colouring individual yarns in a 3D scene (cycled modulo length). Lower
-    # saturation than primary colours — reads as professional, not garish, and
-    # sits well on the neutral slate studio background.
+    # Per-tow palette: muted qualitative colours without purple/magenta slots.
+    # Cycles cleanly on slate (studio) and white (datasheet) backgrounds.
     tow_palette: tuple[str, ...] = (
-        "#4e79a7",
-        "#f28e2b",
-        "#59a14f",
-        "#e15759",
-        "#b07aa1",
-        "#76b7b2",
-        "#edc948",
-        "#9c755f",
-        "#ff9da7",
-        "#bab0ac",
-        "#a0cbe8",
-        "#ffbe7d",
-        "#8cd17d",
-        "#ff9d9a",
-        "#d4a6c8",
-        "#86bcb6",
-        "#b6992d",
-        "#d7b5a6",
-        "#d37295",
-        "#79706e",
+        "#4e79a7",  # steel blue
+        "#f28e2b",  # orange
+        "#59a14f",  # green
+        "#e15759",  # red
+        "#76b7b2",  # teal
+        "#edc948",  # gold
+        "#9c755f",  # brown
+        "#86bcb6",  # sea
+        "#ffbe7d",  # light orange
+        "#8cd17d",  # light green
+        "#a0cbe8",  # light blue
+        "#b6992d",  # olive
+        "#d7b5a6",  # tan
+        "#499894",  # dark teal
+        "#f1ce63",  # yellow
+        "#bab0ac",  # warm grey
+        "#ff9d9a",  # coral
+        "#79706e",  # charcoal
+        "#b07c4f",  # copper (was purple)
+        "#6b9e78",  # sage (was pink)
     )
 
     background: str = "white"
