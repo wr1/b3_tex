@@ -73,7 +73,6 @@ make help              # self-documenting targets
 
 - Guides: getting started, [twill 2×2 agent path](docs/guides/agent-twill-stiffness.mdx), datasheet, convergence
 - Reference: architecture, CLI, micromechanics, YAML schema
-- Internal **Dev KB** (`kb/`, gitignored from main repo): agent-path gap log, runbooks — open the **Dev KB** tab when `kb/` is present
 
 ## What's in
 
