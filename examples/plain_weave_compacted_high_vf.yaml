@@ -52,6 +52,7 @@ field:
   compaction: 0.40                 # section thins to 60% height at crossovers
   nest: true                       # amplitude derived from the compacted section so
                                    # interlacing tows touch at crossovers (no matrix gap)
+  smooth: true                     # B-spline centerlines (not piecewise-linear crimp)
   nominal_fibre_volume_fraction: 0.55
   max_fibre_volume_fraction: 0.90
 

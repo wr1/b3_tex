@@ -112,7 +112,7 @@ def build_woven(config: dict[str, Any], materials: dict[str, Material]) -> Phase
         ),
         nominal_vf=_vf(config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55),
         max_vf=_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
-        smooth=bool(config.get("smooth", False)),
+        smooth=bool(config.get("smooth", True)),
     )
     yarns = woven_yarns(pattern, geom)
     return ParametricWeaveField(

@@ -29,7 +29,9 @@ class WeaveGeometry:
     nominal_vf: float = 0.55
     max_vf: float = 0.9
     z_mid: float | None = None
-    smooth: bool = False  # spline (rounded) vs polyline (default) crimp
+    # B-spline through crossing z-levels (default). Set False for polyline crimp
+    # (sharp float/dip corners — only for debug / legacy comparisons).
+    smooth: bool = True
 
     @property
     def w_width(self) -> float:

@@ -88,9 +88,8 @@ def test_no_compaction_local_vf_is_constant_nominal():
 def test_same_orientation_points_have_equal_stiffness():
     """Two adjacent points in the same warp column get near-identical assembled
     stiffness — isolating the local-Vf effect from rotation. (Under the unified
-    ``woven`` path the centerline is a polyline whose nearest-segment projection
-    makes two points at the same x map to slightly different s, so the match is
-    close rather than exact — the old analytic sinusoid gave bit-exact equality.)"""
+    ``woven`` path the centerline is a B-spline; nearby points share nearly the
+    same local frame and Vf, so the match is close rather than bit-exact.)"""
     problem = _compacted_problem(compaction=0.4)
     p1 = np.array([[0.25, 0.25, 0.115]])
     p2 = np.array([[0.25, 0.25, 0.125]])  # same column -> nearly same frame and Vf
