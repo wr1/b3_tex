@@ -7,7 +7,7 @@ __pycache__/
 .venv/
 build/
 dist/
-# results/
+# results/   # keep tracked showcase artifacts; leave bulk local runs untracked
 *.npz
 *.xdmf
 *.h5
@@ -16,3 +16,8 @@ uv.lock
 .venv/
 notes/
 kb/
+
+# Local agent / IDE scratch (not package)
+.claude/
+.hermes/
+docs/superpowers/
