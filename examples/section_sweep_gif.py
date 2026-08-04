@@ -108,9 +108,11 @@ def make_section_sweep(
         pts[:, u_ax] = flat_u
         pts[:, v_ax] = flat_v
         ids, rot = field.sample_arrays(pts)
-        yarn = ids.reshape(grid, grid) == 1
-        e1u = rot[:, u_ax, 0].reshape(grid, grid)
-        e1v = rot[:, v_ax, 0].reshape(grid, grid)
+        yarn = ids.reshape(grid, grid) != 0
+        e1 = np.asarray(rot, dtype=float)[:, :, 0]
+        e1u = e1[:, u_ax].reshape(grid, grid)
+        e1v = e1[:, v_ax].reshape(grid, grid)
+        e1n = e1[:, sweep].reshape(grid, grid)
         if sampler is not None:
             vf = np.asarray(sampler(pts), dtype=float).reshape(grid, grid)
         else:
@@ -118,26 +120,32 @@ def make_section_sweep(
         vf = np.where(yarn, vf, np.nan)
         eu = np.where(yarn, e1u, np.nan)
         ev = np.where(yarn, e1v, np.nan)
-        return vf, eu, ev
+        en = np.where(yarn, e1n, np.nan)
+        return vf, eu, ev, en
 
     with plt.rc_context(panel_rc()):
-        fig, ax = plt.subplots(figsize=(6.4, 5.6))
-        vf0, eu0, ev0 = sample_plane(positions[0])
+        fig, ax = plt.subplots(figsize=(7.0, 5.6))
+        vf0, eu0, ev0, en0 = sample_plane(positions[0])
         mesh = ax.pcolormesh(
             u, v, vf0, cmap="cividis", vmin=vmin, vmax=vmax, shading="nearest"
         )
+        # Arrows: in-plane projection; colour: signed out-of-plane (crimp / stitch).
         quiv = ax.quiver(
             U[::s, ::s],
             V[::s, ::s],
             eu0[::s, ::s],
             ev0[::s, ::s],
-            color="#39d0ff",
+            en0[::s, ::s],
+            cmap="RdBu_r",
+            clim=(-1.0, 1.0),
             scale=22,
             width=0.0045,
             pivot="mid",
         )
-        cbar = fig.colorbar(mesh, ax=ax)
+        cbar = fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.02)
         cbar.set_label("local in-tow fibre volume fraction $V_f$")
+        cbar_n = fig.colorbar(quiv, ax=ax, fraction=0.046, pad=0.10)
+        cbar_n.set_label(rf"$e_1\cdot {_AXIS_NAME[sweep]}$  (out-of-plane)")
         ax.set_xlabel(_AXIS_NAME[u_ax])
         ax.set_ylabel(_AXIS_NAME[v_ax])
         ax.set_aspect("equal")
@@ -145,12 +153,12 @@ def make_section_sweep(
 
         def update(k: int):
             pos = positions[k]
-            vf, eu, ev = sample_plane(pos)
+            vf, eu, ev, en = sample_plane(pos)
             mesh.set_array(vf.ravel())  # 'nearest' shading: one colour cell per node
-            quiv.set_UVC(eu[::s, ::s], ev[::s, ::s])
+            quiv.set_UVC(eu[::s, ::s], ev[::s, ::s], en[::s, ::s])
             title.set_text(
                 f"{config_path.stem}\ncut plane  {axis} = {pos:.3f}   "
-                f"(fibre direction → quiver, $V_f$ → colour)"
+                f"(arrow = in-plane $e_1$, colour = OOP $e_1\\cdot n$; $V_f$ map)"
             )
             return mesh, quiv, title
 
@@ -161,26 +169,37 @@ def make_section_sweep(
 
         # Also dump a representative mid-sweep still.
         still = out.with_name(out.stem + "_mid.png")
-        fig2, ax2 = plt.subplots(figsize=(6.4, 5.6))
-        vf, eu, ev = sample_plane(positions[len(positions) // 2])
+        fig2, ax2 = plt.subplots(figsize=(7.0, 5.6))
+        vf, eu, ev, en = sample_plane(positions[len(positions) // 2])
         m2 = ax2.pcolormesh(
             u, v, vf, cmap="cividis", vmin=vmin, vmax=vmax, shading="nearest"
         )
-        ax2.quiver(
+        q2 = ax2.quiver(
             U[::s, ::s],
             V[::s, ::s],
             eu[::s, ::s],
             ev[::s, ::s],
-            color="#39d0ff",
+            en[::s, ::s],
+            cmap="RdBu_r",
+            clim=(-1.0, 1.0),
             scale=22,
             width=0.0045,
             pivot="mid",
         )
-        fig2.colorbar(m2, ax=ax2, label="local in-tow fibre volume fraction $V_f$")
+        fig2.colorbar(m2, ax=ax2, fraction=0.046, pad=0.02, label="local in-tow $V_f$")
+        fig2.colorbar(
+            q2,
+            ax=ax2,
+            fraction=0.046,
+            pad=0.10,
+            label=rf"$e_1\cdot {_AXIS_NAME[sweep]}$  (out-of-plane)",
+        )
         ax2.set_xlabel(_AXIS_NAME[u_ax])
         ax2.set_ylabel(_AXIS_NAME[v_ax])
         ax2.set_aspect("equal")
-        ax2.set_title(f"{config_path.stem}  mid-sweep ({axis})")
+        ax2.set_title(
+            f"{config_path.stem}  mid-sweep ({axis})  — arrows coloured by OOP"
+        )
         fig2.tight_layout()
         fig2.savefig(still, dpi=130)
         plt.close(fig2)

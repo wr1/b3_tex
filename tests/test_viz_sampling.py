@@ -102,6 +102,12 @@ def test_plane_sample_consistent_with_volume(problem):
     assert np.all(np.isnan(ps.local_vf[~ps.inside]))
     assert np.all(np.isfinite(ps.local_vf[ps.inside]))
     assert np.all(np.isnan(ps.e1a[~ps.inside]))
+    assert np.all(np.isnan(ps.e1n[~ps.inside]))
+    # unit fibre director: e1a² + e1b² + e1n² ≈ 1 inside tows
+    en2 = ps.e1a[ps.inside] ** 2 + ps.e1b[ps.inside] ** 2 + ps.e1n[ps.inside] ** 2
+    np.testing.assert_allclose(en2, 1.0, atol=1e-6)
+    # weave crimp → non-trivial out-of-plane component somewhere in the RVE
+    assert np.nanmax(np.abs(ps.e1n)) > 0.05
 
 
 def test_vf_clim_within_unit_and_ordered(problem):

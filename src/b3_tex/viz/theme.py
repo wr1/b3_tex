@@ -33,6 +33,10 @@ class Theme:
     cmap_vm: str = "OrRd"  # von Mises stress
     cmap_gp: str = "cividis"  # Gauss-point density / stiffness
     cmap_stress: str = "RdBu_r"  # signed loadcase (red tension / blue compression)
+    # Signed fibre component along a cut-plane normal (out-of-plane tilt / crimp).
+    # Used to colour 2D quivers so in-plane arrows still show the full 3D director.
+    cmap_oop: str = "RdBu_r"
+    oop_clim: tuple[float, float] = (-1.0, 1.0)
     het_clim: tuple[float, float] = (0.0, 0.5)
 
     fibre_color: str = "#39d0ff"  # fibre-direction quiver / glyphs (cyan)
