@@ -14,12 +14,14 @@ reliably without hand-edited CAD.
 | Goal | How |
 |------|-----|
 | **Robustness** | Geometry is an *implicit field* (phase + fibre direction at any point). No yarn-surface mesh. High-Vf contact stays discretizable. AMR refines interfaces; interiors stay coarse. |
+| **Realistic Vf** | Run at production packing fractions without body-fitted meshing failures. Compaction / nesting raise *in-tow* Vf at crossovers; the FE mesh still resolves the field. |
 | **Automation** | One YAML → validate → solve (periodic, 6 loadcases) → `C_eff.npz` + optional datasheet. Fabric generators (`woven` / `ncf` / `braid` / 3D) share the same pipeline. |
+| **Built-in convergence info** | Every solve writes provenance (`C_eff.meta.json`: mesh, backend, AMR, yarn Vf, wall time) plus optional AMR history / sampling uniformity checks in post — not a bare tensor with no pedigree. |
 | **Consistency** | Yarn cards from `b3_micromech` (or Chamis) plug in as `micromodel`; local Vf at crossovers is automatic. Same Voigt / fibre-axis conventions end-to-end. |
 | **Speed where it matters** | Background hex mesh + MFEM NCMesh AMR (or DOLFINx tets); material sampling and solvers are scriptable for sweeps and agent runs. |
 
 ```text
-fabric YAML  →  implicit field  →  AMR mesh  →  6 unit strains  →  C_eff + datasheet
+fabric YAML  →  implicit field  →  AMR mesh  →  6 unit strains  →  C_eff + meta + datasheet
                       ↑
               yarn micromodel (chamis | fea_hex | …)
 ```
