@@ -560,7 +560,7 @@ def generate(
     *,
     out_png: str | Path | None = None,
     axis: str = "z",
-    amr_iterations: int = 2,
+    amr_iterations: int = 4,
     amr_threshold: float = 0.20,
     solve_amr_iterations: int = 0,
     solve_mesh_resolution: tuple[int, int, int] | None = None,

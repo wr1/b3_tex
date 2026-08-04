@@ -45,7 +45,7 @@ def main() -> None:
     ap.add_argument(
         "--amr-iterations",
         type=int,
-        default=2,
+        default=4,
         help="Refinement passes for the AMR illustration panel (coarse 10x10x3 base).",
     )
     ap.add_argument(
