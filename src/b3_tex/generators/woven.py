@@ -2,8 +2,10 @@
 
 Replaces the per-pattern factories (plain / parametric-plain / satin): the crimp
 comes straight from the interlacing matrix, so plain, twill, satin and basket are
-the same code path. Each tow's z-undulation is a polyline (or spline) through the
-pattern's per-crossing z-levels; ``compaction`` thins each section toward its
+the same code path. Each tow's z-undulation is a **B-spline** (default,
+``smooth: true``) through the pattern's per-crossing z-levels — continuous
+tangent at floats, not a piecewise-linear diamond. Set ``smooth: false`` for a
+polyline through the same nodes. ``compaction`` thins each section toward its
 z-extremes (the crossovers), driving the local-Vf pipeline via fibre-area
 conservation in :class:`ParametricYarn`.
 """
