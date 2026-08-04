@@ -19,7 +19,7 @@ STEMS = weave_twill_2x2 weave_satin_4h satin_5h satin_8h weave_basket_2x2 \
 GIF_TARGETS = $(addprefix gif-,$(STEMS))
 
 .PHONY: gifs fabric-gifs gif-fanout showcase-gifs help lint format pre-commit \
-        docs docs-serve docs-open docs-static $(GIF_TARGETS)
+        test test-cov docs docs-serve docs-open docs-static $(GIF_TARGETS)
 
 help:           ## list self-documenting targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -33,6 +33,12 @@ format:         ## ruff format (src, tests, examples)
 
 pre-commit:     ## run all pre-commit hooks on the full tree
 	pre-commit run --all-files
+
+test:           ## pytest (PYTHONPATH=src)
+	PYTHONPATH=src pytest -q
+
+test-cov:       ## pytest + coverage report for b3_tex
+	PYTHONPATH=src pytest -q --cov=b3_tex --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # ---------------------------------------------------------------------------
 # DocKB (fumano) — docs/*.mdx (+ optional kb/) via shared dockb runtime

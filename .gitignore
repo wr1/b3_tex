@@ -21,3 +21,8 @@ kb/
 .claude/
 .hermes/
 docs/superpowers/
+
+# pytest-cov
+.coverage
+coverage.xml
+htmlcov/

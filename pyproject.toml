@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+test = ["pytest>=8.0", "pytest-cov>=5.0"]
 viz = [
   "pyvista>=0.43",      # 3D scene: volume render, level-set isosurface, glyphs
   "pillow>=10.0",       # overview() panel compositing
@@ -41,6 +41,24 @@ testpaths = ["tests"]
 markers = [
   "fenicsx: requires a working DOLFINx and dolfinx_mpc installation",
   "mfem: requires a working PyMFEM (mfem) installation (now a core dependency)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["b3_tex"]
+# FE backends need dolfinx/mfem; CI measures the pure-Python surface + skips.
+omit = [
+  "*/b3_tex/backends/dolfinx*.py",
+  "*/b3_tex/backends/*_dolfinx*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
 ]
 
 [tool.ruff.lint]
