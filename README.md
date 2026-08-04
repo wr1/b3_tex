@@ -235,13 +235,14 @@ Shared palette in [`src/b3_tex/viz/theme.py`](src/b3_tex/viz/theme.py)
 (`DEFAULT_THEME` / `STUDIO_THEME` / `DATASHEET_THEME`). Stills under
 [`docs/images/`](docs/images/).
 
-**Fibre orientation (in-plane + out-of-plane)** — mid-plane dual panel:
-left = local \(V_f\) + in-plane \(e_1\) quiver; right = signed out-of-plane
-\(e_1\cdot n\) (weave crimp / stitch tilt) with the same arrows
+**Fibre orientation — up / down crimp** — not just the in-plane director:
+centerline elevation (literal undulation), mid-plane path height
+(over = red / under = blue) with climbing △ / descending ▽ markers, and a
+side cut of the yarn path
 ([`render_midplane_orientation`](src/b3_tex/viz/slices.py)):
 
 <p align="center">
-  <img src="docs/images/plain_weave_orientation_oop.png" width="720" alt="Mid-plane Vf and out-of-plane fibre component e1·n"/>
+  <img src="docs/images/plain_weave_orientation_oop.png" width="780" alt="Yarn undulation: elevation, over/under plan, side cut"/>
 </p>
 
 **Section sweep** — local fibre direction and in-tow Vf on a cut plane
