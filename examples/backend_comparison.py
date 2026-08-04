@@ -201,7 +201,7 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(6.5, 5.0))
     im = ax.imshow(
-        err_matrix, cmap="viridis", vmin=0.0, vmax=max(err_matrix.max(), 1e-12)
+        err_matrix, cmap="YlOrRd", vmin=0.0, vmax=max(err_matrix.max(), 1e-12)
     )
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))

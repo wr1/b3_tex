@@ -367,9 +367,7 @@ def isotropic_conductivity(k: float) -> NDArray[np.float64]:
     return np.eye(3, dtype=float) * k
 
 
-def orthotropic_conductivity(
-    k1: float, k2: float, k3: float
-) -> NDArray[np.float64]:
+def orthotropic_conductivity(k1: float, k2: float, k3: float) -> NDArray[np.float64]:
     """Build a (3, 3) orthotropic conductivity tensor."""
     for name, value in [("k1", k1), ("k2", k2), ("k3", k3)]:
         if value <= 0:
@@ -377,9 +375,7 @@ def orthotropic_conductivity(
     return np.diag(np.array([k1, k2, k3], dtype=float))
 
 
-def transverse_isotropic_conductivity(
-    k_l: float, k_t: float
-) -> NDArray[np.float64]:
+def transverse_isotropic_conductivity(k_l: float, k_t: float) -> NDArray[np.float64]:
     """Build a (3, 3) transverse-isotropic conductivity tensor.
 
     The local 1-axis is the symmetry axis: k_parallel = k_l,

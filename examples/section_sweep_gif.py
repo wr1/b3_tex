@@ -124,7 +124,7 @@ def make_section_sweep(
         fig, ax = plt.subplots(figsize=(6.4, 5.6))
         vf0, eu0, ev0 = sample_plane(positions[0])
         mesh = ax.pcolormesh(
-            u, v, vf0, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest"
+            u, v, vf0, cmap="cividis", vmin=vmin, vmax=vmax, shading="nearest"
         )
         quiv = ax.quiver(
             U[::s, ::s],
@@ -164,7 +164,7 @@ def make_section_sweep(
         fig2, ax2 = plt.subplots(figsize=(6.4, 5.6))
         vf, eu, ev = sample_plane(positions[len(positions) // 2])
         m2 = ax2.pcolormesh(
-            u, v, vf, cmap="inferno", vmin=vmin, vmax=vmax, shading="nearest"
+            u, v, vf, cmap="cividis", vmin=vmin, vmax=vmax, shading="nearest"
         )
         ax2.quiver(
             U[::s, ::s],

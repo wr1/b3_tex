@@ -176,7 +176,7 @@ def render_slice(mesh, metric, out_path: Path, title: str) -> None:
         show_edges=True,
         edge_color="black",
         line_width=0.5,
-        cmap="viridis",
+        cmap="YlOrRd",
         clim=[0.0, 0.5],
         scalar_bar_args={"title": "heterogeneity", "n_labels": 3, "fmt": "%.2f"},
     )

@@ -137,7 +137,7 @@ def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size,
         fig, (ax, ax2) = plt.subplots(1, 2, figsize=size, dpi=dpi)
 
         # --- left: AMR mesh slice coloured by heterogeneity score ---
-        pc = PatchCollection(rects, cmap="viridis", edgecolor="#cfd3d9", linewidth=0.3)
+        pc = PatchCollection(rects, cmap="YlOrRd", edgecolor="#cfd3d9", linewidth=0.3)
         pc.set_array(metric[idx])
         pc.set_clim(0.0, 0.5)
         ax.add_collection(pc)
@@ -157,7 +157,7 @@ def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size,
                 u,
                 v,
                 vf,
-                cmap="inferno",
+                cmap="cividis",
                 clim=(vmin, vmax),
                 angles="xy",
                 scale_units="xy",

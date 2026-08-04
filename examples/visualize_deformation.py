@@ -294,7 +294,7 @@ def _render_fiber_panel(problem: RVEProblem, out_path: Path) -> None:
     plotter.add_mesh(
         glyphs,
         scalars="align_x",
-        cmap="coolwarm",
+        cmap="RdBu_r",
         clim=(0.0, 1.0),
         show_scalar_bar=True,
         scalar_bar_args={
@@ -345,7 +345,7 @@ def _render_3d_grid(panels, vm_clim, exaggeration: float, out_path: Path) -> Non
         plotter.add_mesh(
             deformed_surface,
             scalars="vm",
-            cmap="plasma",
+            cmap="OrRd",
             clim=tuple(vm_clim),
             show_edges=True,
             edge_color="black",

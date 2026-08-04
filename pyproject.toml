@@ -16,6 +16,7 @@ dependencies = [
   "treeparse>=0.2.5",
   "scipy>=1.10",
   "mfem",       # PyMFEM — required for the recommended default mfem-* backends
+  "numba>=0.59",  # offline MFEM elasticity CSR assembly (solver.assembly=numba)
   "matplotlib>=3.7",  # common plotting dep for examples, convergence studies, and result visualization
 ]
 

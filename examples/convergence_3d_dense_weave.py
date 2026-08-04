@@ -486,7 +486,7 @@ def generate_plots(runs: list[dict], out_dir: Path):
         [r["total_time_s"] for r in runs],
         [r["frobenius_rel"] for r in runs],
         c=[r.get("material_resolution", 3) for r in runs],
-        cmap="viridis",
+        cmap="cividis",
         s=80,
         alpha=0.75,
         edgecolors="black",

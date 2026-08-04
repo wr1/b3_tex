@@ -42,18 +42,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_AMR_SUB_SAMPLES: int = 1000
+# Default marker density: 6^3 tensor grid. Dense enough for interface scoring
+# on typical base meshes; spacing-aware guard still raises N for thin features
+# on coarse cells (up to DEFAULT_MAX_SUB_SAMPLES).
+DEFAULT_AMR_SUB_SAMPLES: int = 216
+
+# Coarse pass for two-pass MFEM marking (4^3). Full N is only re-run on
+# candidate cells (score > threshold/2 or interface present).
+COARSE_AMR_SUB_SAMPLES: int = 64
 
 # Default presence-floor knobs (active only when a feature size is available).
 DEFAULT_CELLS_ACROSS: int = 4
 DEFAULT_MAX_SUB_SAMPLES: int = 32_768  # M <= 32 per cell when the spacing guard fires
 
 
-def amr_loop_kwargs(amr_cfg: dict) -> dict:
+def amr_loop_kwargs(amr_cfg: dict, *, mfem: bool = False) -> dict:
     """Translate a ``solver.amr`` config dict into ``iteratively_refine``[``_mfem``]
-    keyword arguments. Absent keys fall back to defaults that reproduce the
-    original behaviour; ``min_feature_size`` is only forwarded when set
-    explicitly, otherwise the loop auto-derives it from the field."""
+    keyword arguments. Absent keys fall back to package defaults;
+    ``min_feature_size`` is only forwarded when set explicitly, otherwise the
+    loop auto-derives it from the field.
+
+    Set ``mfem=True`` to include MFEM-only knobs (``two_pass``, ``coarse_n_samples``).
+    """
     kwargs = {
         "threshold": float(amr_cfg.get("threshold", 0.15)),
         "max_iterations": int(amr_cfg.get("max_iterations", 4)),
@@ -67,6 +77,11 @@ def amr_loop_kwargs(amr_cfg: dict) -> dict:
     }
     if amr_cfg.get("min_feature_size") is not None:
         kwargs["min_feature_size"] = float(amr_cfg["min_feature_size"])
+    if mfem:
+        kwargs["two_pass"] = bool(amr_cfg.get("two_pass", True))
+        kwargs["coarse_n_samples"] = int(
+            amr_cfg.get("coarse_n_samples", COARSE_AMR_SUB_SAMPLES)
+        )
     return kwargs
 
 
@@ -439,6 +454,29 @@ def _mfem_cell_vertex_array(mesh, c: int) -> NDArray[np.float64]:
     return np.array([mesh.GetVertexArray(int(v)) for v in vert_ids], dtype=float)
 
 
+def _mfem_all_cell_vertices(mesh) -> NDArray[np.float64]:
+    """Bulk ``(n_cells, n_verts, 3)`` vertex coordinates for an MFEM mesh.
+
+    Single mesh walk; used by the AMR metric and (via reshape) by callers that
+    previously looped ``_mfem_cell_vertex_array`` per cell.
+    """
+    n_cells = mesh.GetNE()
+    if n_cells == 0:
+        return np.empty((0, 0, 3), dtype=float)
+    n_verts = mesh.GetElement(0).GetNVertices()
+    nv = mesh.GetNV()
+    # Cache all vertex coords once (O(nv) SWIG), then index per cell.
+    all_v = np.empty((nv, 3), dtype=float)
+    for v in range(nv):
+        all_v[v] = mesh.GetVertexArray(v)
+    out = np.empty((n_cells, n_verts, 3), dtype=float)
+    for c in range(n_cells):
+        vids = mesh.GetElement(c).GetVerticesArray()
+        for i in range(n_verts):
+            out[c, i] = all_v[int(vids[i])]
+    return out
+
+
 def cell_heterogeneity_metric_mfem(
     mesh: Any,
     problem: "RVEProblem",
@@ -456,9 +494,7 @@ def cell_heterogeneity_metric_mfem(
     n_cells = mesh.GetNE()
 
     geom = mesh.GetElement(0).GetGeometryType()
-    cell_verts = np.stack(
-        [_mfem_cell_vertex_array(mesh, c) for c in range(n_cells)], axis=0
-    )  # (n_cells, n_verts, 3)
+    cell_verts = _mfem_all_cell_vertices(mesh)  # (n_cells, n_verts, 3)
     if geom == mfem.Geometry.CUBE:
         unit = _hex_reference_unit_points(n_samples_per_cell, rng)  # (n, 3)
         lo = cell_verts.min(axis=1)  # (n_cells, 3)
@@ -490,16 +526,19 @@ def _signals_mfem(
     band: float,
     want_proximity: bool,
     seed: int = 0,
+    cell_mask: NDArray[np.bool_] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.bool_], NDArray[np.float64]]:
     """Metric, interface-presence and per-cell size on an MFEM mesh (hex or
-    tet), with a spacing-aware sub-sample count when a feature size is set."""
+    tet), with a spacing-aware sub-sample count when a feature size is set.
+
+    If ``cell_mask`` is given, only those cells are sampled at ``default_n``
+    density; other cells receive metric 0 and present=False (caller merges).
+    """
     import mfem.ser as mfem
 
     n_cells = mesh.GetNE()
     geom = mesh.GetElement(0).GetGeometryType()
-    cell_verts = np.stack(
-        [_mfem_cell_vertex_array(mesh, c) for c in range(n_cells)], axis=0
-    )
+    cell_verts = _mfem_all_cell_vertices(mesh)
     if geom == mfem.Geometry.CUBE:
         lo = cell_verts.min(axis=1)
         hi = cell_verts.max(axis=1)
@@ -523,9 +562,24 @@ def _signals_mfem(
     else:
         bary = _tet_barycentric_weights(n_samples, rng)
         all_pts = np.einsum("nb,cbd->cnd", bary, cell_verts)
-    metric, present = _signals_from_points(
-        all_pts, field, band=band, want_proximity=want_proximity
+
+    if cell_mask is None:
+        metric, present = _signals_from_points(
+            all_pts, field, band=band, want_proximity=want_proximity
+        )
+        return metric, present, h_cell
+
+    mask = np.asarray(cell_mask, dtype=bool)
+    metric = np.zeros(n_cells, dtype=float)
+    present = np.zeros(n_cells, dtype=bool)
+    if not mask.any():
+        return metric, present, h_cell
+    sub_pts = all_pts[mask]
+    m_sub, p_sub = _signals_from_points(
+        sub_pts, field, band=band, want_proximity=want_proximity
     )
+    metric[mask] = m_sub
+    present[mask] = p_sub
     return metric, present, h_cell
 
 
@@ -558,27 +612,71 @@ def iteratively_refine_mfem(
     cells_across: int = DEFAULT_CELLS_ACROSS,
     max_sub_samples: int = DEFAULT_MAX_SUB_SAMPLES,
     band: float = 0.0,
+    two_pass: bool = True,
+    coarse_n_samples: int = COARSE_AMR_SUB_SAMPLES,
 ) -> Any:
     """MFEM AMR loop. Same termination conditions as the DOLFINx version
     (``threshold`` on the per-cell metric, hard ``dof_budget`` cap rough-
     estimated as 3 * GetNV() of the next mesh), plus the same geometry-aware
-    presence floor (see :func:`iteratively_refine`)."""
+    presence floor (see :func:`iteratively_refine`).
+
+    When ``two_pass`` is True and ``n_samples_per_cell > coarse_n_samples``,
+    each iteration first marks with a cheap coarse grid, then re-samples only
+    candidate cells (score > threshold/2 or interface present) at full density.
+    """
     mesh = initial_mesh
     field = problem.field
     min_feature_size, h_min = _resolve_feature_guard(
         field, min_feature_size, cells_across
     )
     want_floor = h_min is not None
+    use_two_pass = bool(two_pass) and int(n_samples_per_cell) > int(coarse_n_samples)
     for _ in range(max_iterations):
-        metric, present, h_cell = _signals_mfem(
-            mesh,
-            field,
-            default_n=n_samples_per_cell,
-            min_feature_size=min_feature_size,
-            max_sub_samples=max_sub_samples,
-            band=band,
-            want_proximity=want_floor,
-        )
+        if use_two_pass:
+            metric, present, h_cell = _signals_mfem(
+                mesh,
+                field,
+                default_n=int(coarse_n_samples),
+                min_feature_size=None,  # coarse pass: fixed N, no spacing bump
+                max_sub_samples=max_sub_samples,
+                band=band,
+                want_proximity=want_floor,
+            )
+            candidates = present | (metric > 0.5 * threshold)
+            if candidates.any() and candidates.sum() < mesh.GetNE():
+                m_hi, p_hi, _ = _signals_mfem(
+                    mesh,
+                    field,
+                    default_n=n_samples_per_cell,
+                    min_feature_size=min_feature_size,
+                    max_sub_samples=max_sub_samples,
+                    band=band,
+                    want_proximity=want_floor,
+                    cell_mask=candidates,
+                )
+                metric = np.where(candidates, m_hi, metric)
+                present = np.where(candidates, p_hi, present)
+            elif candidates.any():
+                # All cells are candidates: one full-density pass.
+                metric, present, h_cell = _signals_mfem(
+                    mesh,
+                    field,
+                    default_n=n_samples_per_cell,
+                    min_feature_size=min_feature_size,
+                    max_sub_samples=max_sub_samples,
+                    band=band,
+                    want_proximity=want_floor,
+                )
+        else:
+            metric, present, h_cell = _signals_mfem(
+                mesh,
+                field,
+                default_n=n_samples_per_cell,
+                min_feature_size=min_feature_size,
+                max_sub_samples=max_sub_samples,
+                band=band,
+                want_proximity=want_floor,
+            )
         flagged = flag_cells_for_refinement(
             metric,
             threshold,
