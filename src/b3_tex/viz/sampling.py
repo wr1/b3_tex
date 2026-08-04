@@ -207,6 +207,7 @@ class PlaneSample:
     local_vf: NDArray[np.float64]  # (nb, na) nan outside tows
     e1a: NDArray[np.float64]  # (nb, na) in-plane fibre comp (a), nan outside
     e1b: NDArray[np.float64]  # (nb, na) in-plane fibre comp (b), nan outside
+    e1n: NDArray[np.float64]  # (nb, na) out-of-plane fibre comp (normal), nan outside
 
 
 def sample_plane(
@@ -235,8 +236,10 @@ def sample_plane(
     field = problem.field
     ids, rot = field.sample_arrays(pts)
     inside = (np.asarray(ids) != 0).reshape(A.shape)
-    e1a = rot[:, a_ax, 0].reshape(A.shape)
-    e1b = rot[:, b_ax, 0].reshape(A.shape)
+    e1 = np.asarray(rot, dtype=float)[:, :, 0]
+    e1a = e1[:, a_ax].reshape(A.shape)
+    e1b = e1[:, b_ax].reshape(A.shape)
+    e1n = e1[:, axis].reshape(A.shape)
 
     sampler = getattr(field, "sample_local_vf", None)
     if sampler is not None:
@@ -247,6 +250,7 @@ def sample_plane(
     vf = np.where(inside, vf, np.nan)
     e1a = np.where(inside, e1a, np.nan)
     e1b = np.where(inside, e1b, np.nan)
+    e1n = np.where(inside, e1n, np.nan)
     return PlaneSample(
         axis=axis,
         pos=float(pos),
@@ -258,6 +262,7 @@ def sample_plane(
         local_vf=vf,
         e1a=e1a,
         e1b=e1b,
+        e1n=e1n,
     )
 
 

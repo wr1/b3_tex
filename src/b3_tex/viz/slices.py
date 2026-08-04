@@ -37,8 +37,15 @@ def render_midplane_field(
     grid: int = 140,
     quiver_step: int = 7,
     theme: Theme = DEFAULT_THEME,
+    colour_oop: bool = True,
 ) -> Path:
-    """Mid-plane local-Vf colour map + fibre-direction quiver (implicit field slice)."""
+    """Mid-plane local-Vf map + fibre-direction quiver (implicit field slice).
+
+    Quiver arrows are the **in-plane projection** of the local fibre director.
+    When ``colour_oop`` is True (default), arrow colour encodes the signed
+    out-of-plane component ``e1 · n`` (RdBu_r by theme) so crimp / stitch tilt
+    is visible even on a 2D cut — short arrows + strong colour ⇒ large |e_n|.
+    """
     from b3_tex.viz._deps import require_matplotlib
     from b3_tex.viz.sampling import vf_clim
 
@@ -59,8 +66,10 @@ def render_midplane_field(
     pts[:, v_ax] = V.ravel()
     ids, rot = field.sample_arrays(pts)
     yarn = ids.reshape(grid, grid) != 0
-    e1u = rot[:, u_ax, 0].reshape(grid, grid)
-    e1v = rot[:, v_ax, 0].reshape(grid, grid)
+    e1 = np.asarray(rot, dtype=float)[:, :, 0]
+    e1u = e1[:, u_ax].reshape(grid, grid)
+    e1v = e1[:, v_ax].reshape(grid, grid)
+    e1n = e1[:, sweep].reshape(grid, grid)
     if sampler is not None:
         vf = np.asarray(sampler(pts), dtype=float).reshape(grid, grid)
     else:
@@ -68,6 +77,7 @@ def render_midplane_field(
     vf = np.where(yarn, vf, np.nan)
     eu = np.where(yarn, e1u, np.nan)
     ev = np.where(yarn, e1v, np.nan)
+    en = np.where(yarn, e1n, np.nan)
     vmin, vmax = vf_clim(problem) if sampler is not None else (0.0, 1.0)
 
     s = quiver_step
@@ -75,26 +85,59 @@ def render_midplane_field(
         {"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5}
     )
     scale = 2.85 / max(float(Lu), float(Lv))
-    fig, ax = plt.subplots(figsize=(float(Lu) * scale, float(Lv) * scale))
+    # Room for a right Vf bar and (optionally) a bottom OOP bar.
+    fig_h = float(Lv) * scale * (1.18 if colour_oop else 1.0)
+    fig, ax = plt.subplots(figsize=(float(Lu) * scale * 1.12, fig_h))
     mesh = ax.pcolormesh(
         u, v, vf, cmap=theme.cmap_vf, vmin=vmin, vmax=vmax, shading="nearest"
     )
-    ax.quiver(
-        U[::s, ::s],
-        V[::s, ::s],
-        eu[::s, ::s],
-        ev[::s, ::s],
-        color=theme.fibre_color,
-        scale=22,
-        width=0.0045,
-        pivot="mid",
-    )
-    fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
+    Us, Vs = U[::s, ::s], V[::s, ::s]
+    EUs, EVs = eu[::s, ::s], ev[::s, ::s]
+    if colour_oop:
+        q = ax.quiver(
+            Us,
+            Vs,
+            EUs,
+            EVs,
+            en[::s, ::s],
+            cmap=theme.cmap_oop,
+            clim=theme.oop_clim,
+            scale=22,
+            width=0.0045,
+            pivot="mid",
+        )
+        fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.046, pad=0.02)
+        # Horizontal OOP bar under the axes (doesn't fight the Vf bar).
+        fig.subplots_adjust(left=0.10, right=0.88, top=0.90, bottom=0.18)
+        cax_n = fig.add_axes([0.12, 0.06, 0.62, 0.035])
+        fig.colorbar(
+            q,
+            cax=cax_n,
+            orientation="horizontal",
+            label=rf"$e_1\cdot {_AXIS_NAME[sweep]}$  (out-of-plane; short arrow = more OOP)",
+        )
+        ax.set_title(
+            f"mid-{axis}  $V_f$ + fibre  (arrow = in-plane, colour = OOP)",
+            pad=1.5,
+            fontsize=6.0,
+        )
+    else:
+        ax.quiver(
+            Us,
+            Vs,
+            EUs,
+            EVs,
+            color=theme.fibre_color,
+            scale=22,
+            width=0.0045,
+            pivot="mid",
+        )
+        fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
+        ax.set_title(f"mid-{axis}  $V_f$ + fibre", pad=1.5, fontsize=6.5)
+        fig.subplots_adjust(left=0.085, right=0.92, top=0.94, bottom=0.085)
     ax.set_xlabel(_AXIS_NAME[u_ax])
     ax.set_ylabel(_AXIS_NAME[v_ax])
     ax.set_aspect("equal")
-    ax.set_title(f"mid-{axis}  $V_f$ + fibre", pad=1.5, fontsize=6.5)
-    fig.subplots_adjust(left=0.085, right=0.92, top=0.94, bottom=0.085)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=_FIG_DPI)

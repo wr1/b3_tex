@@ -104,9 +104,12 @@ def tow_outline(field, problem, z0: float, grid: int = 220):
 
 
 def bundle_cell_directors(mesh, field, z0: float):
-    """For every slice cell, sample the field at its centroid; keep the cells that
-    land in bundle (yarn) material and return their centroids, in-plane fibre
-    director, and local Vf (NaN-free)."""
+    """Centroids + fibre director components for bundle cells on the slice.
+
+    Returns in-plane components ``(u, v)`` (not unit-normalised — length reflects
+    in-plane projection) and the out-of-plane component ``en = e1·z`` so sticks
+    can be coloured by crimp / tilt.
+    """
     rects, _idx = hex_slice_rectangles(mesh, z0)
     if len(rects) == 0:
         empty = np.empty(0)
@@ -116,18 +119,12 @@ def bundle_cell_directors(mesh, field, z0: float):
     )
     pts = np.column_stack([centers, np.full(len(centers), z0)])
     ids, rot = field.sample_arrays(pts)
-    bundle = ids == 1
+    bundle = ids != 0
     cx, cy = centers[bundle, 0], centers[bundle, 1]
-    e1 = rot[bundle, :, 0]  # local 1-axis (fibre direction)
-    mag = np.hypot(e1[:, 0], e1[:, 1])
-    mag = np.where(mag > 1e-9, mag, 1.0)
-    u, v = e1[:, 0] / mag, e1[:, 1] / mag  # in-plane unit director
-    sampler = getattr(field, "sample_local_vf", None)
-    if sampler is not None and bundle.any():
-        vf = np.asarray(sampler(pts[bundle]), dtype=float)
-    else:
-        vf = np.ones(int(bundle.sum()))
-    return cx, cy, u, v, vf
+    e1 = np.asarray(rot[bundle, :, 0], dtype=float)  # local 1-axis (fibre direction)
+    # Keep in-plane projection length: short stick ⇒ large |e_z| (out-of-plane).
+    u, v, en = e1[:, 0], e1[:, 1], e1[:, 2]
+    return cx, cy, u, v, en
 
 
 def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size, dpi):
@@ -147,8 +144,8 @@ def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size,
         flag_txt = "converged" if n_flag == 0 else f"{n_flag} cells flagged → refine"
         ax.set_title(f"AMR mesh   |   {len(idx)} cells in slice   |   {flag_txt}")
 
-        # --- right: line-quiver of the fibre director at bundle cells only ---
-        cx, cy, u, v, vf = bundle_cell_directors(mesh, field, z0)
+        # --- right: line-quiver; colour = out-of-plane e1·z (crimp) ---
+        cx, cy, u, v, en = bundle_cell_directors(mesh, field, z0)
         ax2.contour(xs, ys, ind, levels=[0.5], colors="0.8", linewidths=1.0)
         if cx.size:
             q = ax2.quiver(
@@ -156,9 +153,9 @@ def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size,
                 cy,
                 u,
                 v,
-                vf,
-                cmap="cividis",
-                clim=(vmin, vmax),
+                en,
+                cmap="RdBu_r",
+                clim=(-1.0, 1.0),
                 angles="xy",
                 scale_units="xy",
                 scale=26.0,
@@ -169,7 +166,7 @@ def render_frame(mesh, metric, field, problem, z0, it, n_flag, vmin, vmax, size,
                 pivot="mid",
             )
             cb2 = fig.colorbar(q, ax=ax2, fraction=0.046, pad=0.04)
-            cb2.set_label("local in-tow fibre volume fraction $V_f$")
+            cb2.set_label(r"$e_1\cdot z$  (out-of-plane; short stick = more OOP)")
         ax2.set_title(f"fibre director at bundle cells   |   {cx.size} sticks")
 
         for a in (ax, ax2):

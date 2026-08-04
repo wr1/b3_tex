@@ -69,10 +69,14 @@ def _to_height(rgb: np.ndarray, h: int) -> np.ndarray:
 
 
 def _panel_2d(problem, pos, *, grid, quiver_step, clim, stem):
-    """Render the 2D cut-plane panel (Vf + fibre quiver) to an RGB array."""
+    """Render the 2D cut-plane panel (Vf + fibre quiver) to an RGB array.
+
+    Quiver direction = in-plane projection of e1; colour = signed out-of-plane
+    component e1·z so weave crimp is visible on the 2D cut.
+    """
     ps = sample_plane(problem, axis=2, pos=pos, res=grid)
     with plt.rc_context(panel_rc()):
-        fig, ax = plt.subplots(figsize=(6.0, 5.6), dpi=110)
+        fig, ax = plt.subplots(figsize=(6.6, 5.6), dpi=110)
         mesh = ax.pcolormesh(
             ps.a,
             ps.b,
@@ -84,22 +88,30 @@ def _panel_2d(problem, pos, *, grid, quiver_step, clim, stem):
         )
         s = quiver_step
         A, B = np.meshgrid(ps.a, ps.b)
-        ax.quiver(
+        q = ax.quiver(
             A[::s, ::s],
             B[::s, ::s],
             ps.e1a[::s, ::s],
             ps.e1b[::s, ::s],
-            color=STUDIO_THEME.fibre_color,
+            ps.e1n[::s, ::s],
+            cmap=STUDIO_THEME.cmap_oop,
+            clim=STUDIO_THEME.oop_clim,
             scale=22,
             width=0.004,
             pivot="mid",
         )
-        cb = fig.colorbar(mesh, ax=ax, label="local in-tow fibre volume fraction $V_f$")
+        cb = fig.colorbar(
+            mesh, ax=ax, fraction=0.046, pad=0.02, label="local in-tow $V_f$"
+        )
         cb.outline.set_edgecolor(STUDIO_THEME.edge_color)
+        cbn = fig.colorbar(
+            q, ax=ax, fraction=0.046, pad=0.10, label=r"$e_1\cdot z$  (out-of-plane)"
+        )
+        cbn.outline.set_edgecolor(STUDIO_THEME.edge_color)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_aspect("equal")
-        ax.set_title(f"{stem}\ncut plane  z = {pos:.4g}")
+        ax.set_title(f"{stem}\ncut plane  z = {pos:.4g}  (arrows coloured by OOP)")
         fig.tight_layout()
         fig.canvas.draw()
         buf = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
