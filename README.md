@@ -16,7 +16,7 @@ reliably without hand-edited CAD.
 | **Robustness** | Geometry is an *implicit field* (phase + fibre direction at any point). No yarn-surface mesh. High-Vf contact stays discretizable. AMR refines interfaces; interiors stay coarse. |
 | **Realistic Vf** | Run at production packing fractions without body-fitted meshing failures. Compaction / nesting raise *in-tow* Vf at crossovers; the FE mesh still resolves the field. |
 | **Automation** | One YAML → validate → solve (periodic, 6 loadcases) → `C_eff.npz` + optional datasheet. Fabric generators (`woven` / `ncf` / `braid` / 3D) share the same pipeline. |
-| **Built-in convergence info** | Every solve writes provenance (`C_eff.meta.json`: mesh, backend, AMR, yarn Vf, wall time) plus optional AMR history / sampling uniformity checks in post — not a bare tensor with no pedigree. |
+| **Built-in convergence info** | Results include mesh, backend, AMR settings, yarn Vf, and wall time (`C_eff.meta.json`), plus optional AMR history and sampling-uniformity checks. |
 | **Consistency** | Yarn cards from `b3_micromech` (or Chamis) plug in as `micromodel`; local Vf at crossovers is automatic. Same Voigt / fibre-axis conventions end-to-end. |
 | **Speed where it matters** | Background hex mesh + MFEM NCMesh AMR (or DOLFINx tets); material sampling and solvers are scriptable for sweeps and agent runs. |
 
@@ -147,7 +147,7 @@ b3-tex solve     examples/plain_weave_high_vf.yaml \
                  --amr-iterations 3 --amr-threshold 0.20
 b3-tex datasheet examples/plain_weave_compacted_high_vf.yaml \
                  -o results/datasheet_plain_weave_compacted.pdf
-# Twill 2×2 stiffness card + datasheet (reuses C_eff provenance)
+# Twill 2×2 stiffness card + datasheet (reuses C_eff + meta)
 b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
 b3-tex datasheet examples/weave_twill_2x2.yaml \
                  -o results/datasheet_weave_twill_2x2.pdf \
@@ -160,7 +160,8 @@ Backend choices: `mfem-periodic` (CLI default, recommended for hex AMR),
 backend (DOLFINx 0.10's `refine_plaza` is tet-only).
 
 `solve` writes `C_eff.npz` (array key `effective_stiffness`, Pa) plus
-`C_eff.meta.json` provenance, and prints the 6×6 matrix and engineering constants.
+`C_eff.meta.json` (mesh, backend, AMR, yarn Vf, wall time), and prints the
+6×6 matrix and engineering constants.
 
 ## Picking a backend
 
