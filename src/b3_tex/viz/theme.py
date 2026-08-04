@@ -97,6 +97,15 @@ STUDIO_THEME = replace(
     matrix_color="#6b7079",
 )
 
+# One-page technical datasheet: white paper + PyVista-style coolwarm (RWB) for
+# local Vf so mid-plane / AMR panels never fall back to purple inferno/plasma.
+DATASHEET_THEME = replace(
+    DEFAULT_THEME,
+    cmap_vf="coolwarm",  # blue → white → red (matplotlib / PyVista classic)
+    cmap_gp="coolwarm",
+    fibre_color="#1a1a1a",  # dark quiver on light paper (reads on coolwarm fill)
+)
+
 # Coordinated 2D-panel palette (matplotlib rcParams), matched to STUDIO_THEME so the
 # mpl slice panels sit beside the 3D scene without a jarring white frame.
 PANEL_BG = "#3f434a"  # figure face (matches STUDIO_THEME.background)
