@@ -29,8 +29,8 @@ class WeaveGeometry:
     nominal_vf: float = 0.55
     max_vf: float = 0.9
     z_mid: float | None = None
-    # B-spline through crossing z-levels (default). Set False for polyline crimp
-    # (sharp float/dip corners — only for debug / legacy comparisons).
+    # Periodic-smooth crimp (default): sine when levels match one harmonic,
+    # else cubic z(s) with periodic end slopes. False = polyline through nodes.
     smooth: bool = True
 
     @property
