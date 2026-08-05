@@ -370,7 +370,7 @@ def collect_spec(
     return DatasheetSpec(
         title=title,
         config_path=config_path,
-        version="b3_tex 0.1.0",
+        version="b3_tex 0.1.1",
         rve_rows=rve_rows,
         micro_rows=micro_rows,
         analysis_rows=analysis_rows,
