@@ -45,6 +45,50 @@ def test_spline_centerline_passes_through_control_points():
     np.testing.assert_allclose(cl.position(np.array([1.0]))[0], cp[-1], atol=1e-9)
 
 
+def test_graph_periodic_crimp_matches_end_slopes():
+    from b3_tex.geometry import GraphPeriodicCrimpCenterline
+
+    st = np.array([0.0, 0.25, 0.75, 1.0])
+    zv = np.array([0.5, 0.6, 0.4, 0.5])
+    cl = GraphPeriodicCrimpCenterline(
+        axis="x", inplane_position=0.25, stations=st, z_values=zv
+    )
+    s0 = np.array([0.0])
+    s1 = np.array([1.0])
+    np.testing.assert_allclose(cl.z_at(s0), cl.z_at(s1), atol=1e-12)
+    np.testing.assert_allclose(cl.dz_ds_at(s0), cl.dz_ds_at(s1), atol=1e-12)
+
+
+def test_woven_plain_uses_sine_and_is_edge_symmetric():
+    """Plain weave smooth crimp is a sine — periodic, centre/edge consistent."""
+    import yaml
+    from pathlib import Path
+
+    from b3_tex.geometry.centerlines import SinusoidalCenterline
+    from b3_tex.problem import RVEProblem
+
+    cfg = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "plain_weave_compacted_high_vf.yaml"
+    )
+    with cfg.open() as f:
+        raw = yaml.safe_load(f)
+    problem = RVEProblem.from_config(raw)
+    cl = problem.field.yarns[0].centerline
+    assert isinstance(cl, SinusoidalCenterline)
+    L = float(cl.s_max - cl.s_min)
+    # Odd symmetry about mid-plane: z(s) - z_mid = -(z(L-s) - z_mid)
+    s = np.linspace(0.02 * L, 0.48 * L, 40)
+    z = cl.position(s)[:, 2]
+    z_ref = cl.position(L - s)[:, 2]
+    np.testing.assert_allclose(z - cl.z_mid, -(z_ref - cl.z_mid), atol=1e-12)
+    # End slopes match (periodic unit cell).
+    t0 = cl.tangent(np.array([0.0]))[0]
+    tL = cl.tangent(np.array([L]))[0]
+    np.testing.assert_allclose(t0, tL, atol=1e-12)
+
+
 def test_piecewise_linear_nearest_segment_projection():
     pts = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]])
     cl = PiecewiseLinearCenterline(pts)

@@ -252,11 +252,108 @@ class PiecewiseLinearCenterline:
 
 
 @dataclass(frozen=True)
+class GraphPeriodicCrimpCenterline:
+    """Graph centerline along ``x``/``y`` with *periodic* cubic crimp in ``z``.
+
+    ``s`` is the running-axis coordinate in ``[0, span]``. ``z(s)`` is a cubic
+    interpolant through ``(stations, z_values)`` with ``bc_type='periodic'``, so
+    ``z(0)=z(L)`` and ``z'(0)=z'(L)``. That removes the free-end B-spline
+    asymmetry (different centre vs edge behaviour) on a periodic RVE.
+
+    Prefer :class:`SinusoidalCenterline` when the stations match a pure sine
+    (plain weave); use this for general float/dip patterns (satin, twill).
+    """
+
+    axis: str
+    inplane_position: float
+    stations: NDArray[np.float64]
+    z_values: NDArray[np.float64]
+    s_min: float = 0.0
+    s_max: float = 1.0
+    _z_spl: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        from scipy.interpolate import make_interp_spline
+
+        if self.axis not in ("x", "y"):
+            raise ValueError("GraphPeriodicCrimpCenterline axis must be 'x' or 'y'")
+        st = np.asarray(self.stations, dtype=float).reshape(-1)
+        zv = np.asarray(self.z_values, dtype=float).reshape(-1)
+        if st.size < 2 or st.size != zv.size:
+            raise ValueError("stations and z_values must have matching length >= 2")
+        if abs(float(zv[0] - zv[-1])) > 1e-9 * max(1.0, abs(float(zv[0]))):
+            raise ValueError("periodic crimp requires z_values[0] == z_values[-1]")
+        span = float(st[-1] - st[0])
+        if span <= 0.0:
+            raise ValueError("stations must be strictly increasing in span")
+        k = min(3, st.size - 1)
+        # Periodic cubic needs enough points; fall back to natural ends only if
+        # the pattern is too short (still graph-style, not free 3-D B-spline).
+        bc: str | None = "periodic" if k >= 3 and st.size >= 4 else None
+        spl = make_interp_spline(st, zv, k=k, bc_type=bc)
+        object.__setattr__(self, "stations", st)
+        object.__setattr__(self, "z_values", zv)
+        object.__setattr__(self, "s_min", float(st[0]))
+        object.__setattr__(self, "s_max", float(st[-1]))
+        object.__setattr__(self, "_z_spl", spl)
+
+    @property
+    def _running_axis(self) -> int:
+        return _AXIS_INDEX[self.axis]
+
+    @property
+    def _inplane_axis(self) -> int:
+        return _AXIS_INDEX["y" if self.axis == "x" else "x"]
+
+    def z_at(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        # Periodic wrap into the defining interval for evaluation near ends.
+        lo, hi = float(self.s_min), float(self.s_max)
+        span = hi - lo
+        s_wrap = lo + np.mod(s - lo, span)
+        return np.asarray(self._z_spl(s_wrap), dtype=float)
+
+    def dz_ds_at(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        lo, hi = float(self.s_min), float(self.s_max)
+        span = hi - lo
+        s_wrap = lo + np.mod(s - lo, span)
+        return np.asarray(self._z_spl(s_wrap, 1), dtype=float)
+
+    def position(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        out = np.zeros((s.shape[0], 3))
+        out[:, self._running_axis] = s
+        out[:, self._inplane_axis] = self.inplane_position
+        out[:, 2] = self.z_at(s)
+        return out
+
+    def tangent(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = np.asarray(s, dtype=float)
+        slope = self.dz_ds_at(s)
+        t = np.zeros((s.shape[0], 3))
+        t[:, self._running_axis] = 1.0
+        t[:, 2] = slope
+        return t / np.linalg.norm(t, axis=1, keepdims=True)
+
+    def project(
+        self, points: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        # Graph convention: foot parameter = running-axis coordinate (same as sine).
+        s = points[:, self._running_axis]
+        return s, self.position(s)
+
+
+@dataclass(frozen=True)
 class SplineCenterline:
     """B-spline centerline interpolating ``control_points`` (scipy ``BSpline``).
 
     ``s`` is a chord-length parameter in ``[0, 1]``. ``project`` returns ``None``
     so :class:`ParametricYarn` uses its generic KD-tree + Newton projection.
+
+    For *periodic RVE weave crimp* prefer :class:`SinusoidalCenterline` or
+    :class:`GraphPeriodicCrimpCenterline` (graph + periodic z BC) — free-end
+    3-D B-splines create centre/edge asymmetry on the unit cell.
     """
 
     control_points: NDArray[np.float64]
@@ -279,6 +376,10 @@ class SplineCenterline:
         t = np.concatenate([[0.0], np.cumsum(seg)])
         t = t / t[-1]
         bc = "periodic" if self.periodic else None
+        if self.periodic and not np.allclose(cp[0], cp[-1]):
+            raise ValueError(
+                "periodic SplineCenterline requires control_points[0] == control_points[-1]"
+            )
         spl = make_interp_spline(t, cp, k=self.degree, bc_type=bc)
         object.__setattr__(self, "control_points", cp)
         object.__setattr__(self, "_spl", spl)

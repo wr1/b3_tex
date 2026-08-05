@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from b3_tex.geometry.centerlines import (
     Centerline,
+    GraphPeriodicCrimpCenterline,
     PiecewiseLinearCenterline,
     SinusoidalCenterline,
     SplineCenterline,
@@ -33,6 +34,7 @@ __all__ = [
     "CrossSection",
     "LenticularSection",
     "ParametricYarn",
+    "GraphPeriodicCrimpCenterline",
     "PiecewiseLinearCenterline",
     "PowerEllipseSection",
     "SinusoidalCenterline",
