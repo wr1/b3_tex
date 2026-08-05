@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "b3-tex"
-version = "0.1.0"
+version = "0.1.1"
 description = "Implicit modelling and periodic homogenization of textile composite RVEs on FEniCSx."
 readme = "README.md"
 requires-python = ">=3.10"
