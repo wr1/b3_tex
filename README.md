@@ -3,7 +3,7 @@
 # b3_tex
 
 [![CI](https://github.com/wr1/b3_tex/actions/workflows/ci.yml/badge.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/wr1/b3_tex/branch/master/graph/badge.svg)](https://codecov.io/gh/wr1/b3_tex)
+[![coverage](docs/badges/coverage.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)

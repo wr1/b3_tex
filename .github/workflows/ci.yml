@@ -13,6 +13,8 @@ jobs:
   test:
     name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +41,7 @@ jobs:
       - name: Run tests
         run: PYTHONPATH=src python -m pytest -q
 
-      # Coverage once per matrix (report + Codecov); FE backends auto-skip here.
+      # Coverage once per matrix (report + repo badge); FE backends auto-skip here.
       - name: Coverage (XML + terminal)
         if: matrix.python-version == '3.12'
         run: |
@@ -48,8 +50,73 @@ jobs:
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml
 
-      - name: Upload coverage to Codecov
+      # Self-hosted badge (Codecov needs CODECOV_TOKEN; tokenless upload fails).
+      - name: Write coverage badge SVG
         if: matrix.python-version == '3.12'
+        run: |
+          python <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          rate = float(ET.parse("coverage.xml").getroot().get("line-rate"))
+          pct = int(round(rate * 100))
+          if pct >= 90:
+              color = "#4c1"
+          elif pct >= 75:
+              color = "#97ca00"
+          elif pct >= 60:
+              color = "#a4a61d"
+          elif pct >= 40:
+              color = "#dfb317"
+          else:
+              color = "#e05d44"
+          label, message = "coverage", f"{pct}%"
+          lw, mw = 64, 42
+          w = lw + mw
+          svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" role="img" aria-label="{label}: {message}">
+            <title>{label}: {message}</title>
+            <linearGradient id="s" x2="0" y2="100%">
+              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+              <stop offset="1" stop-opacity=".1"/>
+            </linearGradient>
+            <clipPath id="r"><rect width="{w}" height="20" rx="3" fill="#fff"/></clipPath>
+            <g clip-path="url(#r)">
+              <rect width="{lw}" height="20" fill="#555"/>
+              <rect x="{lw}" width="{mw}" height="20" fill="{color}"/>
+              <rect width="{w}" height="20" fill="url(#s)"/>
+            </g>
+            <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+              <text aria-hidden="true" x="{lw/2*10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="{(lw-10)*10}">{label}</text>
+              <text x="{lw/2*10}" y="140" transform="scale(.1)" fill="#fff" textLength="{(lw-10)*10}">{label}</text>
+              <text aria-hidden="true" x="{(lw+mw/2)*10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="{(mw-10)*10}">{message}</text>
+              <text x="{(lw+mw/2)*10}" y="140" transform="scale(.1)" fill="#fff" textLength="{(mw-10)*10}">{message}</text>
+            </g>
+          </svg>
+          '''
+          out = Path("docs/badges/coverage.svg")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(svg)
+          print(f"coverage badge → {pct}%")
+          Path("coverage_pct.txt").write_text(str(pct))
+          PY
+
+      - name: Commit coverage badge
+        if: >
+          matrix.python-version == '3.12'
+          && github.event_name == 'push'
+          && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update coverage badge [skip ci]"
+          file_pattern: docs/badges/coverage.svg
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com
+
+      # Optional: set repo secret CODECOV_TOKEN after enabling the repo on codecov.io
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12' && env.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         uses: codecov/codecov-action@v5
         with:
           files: coverage.xml
