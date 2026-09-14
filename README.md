@@ -3,11 +3,16 @@
 # b3_tex
 
 [![CI](https://github.com/wr1/b3_tex/actions/workflows/ci.yml/badge.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
+[![Release](https://github.com/wr1/b3_tex/actions/workflows/release.yml/badge.svg)](https://github.com/wr1/b3_tex/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/wr1/b3_tex)](https://github.com/wr1/b3_tex/releases)
 [![coverage](docs/badges/coverage.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+
+[Changelog](CHANGELOG.md). Coverage badge is the **pure-Python CI surface**
+(~50%); GitHub Actions skips FE backends (`mfem` / `dolfinx`).
 
 **Robust, automated** textile RVE homogenization — implicit geometry, adaptive
 meshing, and a one-command path from fabric YAML to **C_eff** / datasheet.
@@ -294,6 +299,8 @@ refinement progresses ([`amr_development_gif.py`](examples/amr_development_gif.p
   Transverse-isotropic stiffness has its symmetry axis along local 1.
 - Tests marked `@pytest.mark.fenicsx` and `@pytest.mark.mfem` are
   auto-skipped if their respective library is unimportable.
+  GitHub Actions CI installs a light pip set (no `mfem` / `dolfinx`) and
+  runs against `PYTHONPATH=src`, so those FE tests skip there too.
 
 ## Tests
 
@@ -303,7 +310,8 @@ micromamba run -n b3-tex pytest -m fenicsx     # DOLFINx-only
 micromamba run -n b3-tex pytest -m mfem        # MFEM-only
 micromamba run -n b3-tex pytest tests/test_amr.py tests/test_mfem.py -v
 
-# Coverage (pytest-cov; same surface as CI — FE backends skip if missing)
+# Coverage (pytest-cov; same pure-Python surface as GitHub Actions —
+# mfem / dolfinx tests auto-skip when those libraries are not installed)
 pip install -e ".[test]"
 PYTHONPATH=src pytest --cov=b3_tex --cov-report=term-missing
 ```
