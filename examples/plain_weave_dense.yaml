@@ -44,4 +44,4 @@ field:
   amplitude: 0.04             # over/under crossing, no interpenetration
 
 solver:
-  backend: dolfinx_periodic
+  backend: mfem-periodic

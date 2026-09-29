@@ -6,17 +6,21 @@ description: Agent path — full FEA C_eff for a twill weave from fibre, resin, 
 Goal: given **fibre**, **resin (matrix)**, and **in-tow Vf**, produce a defensible
 homogenized stiffness for a **twill 2×2** weave, ready for FEA.
 
-## One-shot path
+## One-shot path (textile-as-code preferred)
 
-Edit constituents in `examples/weave_twill_2x2.yaml` (`materials` block), then:
+Edit constituents in `examples/weave_twill_2x2.py` (`build()` — matrix / fibre / Vf),
+then:
 
 ```bash
-b3-tex validate examples/weave_twill_2x2.yaml
-b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+b3-tex validate examples/weave_twill_2x2.py
+b3-tex solve    examples/weave_twill_2x2.py -o results/weave_twill_2x2
+# datasheet still takes the YAML twin for geometry labels; reuse C_eff from the .py solve
 b3-tex datasheet examples/weave_twill_2x2.yaml \
   -o results/datasheet_weave_twill_2x2.pdf \
   --c-eff results/weave_twill_2x2/C_eff.npz
 ```
+
+YAML twin (`examples/weave_twill_2x2.yaml`) remains valid if you prefer pure data cards.
 
 ### What `solve` prints
 
@@ -41,7 +45,23 @@ print(r.metadata["micromechanics"])  # from C_eff.meta.json
 
 Voigt order: `(11, 22, 33, 23, 13, 12)` with **engineering shear**.
 
-## YAML knobs (fibre / resin / Vf)
+## Knobs (fibre / resin / Vf)
+
+**Python** (`examples/weave_twill_2x2.py`):
+
+```python
+matrix = Material.isotropic("matrix", youngs_modulus=3.5e9, poisson_ratio=0.35)
+fibre = Material.transverse_isotropic(
+    "fibre", e_l=230e9, e_t=15e9, g_lt=15e9, nu_lt=0.20, nu_tt=0.30
+)
+yarn = textile.micromechanical(
+    "yarn", matrix=matrix, fibre=fibre, micromodel="chamis",
+    nominal_vf=0.55, max_vf=0.90,
+)
+# WeavePattern.twill(2, 2, n_warp=4, n_weft=4) + WeaveGeometry(...)
+```
+
+**YAML** (same numbers in `materials` / `field` blocks):
 
 ```yaml
 materials:
@@ -61,17 +81,19 @@ field:
 
 - **In-tow Vf** drives yarn stiffness via micromechanics (local Vf rises under compaction).
 - **Yarn Vf** (bundle volume / RVE) is a geometric outcome — printed by `validate` / `solve`.
+- Full builder reference: [Textile-as-code](/docs/reference/textile-as-code).
 
 ## Solver defaults in the twill example
 
 | Key | Value | Why |
 |-----|-------|-----|
-| `mesh_resolution` | `[24, 24, 6]` | Moderate base for thin SI domain (~0.02×0.02×0.0024 m) |
+| `mesh_resolution` | `(24, 24, 6)` | Moderate base for thin SI domain (~0.02×0.02×0.0024 m) |
 | `backend` | `mfem-periodic` | Hex + NCMesh AMR |
 | `cell_type` | `hexahedron` | Efficient weave meshing |
 | `amr` | 2 iters @ 0.2 | Interface resolution without full fine grid |
 
-Smoke (~10 s class): set mesh to `[20, 20, 5]` and `amr.enabled: false`.
+Smoke (~10 s class): `build(smoke=True)` in the `.py` card, or set mesh to
+`[20, 20, 5]` and `amr.enabled: false` in YAML.
 
 ## Geometry sanity (optional)
 
@@ -103,8 +125,8 @@ See [Convergence](/docs/guides/convergence) for manual mesh checks.
 
 ## Checklist for agents
 
-1. Edit fibre / matrix / Vf in YAML (do not hardcode in Python unless needed).
-2. `validate` — confirm micromodel and AMR.
+1. Edit fibre / matrix / Vf in `weave_twill_2x2.py` (or YAML twin).
+2. `validate` on the same card — confirm micromodel and AMR.
 3. `solve` — read printed `E_x` and meta path.
-4. `datasheet --c-eff` — mesh line must say `(from C_eff.meta.json)`.
+4. `datasheet` with YAML twin + `--c-eff` — mesh line must say `(from C_eff.meta.json)`.
 5. Hand off `effective_stiffness` + meta, not a bare matrix dump.

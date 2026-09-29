@@ -49,6 +49,7 @@ from typing import Any
 
 import numpy as np
 
+from b3_tex.api import homogenize
 from b3_tex.problem import RVEProblem
 
 # Gentle nudge to use uv (consistent with project management)
@@ -158,23 +159,23 @@ def build_config(
     return cfg
 
 
-# =============================================================================
-# Backend handling
-# =============================================================================
-
-
-def get_solve_function(backend: str):
-    if backend.startswith("mfem"):
-        if "periodic" in backend:
-            from b3_tex.backends.mfem_backend import solve_periodic as fn
-        else:
-            from b3_tex.backends.mfem_backend import solve as fn
-    else:
-        if "periodic" in backend:
-            from b3_tex.backends.dolfinx_periodic_backend import solve as fn
-        else:
-            from b3_tex.backends.dolfinx_backend import solve as fn
-    return fn
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
 
 
 # =============================================================================
@@ -282,6 +283,7 @@ def run_one(
     Run a single point in the study.
     Returns a dict with accuracy metrics and detailed timings.
     """
+    backend = _canonical_backend(backend)
     cfg = build_config(
         n_xy,
         material_resolution,
@@ -338,10 +340,8 @@ def run_one(
         return rec
 
     # Real run (AMR supported via config)
-    solve_fn = get_solve_function(backend)
-
     t0 = time.perf_counter()
-    result = solve_fn(problem)
+    result = homogenize(problem, backend=backend)
     total_time = time.perf_counter() - t0
 
     return {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,17 +14,17 @@ import yaml
 from numpy.typing import NDArray
 
 from b3_tex.materials import Material, MicromechanicalMaterial
-from b3_tex.postprocess import engineering_constants_from_S
+from b3_tex.metrics import local_vf_stats, monte_carlo_yarn_volume_fraction
 from b3_tex.problem import RVEProblem
+from b3_tex.provenance import package_version
 from b3_tex.result import HomogenizationResult
+from b3_tex.viz.sampling import _PLANE_AXES
 from b3_tex.viz.slices import (
     render_amr_snapshot,
     render_midplane_field,
     render_midplane_orientation,
 )
 from b3_tex.viz.theme import DATASHEET_THEME
-
-_PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
 
 # One-page A4 landscape layout targets (Typst + matplotlib).
 
@@ -121,23 +122,11 @@ def _fmt_gpa(value: float) -> str:
 
 
 def _yarn_volume_fraction(problem: RVEProblem, n: int = 80_000) -> float:
-    rng = np.random.default_rng(0)
-    pts = rng.uniform(np.zeros(3), problem.size, size=(n, 3))
-    ids, _ = problem.field.sample_arrays(pts)
-    return float((ids == 1).mean())
+    return monte_carlo_yarn_volume_fraction(problem, n=n, seed=0)
 
 
 def _local_vf_range(problem: RVEProblem, n: int = 80_000) -> dict[str, float] | None:
-    sampler = getattr(problem.field, "sample_local_vf", None)
-    if sampler is None:
-        return None
-    rng = np.random.default_rng(1)
-    pts = rng.uniform(np.zeros(3), problem.size, size=(n, 3))
-    vf = np.asarray(sampler(pts), dtype=float)
-    vf = vf[np.isfinite(vf)]
-    if vf.size == 0:
-        return None
-    return {"min": float(vf.min()), "mean": float(vf.mean()), "max": float(vf.max())}
+    return local_vf_stats(problem, n=n, seed=1)
 
 
 def _field_geometry_rows(raw_field: dict[str, Any]) -> list[tuple[str, str]]:
@@ -244,10 +233,13 @@ def _build_analysis_rows(
     YAML (or datasheet default mesh override).
     """
     solver = problem.solver
-    amr = dict(solver.get("amr", {}))
-    sampling = solver.get("material_sampling", {})
-    backend = str(solver.get("backend", "mfem-periodic"))
-    cell_type = str(solver.get("cell_type", "tetrahedron"))
+    amr = solver.amr.to_dict()
+    sampling = solver.material_sampling.to_dict()
+    backend = solver.backend
+    from b3_tex.backends.registry import get_backend
+
+    spec_bc = get_backend(backend)
+    cell_type = solver.cell_type or spec_bc.default_cell_type
     mesh_label = " x ".join(str(v) for v in problem.mesh_resolution)
     mesh_note = ""
 
@@ -277,8 +269,13 @@ def _build_analysis_rows(
             "homogenization mesh",
             mesh_label + mesh_note,
         ),
-        ("BC", "periodic (3-axis MPC / saddle-point)"),
-        ("material sampling", str(sampling.get("strategy", "default"))),
+        (
+            "BC",
+            "periodic (3-axis MPC / saddle-point)"
+            if spec_bc.bc == "periodic"
+            else "KUBC (affine displacement on the boundary)",
+        ),
+        ("material sampling", str(sampling.get("strategy", "exact"))),
     ]
     if sampling and "resolution" in sampling:
         rows.append(("sampling resolution", str(sampling["resolution"])))
@@ -370,7 +367,7 @@ def collect_spec(
     return DatasheetSpec(
         title=title,
         config_path=config_path,
-        version="b3_tex 0.1.2",
+        version=f"b3_tex {package_version()}",
         rve_rows=rve_rows,
         micro_rows=micro_rows,
         analysis_rows=analysis_rows,
@@ -378,15 +375,6 @@ def collect_spec(
         local_vf=local_vf,
         vf_avg=vf_avg,
     )
-
-
-def solve_homogenization(problem: RVEProblem) -> HomogenizationResult:
-    # Use the backend registry directly (not b3_tex.cli) so the datasheet does
-    # not pull in the CLI's treeparse dependency just to homogenize.
-    from b3_tex.backends.base import get_backend
-
-    backend = str(problem.solver.get("backend", "mfem-periodic"))
-    return get_backend(backend)(problem)
 
 
 def build_typst(spec: DatasheetSpec) -> str:
@@ -415,8 +403,8 @@ def build_typst(spec: DatasheetSpec) -> str:
         eng_block = (
             '#text(weight: "bold", size: 7pt)[Engineering constants]\n'
             "#text(size: 6.5pt)["
-            f"$E$ = ({ec['E_x'] / 1e9:.1f}, {ec['E_y'] / 1e9:.1f}, {ec['E_z'] / 1e9:.1f}) GPa; "
-            f"$G$ = ({ec['G_xy'] / 1e9:.2f}, {ec['G_xz'] / 1e9:.2f}, {ec['G_yz'] / 1e9:.2f}); "
+            f"$E$ = ({ec['e_x'] / 1e9:.1f}, {ec['e_y'] / 1e9:.1f}, {ec['e_z'] / 1e9:.1f}) GPa; "
+            f"$G$ = ({ec['g_xy'] / 1e9:.2f}, {ec['g_xz'] / 1e9:.2f}, {ec['g_yz'] / 1e9:.2f}); "
             f"$nu$ = ({ec['nu_xy']:.2f}, {ec['nu_xz']:.2f}, {ec['nu_yz']:.2f})"
             "]\n"
         )
@@ -526,6 +514,10 @@ def compile_datasheet(
     root: Path | None = None,
 ) -> None:
     """Compile Typst; ``root`` is the directory holding figure PNGs (and the .typ file)."""
+    if shutil.which("typst") is None:
+        raise RuntimeError(
+            "typst is not on PATH. Install typst to compile the datasheet."
+        )
     out_pdf = Path(out_pdf)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     root = Path(root or out_pdf.parent)
@@ -540,6 +532,8 @@ def compile_datasheet(
     if proc.returncode != 0:
         raise RuntimeError(f"typst compile failed ({proc.returncode}):\n{proc.stderr}")
     if out_png is not None:
+        for stale in root.glob("datasheet-*.png"):
+            stale.unlink()
         png_pattern = root / "datasheet-{p}.png"
         proc2 = subprocess.run(
             [
@@ -560,7 +554,12 @@ def compile_datasheet(
             raise RuntimeError(
                 f"typst png export failed ({proc2.returncode}):\n{proc2.stderr}"
             )
-        rendered = next(root.glob("datasheet-*.png"))
+        rendered = root / "datasheet-1.png"
+        if not rendered.is_file():
+            pages = sorted(root.glob("datasheet-*.png"))
+            if not pages:
+                raise RuntimeError("typst png export produced no datasheet-*.png")
+            rendered = pages[0]
         shutil.copy(rendered, out_png)
 
 
@@ -575,13 +574,17 @@ def generate(
     *,
     out_png: str | Path | None = None,
     axis: str = "z",
-    amr_iterations: int = 4,
+    amr_iterations: int | None = None,
+    amr_base: tuple[int, int, int] | None = None,
     amr_threshold: float = 0.20,
     solve_amr_iterations: int = 0,
     solve_mesh_resolution: tuple[int, int, int] | None = None,
     skip_solve: bool = False,
     skip_amr: bool = False,
     c_eff_npz: str | Path | None = None,
+    no_amr: bool = False,
+    result: HomogenizationResult | None = None,
+    keep_workdir: bool = False,
 ) -> DatasheetSpec:
     """Build figures, optionally homogenize, and compile the one-page datasheet."""
     config_path = Path(config)
@@ -591,40 +594,102 @@ def generate(
     if solve_mesh_resolution is not None:
         raw.setdefault("domain", {})["mesh_resolution"] = list(solve_mesh_resolution)
 
-    solver = dict(raw.get("solver", {}))
-    if solve_amr_iterations > 0:
-        solver["amr"] = {
-            **solver.get("amr", {}),
+    overrides: dict[str, Any] = {}
+    if no_amr:
+        overrides["amr"] = {"enabled": False}
+    elif solve_amr_iterations > 0:
+        overrides["amr"] = {
             "enabled": True,
             "max_iterations": solve_amr_iterations,
             "threshold": amr_threshold,
         }
-    raw["solver"] = solver
-    problem = RVEProblem.from_config(raw)
+    from b3_tex.api import load_problem as load_card
+
+    problem = load_card(config_path, solver_overrides=overrides or None)
+    if solve_mesh_resolution is not None:
+        from dataclasses import replace
+
+        problem = replace(
+            problem, mesh_resolution=tuple(int(v) for v in solve_mesh_resolution)
+        )
 
     out_pdf = Path(out_pdf)
     if out_png is None:
         out_png = out_pdf.with_suffix(".png")
 
-    work = out_pdf.parent / f".datasheet_{out_pdf.stem}"
-    work.mkdir(parents=True, exist_ok=True)
+    def _render(work: Path) -> DatasheetSpec:
+        return _generate_in_workdir(
+            work,
+            config_path=config_path,
+            raw=raw,
+            problem=problem,
+            out_pdf=out_pdf,
+            out_png=Path(out_png),
+            axis=axis,
+            amr_iterations=amr_iterations,
+            amr_base=amr_base,
+            amr_threshold=amr_threshold,
+            skip_solve=skip_solve,
+            skip_amr=skip_amr,
+            c_eff_npz=c_eff_npz,
+            result=result,
+        )
 
+    if keep_workdir:
+        work = out_pdf.parent / f".datasheet_{out_pdf.stem}"
+        work.mkdir(parents=True, exist_ok=True)
+        return _render(work)
+    with tempfile.TemporaryDirectory(prefix=f".datasheet_{out_pdf.stem}_") as tmp:
+        return _render(Path(tmp))
+
+
+def _generate_in_workdir(
+    work: Path,
+    *,
+    config_path: Path,
+    raw: dict[str, Any],
+    problem: RVEProblem,
+    out_pdf: Path,
+    out_png: Path,
+    axis: str,
+    amr_iterations: int | None,
+    amr_base: tuple[int, int, int] | None,
+    amr_threshold: float,
+    skip_solve: bool,
+    skip_amr: bool,
+    c_eff_npz: str | Path | None,
+    result: HomogenizationResult | None,
+) -> DatasheetSpec:
     amr_panel_desc: str | None = None
     if not skip_amr:
-        mesh_iters = amr_iterations
-        base = _AMR_ILLUSTRATION_BASE
+        if amr_base is None:
+            base = tuple(int(v) for v in problem.mesh_resolution)
+            mesh_label = "solve mesh"
+        else:
+            base = tuple(int(v) for v in amr_base)
+            mesh_label = "illustration override"
+        if amr_iterations is None:
+            if problem.solver.amr.enabled:
+                mesh_iters = int(problem.solver.amr.max_iterations)
+                panel_threshold = float(problem.solver.amr.threshold)
+            else:
+                mesh_iters = 0
+                panel_threshold = amr_threshold
+        else:
+            mesh_iters = int(amr_iterations)
+            panel_threshold = amr_threshold
         mesh_path, n_cells, n_gp = render_amr_snapshot(
             problem,
             work / "amr_slice.png",
             base_mesh=base,
             iters=mesh_iters,
-            threshold=amr_threshold,
+            threshold=panel_threshold,
             theme=DATASHEET_THEME,
         )
         Lx, Ly, Lz = (float(s) for s in problem.size)
         amr_panel_desc = (
-            f"on — base {base[0]}×{base[1]}×{base[2]} hex, "  # noqa: RUF001
-            f"{mesh_iters} pass(es), τ={amr_threshold}; "
+            f"on — {mesh_label} {base[0]}×{base[1]}×{base[2]} hex, "  # noqa: RUF001
+            f"{mesh_iters} pass(es), τ={panel_threshold}; "
             f"cuts plan z={0.5 * Lz:.2f}, top y={0.5 * Ly:.2f}, side x={0.25 * Lx:.2f}"
         )
 
@@ -663,7 +728,9 @@ def generate(
             )
         c = loaded.effective_stiffness
         spec.c_eff_gpa = c / 1e9
-        spec.engineering_constants = engineering_constants_from_S(np.linalg.inv(c))
+        from b3_tex.tensors import engineering_constants
+
+        spec.engineering_constants = engineering_constants(c)
         # Rebuild analysis rows with actual solve provenance when meta exists.
         if loaded.metadata:
             spec.analysis_rows = _build_analysis_rows(
@@ -686,14 +753,14 @@ def generate(
                 solve_provenance={"mesh_resolution": None},
             )
     elif not skip_solve:
+        from b3_tex.api import homogenize
+
         print(
             "Homogenizing (this may take several minutes on fine meshes)...", flush=True
         )
-        result = solve_homogenization(problem)
+        result = result or homogenize(problem, source=config_path)
         spec.c_eff_gpa = result.effective_stiffness / 1e9
-        spec.engineering_constants = engineering_constants_from_S(
-            np.linalg.inv(result.effective_stiffness)
-        )
+        spec.engineering_constants = result.engineering_constants()
 
     typst_src = build_typst(spec)
     compile_datasheet(typst_src, out_pdf, out_png=Path(out_png), root=work)

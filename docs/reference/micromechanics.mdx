@@ -13,7 +13,16 @@ or **micromechanical**: recomputed from local in-tow fibre volume fraction.
 | `chamis` | analytical | Baseline rule-of-mixtures (default) |
 | `mori_tanaka` | analytical | Cylinder estimate; smoother transverse |
 
-YAML:
+Textile-as-code:
+
+```python
+yarn = textile.micromechanical(
+    "yarn", matrix=matrix, fibre=fibre, micromodel="chamis",
+    nominal_vf=0.55, max_vf=0.90,
+)
+```
+
+YAML card:
 
 ```yaml
 - name: yarn
@@ -39,12 +48,9 @@ Fixed single-Vf shortcut (no compaction path):
 
 Fibre area is conserved along a tow. Compressed sections (crossovers) raise local Vf:
 
-\[
-V_{f,\mathrm{local}}(s) = \mathrm{clip}\!\left(
-  V_{f,\mathrm{nom}}\,A_\mathrm{nom}/A(s),\;
-  V_{f,\mathrm{nom}},\; V_{f,\mathrm{max}}
-\right)
-\]
+```text
+Vf_local(s) = clip( Vf_nom * A_nom / A(s),  Vf_nom,  Vf_max )
+```
 
 Assembly uses a Vf-binned LUT (`stiffness_batch` → rotate per GP). All models share
 this path — swap `micromodel` only.
@@ -79,7 +85,7 @@ Registered models appear as kind **`registered`** in `validate` / meta (not
 
 Always check:
 
-1. YAML `micromodel:` field
+1. Card micromodel (`textile.micromechanical(..., micromodel=...)` or YAML `micromodel:`)
 2. `b3-tex validate` micromodel line
 3. `C_eff.meta.json` → `micromechanics`
 4. Datasheet **Micromechanics** table

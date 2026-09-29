@@ -104,7 +104,7 @@ def weave_config(amr_iterations: int, cell_type: str = "hexahedron") -> dict:
             "power": 4.0,
         },
         "solver": {
-            "backend": "mfem_periodic",
+            "backend": "mfem-periodic",
             "cell_type": cell_type,
             "amr": {
                 "enabled": amr_iterations > 0,
@@ -189,7 +189,8 @@ def render_slice(mesh, metric, out_path: Path, title: str) -> None:
 
 def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
     from b3_tex.amr import cell_heterogeneity_metric_mfem
-    from b3_tex.backends.mfem_backend import _build_mesh, solve_periodic
+    from b3_tex.api import homogenize
+    from b3_tex.backends.mfem_backend import _build_mesh
 
     gp_per_cell = gps_per_cell(cell_type)
     runs: list[dict] = []
@@ -198,7 +199,7 @@ def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
         print(f"  [{cell_type[:3]}] AMR iter {it} ...", end=" ", flush=True)
 
         t0 = time.perf_counter()
-        result = solve_periodic(problem)
+        result = homogenize(problem)
         elapsed = time.perf_counter() - t0
 
         mesh_for_viz = _build_mesh(problem)
@@ -240,9 +241,9 @@ def _sweep(cell_type: str, iters: list[int]) -> list[dict]:
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # Subsampling / quadrature schemes:
-    #   AMR metric (mesh-driver):  10x10x10 = 1000 deterministic sub-points
-    #                              per cell (tensor grid in unit cube),
-    #                              shared across both cell types.
+    #   AMR metric (mesh-driver):  6x6x6 = 216 deterministic sub-points
+    #                              per cell (default n_samples_per_cell, not the
+    #                              base mesh), shared across both cell types.
     #   FE quadrature (assembly):  q = 2 * Lagrange-1 order = 2 in MFEM.
     #     hex: tensor 2x2x2 Gauss-Legendre  -> 8 GPs/cell.
     #     tet: 4-point Hammer (degree 2)    -> 4 GPs/cell.

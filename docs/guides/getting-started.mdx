@@ -16,14 +16,20 @@ description: Install b3_tex and run validate / solve on an example RVE.
 ## Install
 
 ```bash
-micromamba create -n b3-tex -c conda-forge \
-    python=3.12 fenics-dolfinx dolfinx_mpc mpich numpy pyyaml pytest scipy
-micromamba activate b3-tex
-pip install treeparse pymfem
-pip install -e .
+pip install 'b3-tex[mfem]'
 ```
 
-`pymfem` builds on first install (~5 min). Skip DOLFINx packages if you only need MFEM.
+The PyPI package is `mfem` (the `[mfem]` extra), not `pymfem`. It also installs
+`numba`. Skip DOLFINx if you only need MFEM.
+
+Optional DOLFINx backends are conda-forge only (not a pip extra):
+
+```bash
+micromamba create -n b3-tex -c conda-forge \
+    python=3.12 fenics-dolfinx dolfinx_mpc mpich
+micromamba activate b3-tex
+pip install 'b3-tex[mfem]'
+```
 
 ## First commands
 
@@ -41,7 +47,14 @@ b3-tex solve examples/ud_tow.yaml -o results/ud_tow
 b3-tex datasheet examples/ud_tow.yaml \
   -o results/datasheet_ud_tow.pdf \
   --c-eff results/ud_tow/C_eff.npz
+
+# Textile-as-code card (preferred for weaves)
+b3-tex validate examples/weave_twill_2x2.py
+b3-tex solve    examples/weave_twill_2x2.py -o results/weave_twill_2x2
 ```
+
+Cards may be **YAML** or **Python** (`build() -> RVEProblem`). Authoring API:
+[Textile-as-code](/docs/reference/textile-as-code).
 
 ## Recommended defaults
 
@@ -64,5 +77,6 @@ make docs-static       # list MDX tree only
 ## Next
 
 - [Twill 2×2 FEA stiffness card](/docs/guides/agent-twill-stiffness) — end-to-end agent path
+- [Textile-as-code](/docs/reference/textile-as-code) — preferred builders
 - [CLI reference](/docs/reference/cli)
-- [YAML schema](/docs/reference/yaml-schema)
+- [YAML schema](/docs/reference/yaml-schema) — optional card format

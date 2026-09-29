@@ -23,7 +23,6 @@ import json
 import math
 import os
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -488,75 +487,43 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _resolve_backend(override: str | None = None) -> str:
-    """Find an available b3_tex solver backend."""
-    candidates = [
-        ("mfem-periodic", "mfem"),
-        ("dolfinx-periodic", "dolfinx"),
-    ]
-    for backend_name, lib_name in candidates:
-        if override and override != backend_name:
-            continue
-        try:
-            if backend_name.startswith("mfem"):
-                __import__("mfem")
-            else:
-                __import__("dolfinx")
-            return backend_name
-        except ImportError:
-            continue
-
-    print("ERROR: no solver backend available (need mfem or dolfinx)", file=sys.stderr)
-    sys.exit(1)
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
 
 
 def _run_solve(config: dict) -> tuple:
     """Run a single b3_tex homogenisation solve. Returns (C_eff, metadata)."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        tmp_path = f.name
+    from b3_tex.api import homogenize
+    from b3_tex.problem import RVEProblem
 
-    try:
-        from b3_tex.problem import RVEProblem
-
-        problem = RVEProblem.from_config(config)
-
-        backend_name = config.get("solver", {}).get("backend", "mfem-periodic")
-        canonical = {"dolfinx": "dolfinx-periodic", "mfem": "mfem-periodic"}.get(
-            backend_name, backend_name
-        )
-
-        if canonical == "dolfinx-periodic":
-            from b3_tex.backends.dolfinx_periodic_backend import solve as solve_fn
-
-            lib_label = "DOLFINx"
-        elif canonical == "dolfinx-kubc":
-            from b3_tex.backends.dolfinx_backend import solve as solve_fn
-
-            lib_label = "DOLFINx"
-        elif canonical == "mfem-periodic":
-            from b3_tex.backends.mfem_backend import solve_periodic as solve_fn
-
-            lib_label = "PyMFEM"
-        elif canonical == "mfem-kubc":
-            from b3_tex.backends.mfem_backend import solve as solve_fn
-
-            lib_label = "PyMFEM"
-        else:
-            raise ValueError(f"unknown backend {canonical}")
-
-        result = solve_fn(problem)
-        C_eff = result.effective_stiffness
-        meta = {
-            "lib": lib_label,
-            "backend": canonical,
-            "size": problem.size.tolist(),
-            "mesh_resolution": list(problem.mesh_resolution),
-        }
-        return C_eff, meta
-
-    finally:
-        os.unlink(tmp_path)
+    backend_name = config.get("solver", {}).get("backend", "mfem-periodic")
+    canonical = _canonical_backend(backend_name)
+    problem = RVEProblem.from_config(config)
+    result = homogenize(problem, backend=canonical)
+    lib_label = "PyMFEM" if canonical.startswith("mfem") else "DOLFINx"
+    C_eff = result.effective_stiffness
+    meta = {
+        "lib": lib_label,
+        "backend": canonical,
+        "size": problem.size.tolist(),
+        "mesh_resolution": list(problem.mesh_resolution),
+    }
+    return C_eff, meta
 
 
 def main() -> None:
@@ -585,9 +552,9 @@ def main() -> None:
     parser.add_argument(
         "--backend",
         type=str,
-        default=None,
+        default="mfem-periodic",
         choices=["mfem-periodic", "mfem-kubc", "dolfinx-periodic", "dolfinx-kubc"],
-        help="Override solver backend",
+        help="Solver backend (default: mfem-periodic).",
     )
     args = parser.parse_args()
 
@@ -597,8 +564,7 @@ def main() -> None:
         f"{len(ds.weaves)} weaves"
     )
 
-    # Resolve backend
-    backend = _resolve_backend(args.backend)
+    backend = _canonical_backend(args.backend)
     print(f"Using backend: {backend}")
 
     # Generate all samples

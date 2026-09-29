@@ -29,11 +29,8 @@ def require_pyvista():
 
 
 def require_matplotlib():
-    """Return ``matplotlib.pyplot`` with the Agg backend forced (headless-safe)."""
+    """Return ``matplotlib.pyplot``. Callers that change rcParams use ``rc_context``."""
     try:
-        import matplotlib
-
-        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError as exc:  # pragma: no cover
         raise ImportError(

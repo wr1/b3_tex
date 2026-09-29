@@ -13,12 +13,14 @@ from contextlib import contextmanager
 from typing import Iterator
 
 
-def profiling_enabled(solver_cfg: dict | None = None) -> bool:
+def profiling_enabled(solver_cfg: object | None = None) -> bool:
     if os.environ.get("B3_TEX_PROFILE", "").strip() in ("1", "true", "TRUE", "yes"):
         return True
     if solver_cfg is None:
         return False
-    return bool(solver_cfg.get("profile", False))
+    if hasattr(solver_cfg, "profile"):
+        return bool(solver_cfg.profile)
+    return bool(solver_cfg.get("profile", False))  # type: ignore[union-attr]
 
 
 class StageTimer:

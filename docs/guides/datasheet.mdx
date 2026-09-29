@@ -4,7 +4,7 @@ description: One-page Typst PDF documenting RVE setup, micromechanics, and C_eff
 ---
 
 `b3_tex` can emit a **one-page technical material datasheet** (Typst PDF) for any
-RVE YAML. The sheet documents how the textile is modelled, how it was analysed,
+RVE YAML card. The sheet documents how the textile is modelled, how it was analysed,
 and the homogenized stiffness.
 
 ## Sections on the one-pager
@@ -14,17 +14,18 @@ and the homogenized stiffness.
 | **RVE settings** | Domain size, weave geometry (`n_warp`, tow section, compaction, …) |
 | **Micromechanics** | Matrix and fibre moduli, micromodel name, nominal/max in-tow Vf, yarn Vf |
 | **Analysis** | Backend, cell type, periodic BCs, sampling, **homogenization** mesh + AMR |
-| **Modelled weave** | Mid-plane slice: local in-tow $V_f$ + fibre-direction quiver |
+| **Modelled weave** | Mid-plane slice: local in-tow Vf + fibre-direction quiver |
 | **AMR mesh (right)** | Illustration only (coarse `10×10×3` base + mid-plane cuts) |
-| **Outputs** | Engineering constants and full $6\times6$ $C_\mathrm{eff}$ in GPa |
+| **Outputs** | Engineering constants and full 6×6 `C_eff` in GPa |
 
 Voigt order: `(11, 22, 33, 23, 13, 12)` with engineering shear.
-$\sigma_\mathrm{voigt} = C_\mathrm{eff}\,\varepsilon_\mathrm{voigt}$.
+`σ_voigt = C_eff @ ε_voigt`.
 
 ## Preferred workflow (reuse C_eff)
 
 ```bash
-b3-tex solve examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
+# Solve from textile-as-code or YAML; datasheet still takes the YAML path for labels
+b3-tex solve examples/weave_twill_2x2.py -o results/weave_twill_2x2
 
 b3-tex datasheet examples/weave_twill_2x2.yaml \
   -o results/datasheet_weave_twill_2x2.pdf \
@@ -45,7 +46,7 @@ the sheet warns and marks mesh as unknown rather than inventing `24×24×8`.
 | `--skip-amr` | Omit AMR illustration panel |
 | `--solve-amr-iterations N` | AMR during on-the-fly homogenization |
 | `--amr-iterations N` | AMR for the **illustration** panel only |
-| `--axis {x,y,z}` | Normal to the mid-plane fibre quiver |
+| `--axis x\|y\|z` | Normal to the mid-plane fibre quiver |
 
 Boolean flags are store-true style: `b3-tex datasheet CFG --skip-solve` (no `true` value).
 

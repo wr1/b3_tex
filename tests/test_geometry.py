@@ -5,11 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from b3_tex.fields import (
-    ParametricWeaveField,
-    parametric_plain_weave_yarns,
-    satin_weave_yarns,
-)
+from b3_tex.fields import ParametricWeaveField
+from b3_tex.generators.legacy import parametric_plain_weave_yarns, satin_weave_yarns
 from b3_tex.geometry import (
     LenticularSection,
     ParametricYarn,

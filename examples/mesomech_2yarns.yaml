@@ -46,4 +46,4 @@ field:
       radius: 0.18
 
 solver:
-  backend: dolfinx_periodic
+  backend: mfem-periodic

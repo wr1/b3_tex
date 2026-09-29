@@ -40,7 +40,7 @@ solver:
 CLI override:
 
 ```bash
-b3-tex solve examples/weave_twill_2x2.yaml \
+b3-tex solve examples/weave_twill_2x2.py \
   --amr-iterations 2 --amr-threshold 0.20 \
   -o results/weave_twill_2x2
 ```
@@ -49,7 +49,7 @@ b3-tex solve examples/weave_twill_2x2.yaml \
 
 SI weaves from TexGen (e.g. twill `0.02 × 0.02 × 0.0024` m) need **fewer z cells**
 than in-plane. Do **not** force a cubic `N³` default. Prefer aspect-aware
-`mesh_resolution` (see example YAMLs and `examples/make_fabric_gifs.py` overrides).
+`mesh_resolution` (see example cards and `examples/make_fabric_gifs.py` overrides).
 
 ## Manual convergence check
 

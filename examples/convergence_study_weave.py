@@ -35,6 +35,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from b3_tex.api import homogenize
 from b3_tex.problem import RVEProblem
 
 DOMAIN_SIZE = [1.0, 1.0, 0.16]
@@ -95,7 +96,7 @@ def weave_config(
             "power": 4.0,
         },
         "solver": {
-            "backend": "dolfinx_periodic",
+            "backend": "dolfinx-periodic",
             "stiffness_sampling": sampling,
             "quadrature_degree": qdeg,
             "cell_type": cell_type,
@@ -131,9 +132,9 @@ def mesh_yarn_fraction(mesh, field, sampling: str, qdeg: int = 2) -> float:
     """Yarn Vf as seen by `sampling` at this mesh — same point set the
     assembly queries (cell centroids vs quadrature points)."""
     if sampling == "centroid":
-        from b3_tex.backends.dolfinx_periodic_backend import _cell_centroids
+        from b3_tex.backends._dolfinx_common import cell_centroids
 
-        pts = _cell_centroids(mesh)
+        pts = cell_centroids(mesh)
     else:
         from b3_tex.quadrature import quadrature_point_coords
 
@@ -154,11 +155,9 @@ def run_one(
     qdeg: int = 2,
     cell_type: str = "tetrahedron",
 ) -> dict:
-    from b3_tex.backends.dolfinx_periodic_backend import solve
-
     problem = RVEProblem.from_config(weave_config(n_xy, n_z, sampling, qdeg, cell_type))
     t0 = time.perf_counter()
-    result = solve(problem)
+    result = homogenize(problem)
     elapsed = time.perf_counter() - t0
     mesh = _build_mesh(n_xy, n_z, cell_type)
     vf_fe = mesh_yarn_fraction(mesh, problem.field, sampling, qdeg)

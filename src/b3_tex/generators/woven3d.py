@@ -23,6 +23,9 @@ Two yarn families are common to both architectures:
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -87,6 +90,136 @@ def _cfg(config: dict[str, Any], defaults: dict[str, Any], key: str) -> Any:
     return defaults[key]
 
 
+def _vf(
+    config: Mapping[str, Any], long_key: str, short_key: str, default: float
+) -> float:
+    from b3_tex.config import canonical_vf
+
+    return canonical_vf(config, long_key, short_key, default)
+
+
+@dataclass(frozen=True)
+class OrthogonalGeometry:
+    """Tow counts and sizes for :func:`orthogonal_yarns`."""
+
+    n_warp: int = 6
+    n_weft: int = 4
+    warp_layers: int = 2
+    weft_layers: int = 3
+    n_binder: int = 2
+    warp_spacing: float = 0.0038
+    warp_width: float = 0.0036
+    warp_height: float = 0.00035
+    weft_spacing: float = 0.0028
+    weft_width: float = 0.00258
+    weft_height: float = 0.00025
+    binder_spacing: float = 0.0014
+    binder_width: float = 0.001375
+    binder_height: float = 0.00016
+    fabric_thickness: float = 0.0014
+    power: float = 2.0
+    nominal_vf: float = 0.55
+    max_vf: float = 0.90
+    domain_size: tuple[float, float, float] | None = None
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> OrthogonalGeometry:
+        d = ORTHOGONAL_DEFAULTS
+        raw_domain = config.get("domain_size")
+        return cls(
+            n_warp=int(_cfg(config, d, "n_warp")),
+            n_weft=int(_cfg(config, d, "n_weft")),
+            warp_layers=int(_cfg(config, d, "warp_layers")),
+            weft_layers=int(_cfg(config, d, "weft_layers")),
+            n_binder=int(_cfg(config, d, "n_binder")),
+            warp_spacing=float(_cfg(config, d, "warp_spacing")),
+            warp_width=float(_cfg(config, d, "warp_width")),
+            warp_height=float(_cfg(config, d, "warp_height")),
+            weft_spacing=float(_cfg(config, d, "weft_spacing")),
+            weft_width=float(_cfg(config, d, "weft_width")),
+            weft_height=float(_cfg(config, d, "weft_height")),
+            binder_spacing=float(_cfg(config, d, "binder_spacing")),
+            binder_width=float(_cfg(config, d, "binder_width")),
+            binder_height=float(_cfg(config, d, "binder_height")),
+            fabric_thickness=float(_cfg(config, d, "fabric_thickness")),
+            power=float(_cfg(config, d, "power")),
+            nominal_vf=_vf(
+                config,
+                "nominal_fibre_volume_fraction",
+                "nominal_vf",
+                float(d["nominal_fibre_volume_fraction"]),
+            ),
+            max_vf=_vf(
+                config,
+                "max_fibre_volume_fraction",
+                "max_vf",
+                float(d["max_fibre_volume_fraction"]),
+            ),
+            domain_size=(tuple(float(s) for s in raw_domain) if raw_domain else None),
+        )
+
+
+@dataclass(frozen=True)
+class LayerToLayerGeometry:
+    """Tow counts and sizes for :func:`layer_to_layer_yarns`."""
+
+    n_warp: int = 4
+    n_weft: int = 6
+    warp_layers: int = 2
+    weft_layers: int = 3
+    n_binder: int = 2
+    binder_layers: int = 2
+    warp_spacing: float = 0.00142
+    weft_spacing: float = 0.00166
+    warp_height: float = 0.0003
+    weft_height: float = 0.0003
+    warp_width: float = 0.0012
+    weft_width: float = 0.0012
+    binder_width: float = 0.0012
+    binder_height: float = 0.0003
+    power: float = 2.0
+    nominal_vf: float = 0.55
+    max_vf: float = 0.90
+    binder_sequence: list[list[int]] | None = None
+    domain_size: tuple[float, float, float] | None = None
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> LayerToLayerGeometry:
+        d = LAYER_TO_LAYER_DEFAULTS
+        raw_domain = config.get("domain_size")
+        return cls(
+            n_warp=int(_cfg(config, d, "n_warp")),
+            n_weft=int(_cfg(config, d, "n_weft")),
+            warp_layers=int(_cfg(config, d, "warp_layers")),
+            weft_layers=int(_cfg(config, d, "weft_layers")),
+            n_binder=int(_cfg(config, d, "n_binder")),
+            binder_layers=int(config.get("binder_layers", 2)),
+            warp_spacing=float(_cfg(config, d, "warp_spacing")),
+            weft_spacing=float(_cfg(config, d, "weft_spacing")),
+            warp_height=float(_cfg(config, d, "warp_height")),
+            weft_height=float(_cfg(config, d, "weft_height")),
+            warp_width=float(_cfg(config, d, "warp_width")),
+            weft_width=float(_cfg(config, d, "weft_width")),
+            binder_width=float(_cfg(config, d, "binder_width")),
+            binder_height=float(_cfg(config, d, "binder_height")),
+            power=float(_cfg(config, d, "power")),
+            nominal_vf=_vf(
+                config,
+                "nominal_fibre_volume_fraction",
+                "nominal_vf",
+                float(d["nominal_fibre_volume_fraction"]),
+            ),
+            max_vf=_vf(
+                config,
+                "max_fibre_volume_fraction",
+                "max_vf",
+                float(d["max_fibre_volume_fraction"]),
+            ),
+            binder_sequence=config.get("binder_sequence"),
+            domain_size=(tuple(float(s) for s in raw_domain) if raw_domain else None),
+        )
+
+
 def _layer_centres(
     n_layers: int, height: float, gap: float, z_mid: float
 ) -> NDArray[np.float64]:
@@ -128,26 +261,7 @@ def _straight_tow(
 
 
 def orthogonal_yarns(
-    *,
-    n_warp: int = 6,
-    n_weft: int = 4,
-    warp_layers: int = 2,
-    weft_layers: int = 3,
-    n_binder: int = 2,
-    warp_spacing: float = 0.0038,
-    warp_width: float = 0.0036,
-    warp_height: float = 0.00035,
-    weft_spacing: float = 0.0028,
-    weft_width: float = 0.00258,
-    weft_height: float = 0.00025,
-    binder_spacing: float = 0.0014,
-    binder_width: float = 0.001375,
-    binder_height: float = 0.00016,
-    fabric_thickness: float = 0.0014,
-    power: float = 2.0,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.90,
-    domain_size: tuple[float, float, float] | None = None,
+    geom: OrthogonalGeometry | None = None, **kwargs: Any
 ) -> tuple[ParametricYarn, ...]:
     """Yarns for a ``CTextileOrthogonal`` RVE.
 
@@ -157,7 +271,50 @@ def orthogonal_yarns(
 
     Returns a flat tuple ordered ``[warps..., wefts..., binders...]`` of length
     ``n_warp*warp_layers + n_weft*weft_layers + n_binder``.
+
+    Canonical call is ``orthogonal_yarns(geom)``. Keyword arguments build an
+    :class:`OrthogonalGeometry` and are deprecated; removed in 0.3.0.
     """
+    if isinstance(geom, OrthogonalGeometry):
+        if kwargs:
+            raise TypeError(
+                "orthogonal_yarns() takes an OrthogonalGeometry or keyword "
+                "arguments, not both"
+            )
+    elif geom is not None:
+        raise TypeError(
+            "orthogonal_yarns() expected an OrthogonalGeometry or keyword arguments"
+        )
+    else:
+        warnings.warn(
+            "orthogonal_yarns(**kwargs) is deprecated; pass an OrthogonalGeometry. "
+            "Removed in 0.3.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        geom = OrthogonalGeometry(**kwargs)
+    return _orthogonal_yarns(geom)
+
+
+def _orthogonal_yarns(geom: OrthogonalGeometry) -> tuple[ParametricYarn, ...]:
+    n_warp = geom.n_warp
+    n_weft = geom.n_weft
+    warp_layers = geom.warp_layers
+    weft_layers = geom.weft_layers
+    n_binder = geom.n_binder
+    warp_spacing = geom.warp_spacing
+    warp_width = geom.warp_width
+    warp_height = geom.warp_height
+    weft_spacing = geom.weft_spacing
+    weft_width = geom.weft_width
+    weft_height = geom.weft_height
+    binder_width = geom.binder_width
+    binder_height = geom.binder_height
+    fabric_thickness = geom.fabric_thickness
+    power = geom.power
+    nominal_vf = geom.nominal_vf
+    max_vf = geom.max_vf
+    domain_size = geom.domain_size
     Lx = n_warp * warp_spacing
     Ly = n_weft * weft_spacing
     if domain_size is not None:
@@ -247,39 +404,7 @@ def build_orthogonal(
         if name not in materials:
             raise ValueError(f"{key} {name!r} is not in materials")
 
-    d = ORTHOGONAL_DEFAULTS
-    domain_size = config.get("domain_size")
-    yarns = orthogonal_yarns(
-        n_warp=int(_cfg(config, d, "n_warp")),
-        n_weft=int(_cfg(config, d, "n_weft")),
-        warp_layers=int(_cfg(config, d, "warp_layers")),
-        weft_layers=int(_cfg(config, d, "weft_layers")),
-        n_binder=int(_cfg(config, d, "n_binder")),
-        warp_spacing=float(_cfg(config, d, "warp_spacing")),
-        warp_width=float(_cfg(config, d, "warp_width")),
-        warp_height=float(_cfg(config, d, "warp_height")),
-        weft_spacing=float(_cfg(config, d, "weft_spacing")),
-        weft_width=float(_cfg(config, d, "weft_width")),
-        weft_height=float(_cfg(config, d, "weft_height")),
-        binder_spacing=float(_cfg(config, d, "binder_spacing")),
-        binder_width=float(_cfg(config, d, "binder_width")),
-        binder_height=float(_cfg(config, d, "binder_height")),
-        fabric_thickness=float(_cfg(config, d, "fabric_thickness")),
-        power=float(config.get("power", d["power"])),
-        nominal_vf=float(
-            config.get(
-                "nominal_fibre_volume_fraction",
-                config.get("nominal_vf", d["nominal_fibre_volume_fraction"]),
-            )
-        ),
-        max_vf=float(
-            config.get(
-                "max_fibre_volume_fraction",
-                config.get("max_vf", d["max_fibre_volume_fraction"]),
-            )
-        ),
-        domain_size=(tuple(float(s) for s in domain_size) if domain_size else None),
-    )
+    yarns = orthogonal_yarns(OrthogonalGeometry.from_config(config))
     return ParametricWeaveField(
         matrix_material=str(config["matrix_material"]),
         yarn_material=str(config["yarn_material"]),
@@ -314,26 +439,7 @@ def _default_binder_sequence(
 
 
 def layer_to_layer_yarns(
-    *,
-    n_warp: int = 4,
-    n_weft: int = 6,
-    warp_layers: int = 2,
-    weft_layers: int = 3,
-    n_binder: int = 2,
-    binder_layers: int = 2,
-    warp_spacing: float = 0.00142,
-    weft_spacing: float = 0.00166,
-    warp_height: float = 0.0003,
-    weft_height: float = 0.0003,
-    warp_width: float = 0.0012,
-    weft_width: float = 0.0012,
-    binder_width: float = 0.0012,
-    binder_height: float = 0.0003,
-    power: float = 2.0,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.90,
-    binder_sequence: list[list[int]] | None = None,
-    domain_size: tuple[float, float, float] | None = None,
+    geom: LayerToLayerGeometry | None = None, **kwargs: Any
 ) -> tuple[ParametricYarn, ...]:
     """Yarns for a ``CTextileDecoupledLToL`` angle-interlock RVE.
 
@@ -343,7 +449,50 @@ def layer_to_layer_yarns(
 
     Returns ``[warps..., wefts..., binders...]`` of length
     ``n_warp*warp_layers + n_weft*weft_layers + n_binder``.
+
+    Canonical call is ``layer_to_layer_yarns(geom)``. Keyword arguments build a
+    :class:`LayerToLayerGeometry` and are deprecated; removed in 0.3.0.
     """
+    if isinstance(geom, LayerToLayerGeometry):
+        if kwargs:
+            raise TypeError(
+                "layer_to_layer_yarns() takes a LayerToLayerGeometry or keyword "
+                "arguments, not both"
+            )
+    elif geom is not None:
+        raise TypeError(
+            "layer_to_layer_yarns() expected a LayerToLayerGeometry or keyword arguments"
+        )
+    else:
+        warnings.warn(
+            "layer_to_layer_yarns(**kwargs) is deprecated; pass a "
+            "LayerToLayerGeometry. Removed in 0.3.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        geom = LayerToLayerGeometry(**kwargs)
+    return _layer_to_layer_yarns(geom)
+
+
+def _layer_to_layer_yarns(geom: LayerToLayerGeometry) -> tuple[ParametricYarn, ...]:
+    n_warp = geom.n_warp
+    n_weft = geom.n_weft
+    warp_layers = geom.warp_layers
+    weft_layers = geom.weft_layers
+    n_binder = geom.n_binder
+    warp_spacing = geom.warp_spacing
+    weft_spacing = geom.weft_spacing
+    warp_height = geom.warp_height
+    weft_height = geom.weft_height
+    warp_width = geom.warp_width
+    weft_width = geom.weft_width
+    binder_width = geom.binder_width
+    binder_height = geom.binder_height
+    power = geom.power
+    nominal_vf = geom.nominal_vf
+    max_vf = geom.max_vf
+    binder_sequence = geom.binder_sequence
+    domain_size = geom.domain_size
     Lx = n_warp * warp_spacing
     Ly = n_weft * weft_spacing
     if domain_size is not None:
@@ -431,39 +580,7 @@ def build_layer_to_layer(
         if name not in materials:
             raise ValueError(f"{key} {name!r} is not in materials")
 
-    d = LAYER_TO_LAYER_DEFAULTS
-    domain_size = config.get("domain_size")
-    yarns = layer_to_layer_yarns(
-        n_warp=int(_cfg(config, d, "n_warp")),
-        n_weft=int(_cfg(config, d, "n_weft")),
-        warp_layers=int(_cfg(config, d, "warp_layers")),
-        weft_layers=int(_cfg(config, d, "weft_layers")),
-        n_binder=int(_cfg(config, d, "n_binder")),
-        binder_layers=int(config.get("binder_layers", 2)),
-        warp_spacing=float(_cfg(config, d, "warp_spacing")),
-        weft_spacing=float(_cfg(config, d, "weft_spacing")),
-        warp_height=float(_cfg(config, d, "warp_height")),
-        weft_height=float(_cfg(config, d, "weft_height")),
-        warp_width=float(_cfg(config, d, "warp_width")),
-        weft_width=float(_cfg(config, d, "weft_width")),
-        binder_width=float(_cfg(config, d, "binder_width")),
-        binder_height=float(_cfg(config, d, "binder_height")),
-        power=float(config.get("power", d["power"])),
-        nominal_vf=float(
-            config.get(
-                "nominal_fibre_volume_fraction",
-                config.get("nominal_vf", d["nominal_fibre_volume_fraction"]),
-            )
-        ),
-        max_vf=float(
-            config.get(
-                "max_fibre_volume_fraction",
-                config.get("max_vf", d["max_fibre_volume_fraction"]),
-            )
-        ),
-        binder_sequence=config.get("binder_sequence"),
-        domain_size=(tuple(float(s) for s in domain_size) if domain_size else None),
-    )
+    yarns = layer_to_layer_yarns(LayerToLayerGeometry.from_config(config))
     return ParametricWeaveField(
         matrix_material=str(config["matrix_material"]),
         yarn_material=str(config["yarn_material"]),

@@ -25,6 +25,7 @@ expose a tensorized ``stiffness_batch`` used by
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Protocol, runtime_checkable
 
@@ -209,7 +210,19 @@ class SurrogateModel:
 MICROMODELS: dict[str, MicroModel] = {}
 
 
-def register_micromodel(model: MicroModel) -> None:
+def register_micromodel(model: MicroModel, *, replace: bool = False) -> None:
+    """Register ``model`` by name.
+
+    Overwriting an existing name still succeeds in 0.2.0 and warns, unless
+    ``replace=True``. 0.3.0 will raise on overwrite unless ``replace=True``.
+    """
+    if model.name in MICROMODELS and not replace:
+        warnings.warn(
+            f"micromodel {model.name!r} is already registered; overwriting. "
+            "In 0.3.0 this raises unless replace=True.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     MICROMODELS[model.name] = model
 
 

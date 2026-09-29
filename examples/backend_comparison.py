@@ -19,6 +19,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from b3_tex.api import homogenize
 from b3_tex.problem import RVEProblem
 from b3_tex.result import HomogenizationResult
 
@@ -67,21 +68,31 @@ def _config(backend: str, cell_type: str = "tetrahedron") -> dict:
     }
 
 
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
+
+
 def _solve(backend: str) -> tuple[HomogenizationResult, float]:
-    cfg = _config(backend)
+    canonical = _canonical_backend(backend)
+    cfg = _config(canonical)
     problem = RVEProblem.from_config(cfg)
-    if backend == "dolfinx_kubc":
-        from b3_tex.backends.dolfinx_backend import solve
-    elif backend == "dolfinx_periodic":
-        from b3_tex.backends.dolfinx_periodic_backend import solve
-    elif backend == "mfem_kubc":
-        from b3_tex.backends.mfem_backend import solve
-    elif backend == "mfem_periodic":
-        from b3_tex.backends.mfem_backend import solve_periodic as solve
-    else:
-        raise ValueError(backend)
     t0 = time.perf_counter()
-    result = solve(problem)
+    result = homogenize(problem, backend=canonical)
     elapsed = time.perf_counter() - t0
     return result, elapsed
 

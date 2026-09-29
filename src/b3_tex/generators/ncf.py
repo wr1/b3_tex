@@ -8,8 +8,9 @@ to SI metres by dividing by 1000).
 
 Public API
 ----------
-``ncf_yarns(*, domain_size, plies, stitch=None, ...) -> tuple[ParametricYarn, ...]``
-    Pure geometry: build the inlay tows for every ply plus the stitch thread(s).
+``ncf_yarns(geom: NcfGeometry) -> tuple[ParametricYarn, ...]``
+    Pure geometry. Keyword arguments build an ``NcfGeometry`` and are deprecated
+    until 0.3.0.
 ``build_ncf(config, materials) -> ParametricWeaveField``
     Registry entry point (``field.type: ncf``): parse the field block, validate
     the referenced materials, and wrap the yarns in a weave field. All yarns
@@ -32,7 +33,10 @@ Geometry conventions
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import warnings
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -42,7 +46,7 @@ from b3_tex.geometry.centerlines import SplineCenterline, StraightCenterline
 from b3_tex.geometry.cross_sections import PowerEllipseSection, SuperellipseSection
 from b3_tex.geometry.yarn import ParametricYarn
 
-__all__ = ["build_ncf", "ncf_yarns"]
+__all__ = ["NcfGeometry", "build_ncf", "ncf_yarns"]
 
 
 def _ply_directions(
@@ -192,37 +196,76 @@ def _stitch_yarns(
     return yarns
 
 
+@dataclass(frozen=True)
+class NcfGeometry:
+    """Inlay plies plus an optional stitch for :func:`ncf_yarns`."""
+
+    domain_size: tuple[float, float, float]
+    plies: tuple[Mapping[str, Any], ...]
+    stitch: Mapping[str, Any] | None = None
+    power: float = 0.5
+    nominal_vf: float = 0.55
+    max_vf: float = 0.9
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> NcfGeometry:
+        """Parse a ``field: {type: ncf}`` block. Short Vf keys warn."""
+        from b3_tex.config import canonical_vf
+
+        return cls(
+            domain_size=tuple(float(s) for s in config["domain_size"]),
+            plies=tuple(config["plies"]),
+            stitch=config.get("stitch"),
+            power=float(config.get("power", 0.5)),
+            nominal_vf=canonical_vf(
+                config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55
+            ),
+            max_vf=canonical_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
+        )
+
+    @classmethod
+    def from_kwargs(cls, kwargs: Mapping[str, Any]) -> NcfGeometry:
+        missing = [name for name in ("domain_size", "plies") if name not in kwargs]
+        if missing:
+            listed = ", ".join(missing)
+            raise TypeError(f"ncf_yarns() missing required argument(s): {listed}")
+        data = dict(kwargs)
+        data["domain_size"] = tuple(float(v) for v in data["domain_size"])
+        data["plies"] = tuple(data["plies"])
+        return cls(**data)
+
+
 def ncf_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    plies: list[dict[str, Any]],
-    stitch: Optional[dict[str, Any]] = None,
-    power: float = 0.5,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.9,
+    geom: NcfGeometry | None = None, **kwargs: Any
 ) -> tuple[ParametricYarn, ...]:
     """Multi-axial NCF as a tuple of :class:`ParametricYarn`.
 
-    Parameters
-    ----------
-    domain_size : (Lx, Ly, Lz)
-        RVE size in SI metres.
-    plies : list of dict
-        One entry per inlay ply, each with keys ``angle_deg``, ``z_center``,
-        ``width``, ``height``, ``spacing`` (all SI metres / degrees). A per-ply
-        ``power`` overrides the global ``power`` default.
-    stitch : dict, optional
-        Through-thickness stitch spec (see :func:`_stitch_yarns`). Omit for an
-        un-stitched inlay stack.
-    power : float
-        Default power-ellipse exponent for the inlay sections (TexGen NCF ~0.5).
-    nominal_vf, max_vf : float
-        Fibre volume-fraction bounds passed to every yarn.
+    Canonical call is ``ncf_yarns(geom)``. Keyword arguments build an
+    :class:`NcfGeometry` and are deprecated; removed in 0.3.0.
 
-    The inlay plies are emitted first, the stitch thread(s) last, so the field's
-    smallest-ellipse-value overlap resolution favours the (dominant) inlay phase
-    only where it is geometrically closer.
+    Inlay plies are emitted first, the stitch thread(s) last, so overlap
+    resolution favours the inlay where it is geometrically closer.
     """
+    if isinstance(geom, NcfGeometry):
+        if kwargs:
+            raise TypeError(
+                "ncf_yarns() takes an NcfGeometry or keyword arguments, not both"
+            )
+    elif geom is not None:
+        raise TypeError("ncf_yarns() expected an NcfGeometry or keyword arguments")
+    else:
+        warnings.warn(
+            "ncf_yarns(**kwargs) is deprecated; pass an NcfGeometry. Removed in 0.3.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        geom = NcfGeometry.from_kwargs(kwargs)
+    domain_size = geom.domain_size
+    plies = geom.plies
+    stitch = geom.stitch
+    power = geom.power
+    nominal_vf = geom.nominal_vf
+    max_vf = geom.max_vf
     if not plies:
         raise ValueError("ncf_yarns requires at least one ply")
     yarns: list[ParametricYarn] = []
@@ -265,8 +308,8 @@ def build_ncf(
           yarn_material: yarn
           domain_size: [Lx, Ly, Lz]
           power: 0.5                       # optional global inlay section exponent
-          nominal_fibre_volume_fraction: 0.55   # optional (alias: nominal_vf)
-          max_fibre_volume_fraction: 0.9        # optional (alias: max_vf)
+          nominal_fibre_volume_fraction: 0.55   # optional
+          max_fibre_volume_fraction: 0.9        # optional
           plies:
             - {angle_deg: 0,  z_center: 0.0002, width: 0.00095,
                height: 0.0002, spacing: 0.001}
@@ -282,18 +325,7 @@ def build_ncf(
         if name not in materials:
             raise ValueError(f"{key} {name!r} is not in materials")
 
-    nominal_vf = float(
-        config.get("nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55))
-    )
-    max_vf = float(config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9)))
-    yarns = ncf_yarns(
-        domain_size=tuple(float(s) for s in config["domain_size"]),
-        plies=list(config["plies"]),
-        stitch=config.get("stitch"),
-        power=float(config.get("power", 0.5)),
-        nominal_vf=nominal_vf,
-        max_vf=max_vf,
-    )
+    yarns = ncf_yarns(NcfGeometry.from_config(config))
     return ParametricWeaveField(
         matrix_material=matrix_name,
         yarn_material=yarn_name,

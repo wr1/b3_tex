@@ -348,3 +348,27 @@ def test_synthetic_dataset_shapes():
     vf, c = synthetic_chamis_dataset(matrix=matrix, fibre=fibre, vf_grid=vf_grid)
     assert vf.shape == (11,)
     assert c.shape == (11, 6, 6)
+
+
+def test_register_micromodel_overwrite_warns():
+    model = ChamisModel()
+    with pytest.warns(DeprecationWarning, match="already registered"):
+        register_micromodel(model)
+    register_micromodel(model, replace=True)
+
+
+def test_lut_cache_caps_at_eight_entries():
+    matrix, fibre = _constituents()
+    yarn = MicromechanicalMaterial.from_constituents(
+        "yarn_lut_cap",
+        matrix=matrix,
+        fibre=fibre,
+        micromodel=ChamisModel(),
+        nominal_vf=0.5,
+        max_vf=0.9,
+    )
+    for i in range(10):
+        yarn.build_lut(vf_lo=0.4 + 0.01 * i, vf_hi=0.8, n_bins=4)
+    assert len(yarn._lut_cache) == 8
+    newest = yarn.build_lut(vf_lo=0.4 + 0.09, vf_hi=0.8, n_bins=4)
+    assert newest[0].shape == (4,)

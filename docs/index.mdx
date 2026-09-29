@@ -17,6 +17,7 @@ optionally refined with **AMR** at tow/matrix interfaces. Backends: **MFEM**
 |-------|------|
 | [Getting started](/docs/guides/getting-started) | Install, `b3-tex validate` / `solve` |
 | [Twill 2×2 stiffness (agent path)](/docs/guides/agent-twill-stiffness) | Full FEA card from fibre / resin / Vf |
+| [Weave as crossply](/docs/guides/compare-simple-crossply) | Analytic CLT [0/90] vs mesomech FE weave |
 | [Material datasheet](/docs/guides/datasheet) | One-page Typst PDF + provenance |
 | [Convergence & cost](/docs/guides/convergence) | Smoke vs standard mesh / AMR |
 
@@ -25,19 +26,15 @@ optionally refined with **AMR** at tow/matrix interfaces. Backends: **MFEM**
 | Page | What |
 |------|------|
 | [Architecture](/docs/reference/architecture) | Package layout and data flow |
+| [Textile-as-code](/docs/reference/textile-as-code) | Preferred Python builders + `.py` cards |
 | [CLI](/docs/reference/cli) | `validate`, `reference`, `solve`, `datasheet` |
 | [Micromechanics](/docs/reference/micromechanics) | Chamis, Mori–Tanaka, surrogates |
-| [YAML schema](/docs/reference/yaml-schema) | Field types, materials, solver |
+| [YAML schema](/docs/reference/yaml-schema) | Optional card format (field types, materials, solver) |
 
 ### Agent skill
 
 Repo-root `SKILL.md` is the compact agent playbook (vocabulary, architecture table,
 pitfalls). Prefer the guides above for the full narrative; keep `SKILL.md` short.
-
-### Dev KB
-
-With `kb/` present, open **[Dev KB](/dev)** for privileged notes: agent-path gap
-analysis, architecture diagrams, and runbooks. Public docs stay under `docs/`.
 
 ## What you get
 
@@ -45,7 +42,7 @@ analysis, architecture diagrams, and runbooks. Public docs stay under `docs/`.
 flowchart TB
   subgraph inputs [Inputs]
     direction LR
-    yaml[YAML RVE] ~~~ fibre[Fibre / matrix / Vf]
+    card["RVE card (.py or YAML)"] ~~~ fibre[Fibre / matrix / Vf]
   end
   subgraph solve [b3-tex solve]
     direction LR

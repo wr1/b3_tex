@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from b3_tex.materials import Material, MicromechanicalMaterial
 from b3_tex.micromodels import ChamisModel
@@ -55,7 +56,8 @@ def _compacted_problem(compaction: float) -> RVEProblem:
             "max_fibre_volume_fraction": 0.85,
         },
     }
-    return RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="parametric_plain_weave"):
+        return RVEProblem.from_config(cfg)
 
 
 def test_compressed_crossover_is_stiffer_than_float():
@@ -180,7 +182,8 @@ def test_fixed_material_path_unchanged():
             "amplitude": 0.04,
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="plain_weave"):
+        problem = RVEProblem.from_config(cfg)
     c = global_stiffness_at_points(problem, np.array([[0.0, 0.25, 0.08]]))[0]
     # Equals the fixed yarn stiffness rotated to the (flat) local frame.
     assert np.linalg.norm(c) > 0

@@ -23,48 +23,25 @@ if TYPE_CHECKING:
 LUT_BINS: int = 256
 
 
+def _dolfinx_common():
+    """String import so this module has no static edge to dolfinx/ufl/basix."""
+    import importlib
+
+    return importlib.import_module("b3_tex.backends._dolfinx_common")
+
+
 def make_quadrature_stiffness_function(mesh: Any, degree: int) -> tuple[Any, Any]:
     """Build a (6, 6) Quadrature ``Function`` and a matching ``dx`` measure.
 
-    Returns ``(C_func, dx_q)``. ``dx_q`` must be used by every form that
-    references ``C_func`` so the form's quadrature rule matches the element.
+    The DOLFINx objects live in ``backends._dolfinx_common``. This wrapper
+    remains so existing imports keep working. Removed from this module in 0.3.0.
     """
-    import basix.ufl
-    import dolfinx
-    import ufl
-
-    cell = mesh.basix_cell()
-    quad_elem = basix.ufl.quadrature_element(
-        cell, value_shape=(6, 6), scheme="default", degree=degree
-    )
-    V_C = dolfinx.fem.functionspace(mesh, quad_elem)
-    C_func = dolfinx.fem.Function(V_C)
-    dx_q = ufl.dx(domain=mesh, metadata={"quadrature_degree": degree})
-    return C_func, dx_q
+    return _dolfinx_common().make_quadrature_stiffness_function(mesh, degree)
 
 
 def quadrature_point_coords(mesh: Any, degree: int) -> NDArray[np.float64]:
-    """Physical (Ngp_local, 3) coordinates of every quadrature point of a
-    ``Quadrature`` element of the given ``degree`` on ``mesh``.
-
-    ``degree`` is passed explicitly so the helper does not have to introspect
-    a function-space element across UFL/DOLFINx versions.
-    """
-    import basix.ufl
-    import dolfinx
-    import ufl
-
-    cell = mesh.basix_cell()
-    coord_elem = basix.ufl.quadrature_element(
-        cell, value_shape=(3,), scheme="default", degree=degree
-    )
-    V_x = dolfinx.fem.functionspace(mesh, coord_elem)
-    x_func = dolfinx.fem.Function(V_x)
-    expr = dolfinx.fem.Expression(
-        ufl.SpatialCoordinate(mesh), V_x.element.interpolation_points
-    )
-    x_func.interpolate(expr)
-    return x_func.x.array.reshape(-1, 3)
+    """Physical quadrature-point coordinates. Implemented in ``_dolfinx_common``."""
+    return _dolfinx_common().quadrature_point_coords(mesh, degree)
 
 
 def _stiffness_from_lut(material: Any, vf: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -95,20 +72,26 @@ def global_stiffness_at_points(
     spatially-varying Vf and pluggable micromechanics enter the assembly."""
     from b3_tex.materials import MicromechanicalMaterial
 
+    from b3_tex.fields import LocalVfField
+
     names = problem.field.material_names()
-    ids, rotations = problem.field.sample_arrays(points)
+    local_vf: NDArray[np.float64] | None = None
+    field = problem.field
+    if isinstance(field, LocalVfField) and hasattr(field, "sample_with_vf"):
+        ids, rotations, local_vf = field.sample_with_vf(points)
+        local_vf = np.asarray(local_vf, dtype=float)
+    else:
+        ids, rotations = field.sample_arrays(points)
+        if isinstance(field, LocalVfField):
+            local_vf = np.asarray(field.sample_local_vf(points), dtype=float)
     n = points.shape[0]
     out = np.zeros((n, 6, 6), dtype=float)
-    vf_sampler = getattr(problem.field, "sample_local_vf", None)
-    local_vf: NDArray[np.float64] | None = None
     for k, name in enumerate(names):
         mask = ids == k
         if not mask.any():
             continue
         material = problem.materials[name]
-        if isinstance(material, MicromechanicalMaterial) and vf_sampler is not None:
-            if local_vf is None:
-                local_vf = np.asarray(vf_sampler(points), dtype=float)
+        if isinstance(material, MicromechanicalMaterial) and local_vf is not None:
             vf_masked = local_vf[mask]
             vf_masked = np.where(np.isfinite(vf_masked), vf_masked, material.nominal_vf)
             c_pts = _stiffness_from_lut(material, vf_masked)
@@ -124,7 +107,7 @@ def populate_stiffness_at_quadrature_points(
     """Fill ``C_func`` (a (6, 6) Quadrature Function) from ``problem.field``
     sampled at every quadrature point of a ``degree`` rule on ``mesh``.
     """
-    pts = quadrature_point_coords(mesh, degree)
+    pts = _dolfinx_common().quadrature_point_coords(mesh, degree)
     cell_C = global_stiffness_at_points(problem, pts)
     C_func.x.array[:] = cell_C.reshape(-1)
     C_func.x.scatter_forward()
@@ -135,28 +118,14 @@ def populate_stiffness_at_quadrature_points(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_material_sampling_spec(solver: dict[str, Any]) -> dict[str, Any]:
-    """Parse solver config into a clean sampling spec.
+def _sampling_config(spec: Any) -> Any:
+    from b3_tex.config import SamplingConfig
 
-    Supports the new structured form and the legacy ``stiffness_sampling`` key
-    so that existing YAMLs and the convergence study continue to work.
-    """
-    if "material_sampling" in solver:
-        ms = solver["material_sampling"]
-        strategy = str(ms.get("strategy", "local_cloud"))
-        resolution = int(ms.get("resolution", 3))
-        idw_power = float(ms.get("idw_power", 2.0))
-        return {"strategy": strategy, "resolution": resolution, "idw_power": idw_power}
-
-    # Legacy compatibility
-    legacy = str(solver.get("stiffness_sampling", "quadrature")).lower()
-    if legacy in ("quadrature", "exact"):
-        return {"strategy": "exact", "resolution": 1}
-    if legacy in ("centroid", "cell_constant"):
-        return {"strategy": "cell_constant", "resolution": 1}
-
-    # Sensible default going forward
-    return {"strategy": "local_cloud", "resolution": 3, "idw_power": 2.0}
+    if spec is None:
+        return None
+    if isinstance(spec, SamplingConfig):
+        return spec
+    return SamplingConfig.from_mapping(spec)
 
 
 def _unit_material_grid(
@@ -206,6 +175,29 @@ def _idw_per_cell(
     return out.reshape(n_gps, 6, 6)
 
 
+def material_stiffness_at_gps(
+    problem: "RVEProblem",
+    gp_coords: NDArray[np.float64],
+    cell_vertices: NDArray[np.float64],
+    spec: dict[str, Any] | None = None,
+    gp_cell_ids: NDArray[np.intp] | None = None,
+) -> NDArray[np.float64]:
+    """(N_gps, 6, 6) stiffness. Infers cell ids when each cell owns the same number of points."""
+    n_gps = int(gp_coords.shape[0])
+    n_cells = int(cell_vertices.shape[0])
+    if gp_cell_ids is None:
+        if n_cells == 0 or n_gps % n_cells != 0:
+            raise ValueError(
+                "gp_cell_ids is required when the Gauss-point count is not "
+                f"a multiple of the cell count (n_gps={n_gps}, n_cells={n_cells})"
+            )
+        nq = n_gps // n_cells
+        gp_cell_ids = np.repeat(np.arange(n_cells), nq)
+    return effective_stiffnesses_for_gauss_points(
+        problem, gp_coords, gp_cell_ids, cell_vertices, spec=spec
+    )
+
+
 def effective_stiffnesses_for_gauss_points(
     problem: "RVEProblem",
     gp_coords: NDArray[np.float64],
@@ -216,12 +208,12 @@ def effective_stiffnesses_for_gauss_points(
     """(N_gps, 6, 6) effective stiffness per GP. Strategy is one of:
     ``exact`` (sample at GPs), ``cell_constant`` (sample at centroids),
     ``local_cloud`` (resolution**3 samples per cell, IDW-weighted at each GP)."""
-    if spec is None:
-        spec = {"strategy": "local_cloud", "resolution": 3}
-
-    strategy = str(spec.get("strategy", "local_cloud"))
-    resolution = int(spec.get("resolution", 3))
-    idw_power = float(spec.get("idw_power", 2.0))
+    resolved = _sampling_config(spec)
+    if resolved is None:
+        resolved = problem.solver.material_sampling
+    strategy = resolved.strategy
+    resolution = int(resolved.resolution)
+    idw_power = float(resolved.idw_power)
 
     n_cells = cell_vertices.shape[0]
 

@@ -317,6 +317,22 @@ def transverse_isotropic_stiffness_batch(
     return np.linalg.inv(compliance)
 
 
+def engineering_constants(stiffness: ArrayLike) -> dict[str, float]:
+    """Orthotropic engineering constants from a 6x6 stiffness. Keys are lowercase."""
+    compliance = np.linalg.inv(np.asarray(stiffness, dtype=float))
+    return {
+        "e_x": float(1.0 / compliance[0, 0]),
+        "e_y": float(1.0 / compliance[1, 1]),
+        "e_z": float(1.0 / compliance[2, 2]),
+        "g_yz": float(1.0 / compliance[3, 3]),
+        "g_xz": float(1.0 / compliance[4, 4]),
+        "g_xy": float(1.0 / compliance[5, 5]),
+        "nu_xy": float(-compliance[0, 1] / compliance[0, 0]),
+        "nu_xz": float(-compliance[0, 2] / compliance[0, 0]),
+        "nu_yz": float(-compliance[1, 2] / compliance[1, 1]),
+    }
+
+
 def voigt_strain_to_tensor(strain_voigt: ArrayLike) -> NDArray[np.float64]:
     v = np.asarray(strain_voigt, dtype=float)
     if v.shape != (6,):
