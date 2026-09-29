@@ -24,6 +24,7 @@ __all__ = [
     "classify_family",
     "explore",
     "overview",
+    "render_weave_registers",
     "sample_plane",
     "sample_volume",
     "weave_explainer",
@@ -38,6 +39,7 @@ _LAZY = {
     "overview": ("b3_tex.viz.presets", "overview"),
     "explore": ("b3_tex.viz.presets", "explore"),
     "weave_explainer": ("b3_tex.viz.explainer", "weave_explainer"),
+    "render_weave_registers": ("b3_tex.viz.registers", "render_weave_registers"),
 }
 
 
