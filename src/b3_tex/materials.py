@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+
+if TYPE_CHECKING:
+    from b3_tex.micromodels import MicroModel
 
 from b3_tex.tensors import (
     isotropic_stiffness,
@@ -227,14 +231,14 @@ class MicromechanicalMaterial(Material):
     point through the pluggable ``micromodel``.
     """
 
-    matrix: "Material" = None  # type: ignore[assignment]
-    fibre: "Material" = None  # type: ignore[assignment]
-    micromodel: object = None
+    matrix: "Material" = field(default=None, kw_only=True)  # type: ignore[assignment]
+    fibre: "Material" = field(default=None, kw_only=True)  # type: ignore[assignment]
+    micromodel: "MicroModel | None" = field(default=None, kw_only=True)
     nominal_vf: float = 0.55
     max_vf: float = 0.9
-    _lut_cache: dict[
+    _lut_cache: OrderedDict[
         tuple[int, float, float], tuple[NDArray[np.float64], NDArray[np.float64]]
-    ] = field(default_factory=dict, compare=False, repr=False)
+    ] = field(default_factory=OrderedDict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         Material.__post_init__(self)
@@ -253,7 +257,7 @@ class MicromechanicalMaterial(Material):
         *,
         matrix: "Material",
         fibre: "Material",
-        micromodel: object,
+        micromodel: "MicroModel",
         nominal_vf: float,
         max_vf: float = 0.9,
     ) -> "MicromechanicalMaterial":
@@ -291,8 +295,10 @@ class MicromechanicalMaterial(Material):
         hi = float(self.max_vf if vf_hi is None else vf_hi)
         lo, hi = float(min(lo, hi)), float(max(lo, hi))
         cache_key = (n_bins, lo, hi)
-        if cache_key in self._lut_cache:
-            return self._lut_cache[cache_key]
+        cached = self._lut_cache.get(cache_key)
+        if cached is not None:
+            self._lut_cache.move_to_end(cache_key)
+            return cached
         if hi - lo < 1e-9:
             hi = lo + 1e-9
         centers = (np.arange(n_bins) + 0.5) / n_bins * (hi - lo) + lo
@@ -301,4 +307,7 @@ class MicromechanicalMaterial(Material):
         )
         result = (centers, table)
         self._lut_cache[cache_key] = result
+        self._lut_cache.move_to_end(cache_key)
+        while len(self._lut_cache) > 8:
+            self._lut_cache.popitem(last=False)
         return result

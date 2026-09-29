@@ -3,6 +3,7 @@
   "pages": [
     "getting-started",
     "agent-twill-stiffness",
+    "compare-simple-crossply",
     "datasheet",
     "convergence"
   ]

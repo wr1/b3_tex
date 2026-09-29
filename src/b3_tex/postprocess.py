@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
-from b3_tex.tensors import voigt_strain_to_tensor
+from b3_tex.tensors import engineering_constants, voigt_strain_to_tensor
 
 if TYPE_CHECKING:
     import pyvista as pv
+
+    from b3_tex.problem import RVEProblem
 
 STRESS_LOADCASES: tuple[tuple[str, int, str], ...] = (
     ("tens_x", 0, "uniaxial tension in x"),
@@ -58,7 +61,7 @@ class LoadcaseSolverSession(Protocol):
     def nq(self) -> int: ...
 
     @property
-    def problem(self) -> "object": ...  # the RVEProblem the session was built from
+    def problem(self) -> RVEProblem: ...
 
     def solve_macro_strain(
         self, E_voigt: NDArray[np.float64]
@@ -70,14 +73,26 @@ class LoadcaseSolverSession(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def compute_C_eff(session: LoadcaseSolverSession) -> NDArray[np.float64]:
-    """Strain-basis homogenization: 6 unit-strain solves stacked as columns of C_eff,
-    symmetrised."""
+def compute_C_eff_with_columns(
+    session: LoadcaseSolverSession,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Unit-strain columns, then the symmetrised stiffness.
+
+    ``loadcase_stresses`` is the raw column matrix. ``C_eff`` is
+    ``0.5 * (cols + cols.T)``.
+    """
     eye6 = np.eye(6)
     cols = np.zeros((6, 6))
-    for k in range(6):
+    n_voigt = eye6.shape[0]
+    for k in range(n_voigt):
         cols[:, k] = session.solve_macro_strain(eye6[k]).macro_stress
-    return 0.5 * (cols + cols.T)
+    return 0.5 * (cols + cols.T), cols
+
+
+def compute_C_eff(session: LoadcaseSolverSession) -> NDArray[np.float64]:
+    """Strain-basis homogenization: symmetrised effective stiffness."""
+    stiffness, _stresses = compute_C_eff_with_columns(session)
+    return stiffness
 
 
 def attach_homogenization_fields(
@@ -157,7 +172,7 @@ def attach_homogenization_fields(
             )
 
     # Cross-check: derive engineering constants two ways and compare.
-    eng_alg = engineering_constants_from_S(S_eff)
+    eng_alg = engineering_constants(C_eff)
     eng_load = engineering_constants_from_loadcases(macro_strains, macro_stresses)
     rel_diff = {
         k: abs(eng_alg[k] - eng_load[k]) / max(abs(eng_alg[k]), 1e-30)
@@ -348,12 +363,21 @@ def _print_sampling_uniformity(report: dict) -> None:
 
 # Standard 9 engineering constants for orthotropic media. Each is exposed
 # by both extraction paths so the cross-check is well-defined.
-_ENG_KEYS = ("E_x", "E_y", "E_z", "G_yz", "G_xz", "G_xy", "nu_xy", "nu_xz", "nu_yz")
+_ENG_KEYS = ("e_x", "e_y", "e_z", "g_yz", "g_xz", "g_xy", "nu_xy", "nu_xz", "nu_yz")
 
 
 def engineering_constants_from_S(S: NDArray[np.float64]) -> dict[str, float]:
     """Algebraic engineering constants from the compliance S = inv(C_eff).
-    Same formulas as ``b3_tex.result.HomogenizationResult.engineering_constants``."""
+
+    Uppercase keys are a 0.2.0 shim. Prefer
+    ``b3_tex.tensors.engineering_constants`` (lowercase). Removed in 0.3.0.
+    """
+    warnings.warn(
+        "engineering_constants_from_S returns uppercase keys and is deprecated; "
+        "use b3_tex.tensors.engineering_constants(C). Removed in 0.3.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return {
         "E_x": 1.0 / S[0, 0],
         "E_y": 1.0 / S[1, 1],
@@ -376,28 +400,28 @@ def engineering_constants_from_loadcases(
     if "tens_x" in macro_strains:
         e = macro_strains["tens_x"]
         s = macro_stresses["tens_x"]
-        out["E_x"] = float(s[0] / e[0])
+        out["e_x"] = float(s[0] / e[0])
         out["nu_xy"] = float(-e[1] / e[0])
         out["nu_xz"] = float(-e[2] / e[0])
     if "tens_y" in macro_strains:
         e = macro_strains["tens_y"]
         s = macro_stresses["tens_y"]
-        out["E_y"] = float(s[1] / e[1])
+        out["e_y"] = float(s[1] / e[1])
         out["nu_yz"] = float(-e[2] / e[1])
     if "tens_z" in macro_strains:
         e = macro_strains["tens_z"]
         s = macro_stresses["tens_z"]
-        out["E_z"] = float(s[2] / e[2])
+        out["e_z"] = float(s[2] / e[2])
     if "shear_yz" in macro_strains:
-        out["G_yz"] = float(
+        out["g_yz"] = float(
             macro_stresses["shear_yz"][3] / macro_strains["shear_yz"][3]
         )
     if "shear_xz" in macro_strains:
-        out["G_xz"] = float(
+        out["g_xz"] = float(
             macro_stresses["shear_xz"][4] / macro_strains["shear_xz"][4]
         )
     if "shear_xy" in macro_strains:
-        out["G_xy"] = float(
+        out["g_xy"] = float(
             macro_stresses["shear_xy"][5] / macro_strains["shear_xy"][5]
         )
     return out
@@ -421,7 +445,7 @@ def _print_eng_constants_crosscheck(
         if k not in eng_load:
             continue
         a, b = eng_alg[k], eng_load[k]
-        unit_scale = 1e9 if k.startswith(("E_", "G_")) else 1.0
+        unit_scale = 1e9 if k.split("_", 1)[0].lower() in {"e", "g"} else 1.0
         unit = " GPa" if unit_scale != 1.0 else "    "
         print(
             f"        {k:>6}  {a / unit_scale:>10.4f}{unit}  "

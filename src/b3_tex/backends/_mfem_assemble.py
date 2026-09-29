@@ -10,11 +10,14 @@ DOF layout is MFEM ``byNODES``: column for component ``d`` at node ``n`` is
 stored as ``(n_elem, 3, nd)`` matching that layout when flattened as
 ``elem_vdofs[e].ravel()`` → ``[ux_0..ux_{nd-1}, uy_..., uz_...]``.
 
-Numba is used when importable; otherwise a pure-NumPy per-element loop runs
-(still faster than ``PyBilinearFormIntegrator`` SWIG callbacks).
+``solver.assembly`` selects the kernel: ``auto`` (numba if importable, else
+the Python integrator), ``numba``, ``numpy``, or ``python``. ``numba``
+without the package raises.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -32,24 +35,28 @@ def numba_available() -> bool:
     return _HAS_NUMBA
 
 
-def resolve_assembly_mode(solver_cfg: dict | None) -> str:
+def resolve_assembly_mode(solver_cfg: Any | None) -> str:
     """Return ``'numba'`` | ``'numpy'`` | ``'python'``.
 
-    Default prefers Numba when installed, else the legacy
-    ``PyBilinearFormIntegrator`` path (``python``). Offline pure-NumPy
-    assembly is available explicitly as ``numpy`` but is slower than the
-    integrator on small meshes (CPython element loops).
+    ``auto`` (the default) uses Numba when installed, otherwise the Python
+    integrator. ``numba`` without Numba raises ``RuntimeError``.
     """
-    raw = None if solver_cfg is None else solver_cfg.get("assembly")
-    if raw is None:
+    if solver_cfg is None:
+        mode = "auto"
+    elif hasattr(solver_cfg, "assembly"):
+        mode = str(solver_cfg.assembly)
+    else:
+        raw = solver_cfg.get("assembly")
+        mode = "auto" if raw is None else str(raw).lower().strip()
+    if mode == "auto":
         return "numba" if _HAS_NUMBA else "python"
-    mode = str(raw).lower().strip()
     if mode not in ("numba", "numpy", "python"):
         raise ValueError(
-            f"unknown solver.assembly {raw!r}; expected 'numba', 'numpy', or 'python'"
+            f"unknown solver.assembly {mode!r}; expected 'auto', 'numba', "
+            "'numpy', or 'python'"
         )
     if mode == "numba" and not _HAS_NUMBA:
-        return "python"
+        raise RuntimeError("solver.assembly=numba but numba is not importable")
     return mode
 
 
@@ -144,7 +151,7 @@ if _HAS_NUMBA:
                 for i in range(6):
                     for j in range(nloc):
                         s = 0.0
-                        for k in range(6):
+                        for k in range(B.shape[0]):
                             s += C[e, q, i, k] * B[k, j]
                         CB[i, j] = s
                 # Ke += B.T @ CB * w
@@ -152,7 +159,7 @@ if _HAS_NUMBA:
                 for i in range(nloc):
                     for j in range(nloc):
                         s = 0.0
-                        for k in range(6):
+                        for k in range(B.shape[0]):
                             s += B[k, i] * CB[k, j]
                         Ke[i, j] += s * ww
             # scatter
@@ -185,7 +192,7 @@ if _HAS_NUMBA:
                 ww = w[e, q]
                 for i in range(nloc):
                     s = 0.0
-                    for k in range(6):
+                    for k in range(B.shape[0]):
                         s += B[k, i] * sigma[e, q, k]
                     fe[i] -= s * ww
             for a in range(nloc):

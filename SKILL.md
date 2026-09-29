@@ -1,20 +1,30 @@
 # b3_tex — agent skill: efficient RVE homogenization
 
-Drive textile **C_eff** from YAML with the least FE cost that still gives a
-defensible card. Implicit geometry (no body-fitted yarn mesh) + hex AMR is the
-default path.
+Drive textile **C_eff** with the least FE cost that still gives a defensible
+card. Implicit geometry (no body-fitted yarn mesh) + hex AMR is the default path.
+
+**Prefer textile-as-code** (`b3_tex.textile` + example `.py` cards) for authoring,
+sweeps, and new architectures. YAML remains a valid CLI card format
+(`examples/*.yaml`); both load via `textile.load_problem` / the CLI.
 
 ```text
-pick example YAML → set materials / micromodel → mesh ladder → validate → solve
-→ C_eff.npz + C_eff.meta.json  (± datasheet)
+pick example (.py preferred, .yaml ok) → materials / micromodel → mesh ladder
+→ validate → solve → C_eff.npz + C_eff.meta.json  (± datasheet)
 ```
+
+Install extras: `[mfem]` (`mfem` + `numba`; required to solve), `[viz]`
+(pyvista / gifs), `[test]` (pytest), `[all]` (mfem + viz + test). DOLFINx is
+conda-forge only, not a pip extra.
 
 ---
 
 ## Default command path
 
 ```bash
-b3-tex validate examples/weave_twill_2x2.yaml
+# textile-as-code (preferred for twill; edit build() in the .py)
+b3-tex validate examples/weave_twill_2x2.py
+b3-tex solve    examples/weave_twill_2x2.py -o results/weave_twill_2x2
+# YAML still works:
 b3-tex solve    examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
 # writes C_eff.npz  (key: effective_stiffness, Voigt 6×6 Pa)
 #        C_eff.meta.json  (mesh, backend, AMR, micromodel, yarn Vf, wall time)
@@ -23,25 +33,53 @@ b3-tex solve    examples/weave_twill_2x2.yaml -o results/weave_twill_2x2
 Optional: `b3-tex datasheet CFG -o out.pdf --c-eff results/.../C_eff.npz`  
 Optional: `b3-tex reference CFG` for Voigt/Reuss / closed-form checks.
 
-Load in Python:
+### Textile-as-code (Python)
+
+```python
+from b3_tex import Material, WeaveGeometry, WeavePattern, textile
+
+matrix = Material.isotropic("matrix", youngs_modulus=3.5e9, poisson_ratio=0.35)
+fibre = Material.transverse_isotropic(
+    "fibre", e_l=230e9, e_t=15e9, g_lt=15e9, nu_lt=0.20, nu_tt=0.30
+)
+yarn = textile.micromechanical(
+    "yarn", matrix=matrix, fibre=fibre, micromodel="chamis",
+    nominal_vf=0.55, max_vf=0.90,
+)
+domain = (0.02, 0.02, 0.0024)
+field = textile.woven(
+    WeavePattern.twill(2, 2, n_warp=4, n_weft=4),
+    WeaveGeometry(domain_size=domain, warp_width=0.004, warp_height=0.0008,
+                  power=4.0, compaction=0.3, nest=True),
+    matrix=matrix, yarn=yarn,
+)
+problem = textile.rve(
+    field, [matrix, fibre, yarn],
+    size=domain, mesh_resolution=(24, 24, 6),
+    solver=textile.solver_config(amr=True),
+)
+# result = textile.solve(problem)
+```
+
+Load prior result:
 
 ```python
 from b3_tex.result import HomogenizationResult
 r = HomogenizationResult.load_npz("results/weave_twill_2x2/C_eff.npz")
 C = r.effective_stiffness          # Pa
-ec = r.engineering_constants()     # E_x, … in Pa
+ec = r.engineering_constants()     # keys e_x, g_xy, nu_xy, … (moduli in Pa)
 ```
 
 Voigt order `(11,22,33,23,13,12)`, **engineering shear**.  
-`E_x = 1/S[0,0]` with `S = inv(C)`. Balanced plain/twill: `E_x ≈ E_y ≫ E_z`.
+`e_x = 1/S[0,0]` with `S = inv(C)`. Balanced plain/twill: `e_x ≈ e_y ≫ e_z`.
 
 ---
 
-## Pick architecture (example YAML)
+## Pick architecture (example cards)
 
 | Need | Start from |
 |------|------------|
-| Twill 2×2 card | `examples/weave_twill_2x2.yaml` |
+| Twill 2×2 card | `examples/weave_twill_2x2.py` (or `.yaml`) |
 | High-Vf plain + compaction / local Vf | `examples/plain_weave_compacted_high_vf.yaml` |
 | Satin / basket | `satin_5h.yaml`, `weave_satin_4h.yaml`, `weave_basket_2x2.yaml` |
 | NCF | `ncf_tricot_stitched.yaml`, `ncf_biaxial_high_vf.yaml` |
@@ -49,12 +87,13 @@ Voigt order `(11,22,33,23,13,12)`, **engineering shear**.
 | Braid | `triaxial_braid.yaml` |
 | UD smoke | `ud_tow.yaml` |
 
-Prefer `field.type: woven|ncf|orthogonal|layer_to_layer|braid` (not deprecated
+Prefer typed builders (`textile.woven` / `ncf` / `braid`) or YAML
+`field.type: woven|ncf|orthogonal|layer_to_layer|braid` (not deprecated
 `plain_weave` / `stitched_biaxial`). Edit **materials** (matrix, fibre, in-tow
-`nominal_fibre_volume_fraction`) before mesh cost.
+Vf) before mesh cost.
 
-For high packing: `compaction > 0`, `nest: true`, yarn
-`type: micromechanical` so local Vf rises at crossovers.
+For high packing: `compaction > 0`, `nest=True` / `nest: true`, yarn
+micromechanical so local Vf rises at crossovers.
 
 ---
 
@@ -106,7 +145,7 @@ not the production card.
 
 | Mode | Base mesh (order) | AMR | Use |
 |------|-------------------|-----|-----|
-| **smoke** | ~`20×20×5` (thin RVE: keep z thin) | **off** | iterate YAML, FD sweeps, CI-scale |
+| **smoke** | ~`20×20×5` (thin RVE: keep z thin) | **off** | iterate card, FD sweeps, CI-scale |
 | **standard** | ~`24×24×6` | **2** @ threshold **0.2** | FEA material card / datasheet |
 | **publish** | finer base and/or AMR **3** | 2–3 | paper; require ΔE vs standard ≲ ~2% |
 
@@ -118,8 +157,12 @@ b3-tex solve CFG -o results/out \
   --amr-iterations 2 --amr-threshold 0.20
 ```
 
-Smoke: set `mesh_resolution: [20, 20, 5]` and `amr.enabled: false` (or
-`--amr-iterations 0` if exposed).
+**Precedence:** CLI flag > card (`solver:` in YAML, or the `SolverConfig` on a
+`.py` card) > `SolverConfig` default.
+
+Smoke: set `mesh_resolution: [20, 20, 5]` and `amr.enabled: false`, or pass
+`--no-amr`. `--amr-iterations 0` does **not** disable AMR; it leaves the card's
+AMR block unchanged.
 
 ### Refinement rules of thumb
 
@@ -131,8 +174,10 @@ Smoke: set `mesh_resolution: [20, 20, 5]` and `amr.enabled: false` (or
 3. **Threshold ~0.2** is the standard starting point. Lower → more refine / more
    DOFs; raise only if the mesh explodes on thin features.
 4. **`dof_budget`** caps runaway refinement — leave YAML default unless OOM.
-5. **Sampling:** keep `material_sampling.strategy: local_cloud` (default) at
-   interfaces; do not use `cell_constant` for production cards.
+5. **Sampling:** the YAML / `SolverConfig` default is `exact` (an omitted
+   `material_sampling` block). `textile.solver_config()` is a separate preset:
+   `local_cloud` at resolution 6. Set `local_cloud` explicitly on production
+   cards; do not use `cell_constant` for those.
 6. **No auto-converge in one call.** Standard practice: smoke → standard → if
    needed +1 AMR or finer base and check `ΔE_x/E_x` (and `E_z`) against
    `C_eff.meta.json` / engineering prints.
@@ -181,7 +226,7 @@ domain:
 solver:
   backend: mfem-periodic
   cell_type: hexahedron
-  material_sampling: {strategy: local_cloud, resolution: 6}
+  material_sampling: {strategy: local_cloud, resolution: 6}  # explicit; omitted block is exact. textile.solver_config() uses this preset
   amr:
     enabled: true
     max_iterations: 2
@@ -194,8 +239,11 @@ solver:
 ## Sanity checks (after solve)
 
 - `C` symmetric, SPD; engineering constants finite and positive.
-- Balanced weave: `E_x ≈ E_y`; in-plane ≫ thickness.
-- Meta: micromodel name/kind, mesh, AMR iters, yarn Vf, wall time present.
+- Balanced weave: `e_x ≈ e_y` (dict keys; the CLI prints them as `E_x` / `E_y`);
+  in-plane ≫ thickness.
+- Meta: micromodel name/kind, mesh, configured `amr.max_iterations`, and
+  `amr.iterations_performed` (recorded separately from that cap), yarn Vf,
+  wall time present.
 - Optional: KUBC ≥ periodic (eigenvalues of difference ≥ 0).
 - Optional: re-run standard with AMR+1; |ΔE|/E ≲ 2% for production cards.
 

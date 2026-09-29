@@ -178,26 +178,28 @@ def build_amr_mesh(
     n_samples_per_cell: int = 216,
 ):
     """Refine a coarse hex base mesh toward the implicit field; return (mesh, metric)."""
-    import mfem.ser as mfem
+    from dataclasses import replace
 
-    from b3_tex.amr import (
-        cell_heterogeneity_metric_mfem,
-        flag_cells_for_refinement,
-        refine_flagged_cells_mfem,
+    from b3_tex.amr import cell_heterogeneity_metric_mfem
+    from b3_tex.backends.mfem_backend import build_mesh
+
+    solver = problem.solver.with_overrides(
+        amr={
+            "enabled": int(iters) > 0,
+            "max_iterations": int(iters),
+            "threshold": float(threshold),
+            "n_samples_per_cell": int(n_samples_per_cell),
+        }
     )
-
-    Lx, Ly, Lz = (float(s) for s in problem.size)
-    nx, ny, nz = base
-    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
-    metric = None
-    for it in range(iters + 1):
-        metric = cell_heterogeneity_metric_mfem(
-            mesh, problem, n_samples_per_cell=n_samples_per_cell
-        )
-        flagged = flag_cells_for_refinement(metric, threshold)
-        if it == iters or not flagged.any():
-            break
-        refine_flagged_cells_mfem(mesh, flagged)
+    view = replace(
+        problem,
+        mesh_resolution=(int(base[0]), int(base[1]), int(base[2])),
+        solver=solver,
+    )
+    mesh = build_mesh(view).mesh
+    metric = cell_heterogeneity_metric_mfem(
+        mesh, view, n_samples_per_cell=int(n_samples_per_cell)
+    )
     return mesh, metric
 
 
@@ -304,16 +306,16 @@ def add_sample_cloud(
     from b3_tex.viz._deps import require_pyvista
 
     pv = require_pyvista()
-    import mfem.ser as mfem
 
     from b3_tex.amr import _mfem_cell_vertex_array
+    from b3_tex.backends._amr_mfem import cartesian_hex_mesh
     from b3_tex.quadrature import _unit_material_grid
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
     if z is None:
         z = 0.5 * Lz
     nx, ny, nz = base
-    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
+    mesh = cartesian_hex_mesh(nx, ny, nz, (Lx, Ly, Lz))
     ref_pts, _ = _unit_material_grid(resolution)
 
     crossing = []

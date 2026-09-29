@@ -27,6 +27,7 @@ from b3_tex.geometry.frames import (
     orthonormal_frame_along,
     orthonormal_frame_along_batch,
 )
+from b3_tex.geometry.weave_pattern import WeavePattern
 from b3_tex.geometry.yarn import ParametricYarn
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "SplineCenterline",
     "StraightCenterline",
     "SuperellipseSection",
+    "WeavePattern",
     "orthonormal_frame_along",
     "orthonormal_frame_along_batch",
 ]

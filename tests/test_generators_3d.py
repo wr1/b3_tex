@@ -9,13 +9,25 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import yaml
 
 from b3_tex.generators.woven3d import (
+    LayerToLayerGeometry,
+    OrthogonalGeometry,
     layer_to_layer_yarns,
     orthogonal_yarns,
 )
 from b3_tex.problem import RVEProblem
+
+
+def _orth(**kwargs):
+    return orthogonal_yarns(OrthogonalGeometry(**kwargs))
+
+
+def _l2l(**kwargs):
+    return layer_to_layer_yarns(LayerToLayerGeometry(**kwargs))
+
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -28,7 +40,7 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 def test_orthogonal_yarn_count() -> None:
     n_warp, n_weft = 6, 4
     warp_layers, weft_layers, n_binder = 2, 3, 2
-    yarns = orthogonal_yarns(
+    yarns = _orth(
         n_warp=n_warp,
         n_weft=n_weft,
         warp_layers=warp_layers,
@@ -40,7 +52,7 @@ def test_orthogonal_yarn_count() -> None:
 
 
 def test_orthogonal_binder_pierces_full_thickness() -> None:
-    yarns = orthogonal_yarns()
+    yarns = _orth()
     binder = yarns[-1]
     nodes = binder.centerline.points
     top_node = nodes[np.argmax(nodes[:, 2])]
@@ -52,7 +64,7 @@ def test_orthogonal_binder_pierces_full_thickness() -> None:
 
 
 def test_orthogonal_warp_weft_orientation() -> None:
-    yarns = orthogonal_yarns(n_warp=6, n_weft=4, warp_layers=2, weft_layers=3)
+    yarns = _orth(n_warp=6, n_weft=4, warp_layers=2, weft_layers=3)
     warp = yarns[0]  # first warp tow, runs along x
     weft = yarns[6 * 2]  # first weft tow, runs along y
     wp = np.array([[0.005, warp.centerline.point[1], warp.centerline.point[2]]])
@@ -69,7 +81,7 @@ def test_orthogonal_warp_weft_orientation() -> None:
 def test_layer_to_layer_yarn_count() -> None:
     n_warp, n_weft = 4, 6
     warp_layers, weft_layers, n_binder = 2, 3, 2
-    yarns = layer_to_layer_yarns(
+    yarns = _l2l(
         n_warp=n_warp,
         n_weft=n_weft,
         warp_layers=warp_layers,
@@ -81,7 +93,7 @@ def test_layer_to_layer_yarn_count() -> None:
 
 
 def test_layer_to_layer_binder_visits_multiple_levels() -> None:
-    yarns = layer_to_layer_yarns()
+    yarns = _l2l()
     binder = yarns[-1]
     z = binder.centerline.points[:, 2]
     distinct = np.unique(np.round(z, 9))
@@ -134,7 +146,7 @@ def test_orthogonal_warp_weft_volume_roughly_balanced() -> None:
     """Symmetric warp/weft layout -> comparable inside volume from each family."""
     n_warp = n_weft = 4
     layers = 2
-    yarns = orthogonal_yarns(
+    yarns = _orth(
         n_warp=n_warp,
         n_weft=n_weft,
         warp_layers=layers,
@@ -170,3 +182,9 @@ def test_orthogonal_warp_weft_volume_roughly_balanced() -> None:
     assert cw > 0 and cf > 0
     ratio = cw / cf
     assert 0.5 < ratio < 2.0
+
+
+def test_orthogonal_yarns_kwargs_deprecated() -> None:
+    with pytest.warns(DeprecationWarning, match="OrthogonalGeometry"):
+        yarns = orthogonal_yarns(n_binder=0)
+    assert yarns

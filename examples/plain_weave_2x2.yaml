@@ -46,4 +46,4 @@ field:
   amplitude: 0.08
 
 solver:
-  backend: dolfinx_periodic
+  backend: mfem-periodic

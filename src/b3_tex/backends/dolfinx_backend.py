@@ -7,8 +7,8 @@ effective 6x6 stiffness.
 
 KUBC (Kinematic Uniform Boundary Conditions) gives an upper-bound estimate that
 is exact for a homogeneous RVE and converges to the true periodic homogenization
-as the RVE size grows. It is the v1 baseline; matching-face periodic BCs via
-``dolfinx_mpc`` are a v1.5 milestone.
+as the RVE size grows. Matching-face periodic BCs live in
+``dolfinx_periodic_backend``.
 """
 
 import numpy as np
@@ -21,23 +21,12 @@ from b3_tex.backends._dolfinx_common import (
 )
 from b3_tex.problem import RVEProblem
 from b3_tex.quadrature import (
-    _resolve_material_sampling_spec,
     effective_stiffnesses_for_gauss_points,
     make_quadrature_stiffness_function,
     populate_stiffness_at_quadrature_points,
     quadrature_point_coords,
 )
 from b3_tex.result import HomogenizationResult
-
-
-_UNIT_VOIGT_TO_TENSOR: tuple[NDArray[np.float64], ...] = (
-    np.array([[1.0, 0, 0], [0, 0, 0], [0, 0, 0]]),
-    np.array([[0, 0, 0], [0, 1.0, 0], [0, 0, 0]]),
-    np.array([[0, 0, 0], [0, 0, 0], [0, 0, 1.0]]),
-    np.array([[0, 0, 0], [0, 0, 0.5], [0, 0.5, 0]]),
-    np.array([[0, 0, 0.5], [0, 0, 0], [0.5, 0, 0]]),
-    np.array([[0, 0.5, 0], [0.5, 0, 0], [0, 0, 0]]),
-)
 
 
 def solve(problem: RVEProblem) -> HomogenizationResult:
@@ -49,7 +38,7 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = problem.mesh_resolution
 
-    cell_type_name = str(problem.solver.get("cell_type", "tetrahedron"))
+    cell_type_name = problem.solver.cell_type or "tetrahedron"
     if cell_type_name == "tetrahedron":
         cell_type = dolfinx.mesh.CellType.tetrahedron
     elif cell_type_name == "hexahedron":
@@ -66,26 +55,29 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         cell_type=cell_type,
     )
 
-    if problem.solver.get("amr", {}).get("enabled", False):
+    if problem.solver.amr.enabled:
         if cell_type_name != "tetrahedron":
-            raise ValueError(
-                "AMR phase 1 currently requires cell_type='tetrahedron' "
+            from b3_tex.backends.registry import BackendCapabilityError
+
+            raise BackendCapabilityError(
+                "DOLFINx AMR requires cell_type='tetrahedron' "
                 f"(got {cell_type_name!r}); dolfinx.mesh.refine is tet-only in 0.10"
             )
-        from b3_tex.amr import amr_loop_kwargs, iteratively_refine
+        from b3_tex.amr import _iteratively_refine_loop, amr_loop_kwargs
 
-        amr_cfg = problem.solver["amr"]
-        mesh = iteratively_refine(mesh, problem, **amr_loop_kwargs(amr_cfg))
+        mesh = _iteratively_refine_loop(
+            mesh, problem, **amr_loop_kwargs(problem.solver.amr)
+        )
 
     V = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (3,)))
 
-    spec = _resolve_material_sampling_spec(problem.solver)
-    qdeg = int(problem.solver.get("quadrature_degree", 2))
+    spec = problem.solver.material_sampling
+    qdeg = int(problem.solver.quadrature_degree)
 
-    if spec["strategy"] == "exact":
+    if spec.strategy == "exact":
         C_func, dx_q = make_quadrature_stiffness_function(mesh, degree=qdeg)
         populate_stiffness_at_quadrature_points(C_func, problem, mesh=mesh, degree=qdeg)
-    elif spec["strategy"] == "cell_constant":
+    elif spec.strategy == "cell_constant":
         T = dolfinx.fem.functionspace(mesh, ("DG", 0, (6, 6)))
         C_func = dolfinx.fem.Function(T)
         centroids = _cell_centroids(mesh)
@@ -139,10 +131,10 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
 
     eps_post = _voigt_strain(u_sol, ufl)
     sigma_post = ufl.dot(C_func, eps_post)
-    sigma_component_forms = [dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(6)]
-
-    loadcase_strains = np.eye(6)
-    loadcase_stresses = np.zeros((6, 6))
+    n_voigt = 6
+    sigma_component_forms = [
+        dolfinx.fem.form(sigma_post[k] * dx_q) for k in range(n_voigt)
+    ]
 
     petsc_options = {
         "ksp_type": "preonly",
@@ -160,26 +152,74 @@ def solve(problem: RVEProblem) -> HomogenizationResult:
         petsc_options=petsc_options,
     )
 
-    for k, E_tensor in enumerate(_UNIT_VOIGT_TO_TENSOR):
-        apply_macro_strain(E_tensor)
-        u_sol.x.array[:] = 0.0
-        linear_problem.solve()
-        for a_idx, form in enumerate(sigma_component_forms):
-            integral = dolfinx.fem.assemble_scalar(form)
-            loadcase_stresses[a_idx, k] = (
-                mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+    n_cells = int(mesh.topology.index_map(mesh.topology.dim).size_local)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.problem = problem
+            self.volume = float(volume)
+            self._n_elem = n_cells
+            n_gp = max(n_cells, 1)
+            self._nq = 1
+            self._gp_weights = np.ones(n_gp)
+            self._gp_coords = np.zeros((n_gp, 3))
+            self._c_per_gp = np.zeros((n_gp, 6, 6))
+
+        @property
+        def gp_weights(self) -> NDArray[np.float64]:
+            return self._gp_weights
+
+        @property
+        def gp_coords(self) -> NDArray[np.float64]:
+            return self._gp_coords
+
+        @property
+        def c_per_gp(self) -> NDArray[np.float64]:
+            return self._c_per_gp
+
+        @property
+        def n_elem(self) -> int:
+            return self._n_elem
+
+        @property
+        def nq(self) -> int:
+            return self._nq
+
+        def solve_macro_strain(self, E_voigt: NDArray[np.float64]):
+            from b3_tex.postprocess import LoadcaseSolveResult
+            from b3_tex.tensors import voigt_strain_to_tensor
+
+            strain = np.asarray(E_voigt, dtype=float)
+            apply_macro_strain(voigt_strain_to_tensor(strain))
+            u_sol.x.array[:] = 0.0
+            linear_problem.solve()
+            macro_stress = np.zeros(6)
+            for a_idx, form in enumerate(sigma_component_forms):
+                integral = dolfinx.fem.assemble_scalar(form)
+                macro_stress[a_idx] = mesh.comm.allreduce(integral, op=MPI.SUM) / volume
+            n_gp = self._gp_weights.shape[0]
+            return LoadcaseSolveResult(
+                u_at_vertices=np.zeros((1, 3)),
+                eps_per_gp=np.broadcast_to(strain, (n_gp, 6)).copy(),
+                sigma_per_gp=np.broadcast_to(macro_stress, (n_gp, 6)).copy(),
+                macro_strain=strain,
+                macro_stress=macro_stress,
             )
 
-    effective_stiffness = 0.5 * (loadcase_stresses + loadcase_stresses.T)
+    from b3_tex.backends._driver import solve_with_session
 
-    return HomogenizationResult(
-        effective_stiffness=effective_stiffness,
-        loadcase_strains=loadcase_strains,
-        loadcase_stresses=loadcase_stresses,
-        metadata={
-            "backend": "dolfinx_kubc",
+    session = _Session()
+    return solve_with_session(
+        session,
+        backend_detail="dolfinx_kubc",
+        extra_meta={
             "mesh_resolution": list(problem.mesh_resolution),
             "volume": float(volume),
-            "n_cells_local": int(mesh.topology.index_map(mesh.topology.dim).size_local),
+            "n_cells": n_cells,
+            "n_cells_local": n_cells,
         },
     )
+
+
+def solve_elastic(problem: RVEProblem) -> HomogenizationResult:
+    return solve(problem)

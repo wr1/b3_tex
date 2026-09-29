@@ -4,10 +4,24 @@ description: b3-tex validate, reference, solve, and datasheet.
 ---
 
 ```bash
-b3-tex validate  CONFIG.yaml
-b3-tex reference CONFIG.yaml
-b3-tex solve     CONFIG.yaml [options]
-b3-tex datasheet CONFIG.yaml [options]
+b3-tex validate  CONFIG     # .yaml / .yml or textile-as-code .py
+b3-tex reference CONFIG
+b3-tex solve     CONFIG [options]
+b3-tex datasheet CONFIG.yaml [options]   # datasheet still expects YAML today
+```
+
+`CONFIG` for `validate` / `reference` / `solve` may be:
+
+| Kind | Contract |
+|------|----------|
+| `.yaml` / `.yml` | Full RVE card (see [YAML schema](/docs/reference/yaml-schema)) |
+| `.py` | Module with `build() -> RVEProblem` or `problem` (instance or zero-arg callable) |
+
+Example:
+
+```bash
+b3-tex validate examples/weave_twill_2x2.py
+b3-tex solve    examples/weave_twill_2x2.py -o results/weave_twill_2x2
 ```
 
 ## validate
@@ -33,8 +47,8 @@ Run 6 macro-strain loadcases; write FEA card + provenance.
 |------|---------|---------|
 | `-o, --out` | `results` | Output directory |
 | `-b, --backend` | `mfem-periodic` | Solver backend |
-| `-c, --cell-type` | YAML | `tetrahedron` / `hexahedron` |
-| `--amr-iterations` | `0` | If &gt; 0, enable AMR with this max iters (YAML AMR otherwise left as-is) |
+| `-c, --cell-type` | from card | `tetrahedron` / `hexahedron` |
+| `--amr-iterations` | `0` | If &gt; 0, enable AMR with this max iters (card AMR otherwise left as-is) |
 | `--amr-threshold` | `0.20` | Heterogeneity threshold |
 
 ### Outputs
@@ -48,13 +62,14 @@ Stdout also prints engineering constants (GPa).
 
 ## datasheet
 
-One-page Typst PDF + PNG thumbnail.
+One-page Typst PDF + PNG thumbnail. Currently takes a **YAML** RVE path for
+geometry labels; pass `--c-eff` to reuse a prior solve (from `.py` or YAML).
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-o, --out` | `results/datasheet.pdf` | PDF path |
 | `--c-eff` | empty | Reuse NPZ (+ meta for mesh provenance) |
-| `--full-mesh` | off | Use YAML mesh instead of 24×24×8 |
+| `--full-mesh` | off | Use card mesh instead of 24×24×8 |
 | `--skip-solve` | off | No stiffness table |
 | `--skip-amr` | off | No AMR illustration |
 | `--amr-iterations` | `2` | Illustration panel only |

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import yaml
 
-from b3_tex.generators.ncf import ncf_yarns
+from b3_tex.generators.ncf import NcfGeometry, ncf_yarns
 from b3_tex.problem import RVEProblem
 
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "ncf_tricot_stitched.yaml"
@@ -31,6 +31,19 @@ _PLIES_0_90 = [
 ]
 
 
+def _yarns(**kwargs):
+    return ncf_yarns(
+        NcfGeometry(
+            domain_size=kwargs["domain_size"],
+            plies=tuple(kwargs["plies"]),
+            stitch=kwargs.get("stitch"),
+            power=kwargs.get("power", 0.5),
+            nominal_vf=kwargs.get("nominal_vf", 0.55),
+            max_vf=kwargs.get("max_vf", 0.9),
+        )
+    )
+
+
 def test_inlay_ply_fibre_directions():
     """A tow's local 1-axis (rotation col 0) equals its ply's in-plane direction."""
     centre = np.array([[0.002, 0.002, 0.0]])
@@ -42,7 +55,7 @@ def test_inlay_ply_fibre_directions():
         -45: np.array([0.70710678, -0.70710678, 0.0]),
     }
     for angle, exp in expected.items():
-        yarns = ncf_yarns(
+        yarns = _yarns(
             domain_size=_DOMAIN,
             plies=[
                 {
@@ -70,7 +83,7 @@ def test_stitch_pierces_the_stack():
         "radius": 5.0e-5,
         "z_span": [0.00005, 0.00095],
     }
-    yarns = ncf_yarns(domain_size=_DOMAIN, plies=_PLIES_0_90, stitch=stitch)
+    yarns = _yarns(domain_size=_DOMAIN, plies=_PLIES_0_90, stitch=stitch)
     stitch_yarn = yarns[-1]  # stitch appended last
 
     # Sample the stitch centerline; it must visit both z extremes.
@@ -91,10 +104,10 @@ def test_stitch_pierces_the_stack():
 def test_tricot_stitch_zigzags_in_x():
     """A tricot stitch shifts laterally in x; a pillar does not."""
     common = {"n_x": 1, "n_y": 4, "radius": 2.5e-5, "z_span": [0.00005, 0.00095]}
-    tricot = ncf_yarns(
+    tricot = _yarns(
         domain_size=_DOMAIN, plies=_PLIES_0_90, stitch={"pattern": "tricot", **common}
     )[-1]
-    pillar = ncf_yarns(
+    pillar = _yarns(
         domain_size=_DOMAIN, plies=_PLIES_0_90, stitch={"pattern": "pillar", **common}
     )[-1]
     s_grid = np.linspace(0.0, 1.0, 201)
@@ -138,4 +151,10 @@ def test_example_yaml_builds_and_samples():
 
 def test_ncf_requires_a_ply():
     with pytest.raises(ValueError):
-        ncf_yarns(domain_size=_DOMAIN, plies=[])
+        _yarns(domain_size=_DOMAIN, plies=[])
+
+
+def test_ncf_yarns_kwargs_deprecated():
+    with pytest.warns(DeprecationWarning, match="NcfGeometry"):
+        yarns = ncf_yarns(domain_size=_DOMAIN, plies=_PLIES_0_90)
+    assert yarns

@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -426,13 +425,6 @@ def _weave_braid_field_cfg(
     return field_cfg
 
 
-def write_sweep_yaml(cfg: dict[str, Any], path: str | Path) -> None:
-    """Persist a sweep config to disk (needed by treeparse solver)."""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
-
-
 # ---------------------------------------------------------------------------
 # Sample generator -- presets
 # ---------------------------------------------------------------------------
@@ -545,26 +537,23 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _resolve_backend() -> str:
-    """Find an available b3_tex solver backend."""
-    # Try backends in priority order
-    candidates = [
-        ("mfem-periodic", "mfem"),
-        ("dolfinx-periodic", "dolfinx"),
-    ]
-
-    for backend_name, _lib_name in candidates:
-        try:
-            if backend_name.startswith("mfem"):
-                __import__("mfem")
-            else:
-                __import__("dolfinx")
-            return backend_name
-        except ImportError:
-            continue
-
-    print("ERROR: no solver backend available (need mfem or dolfinx)", file=sys.stderr)
-    sys.exit(1)
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
 
 
 def _run_solve(config: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
@@ -572,66 +561,34 @@ def _run_solve(config: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
 
     Returns (C_eff shape (6,6), metadata dict).
     """
-    # Write temp YAML
-    import tempfile
+    from b3_tex.api import homogenize
+    from b3_tex.problem import RVEProblem
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        tmp_path = f.name
-
-    try:
-        # Load problem
-        from b3_tex.problem import RVEProblem
-
-        problem = RVEProblem.from_config(config)
-
-        # Dispatch solver
-        backend_name = config.get("solver", {}).get("backend", "mfem-periodic")
-        canonical = {"dolfinx": "dolfinx-periodic", "mfem": "mfem-periodic"}.get(
-            backend_name, backend_name
-        )
-
-        if canonical == "dolfinx-periodic":
-            from b3_tex.backends.dolfinx_periodic_backend import solve as solve_fn
-
-            lib_label = "DOLFINx"
-        elif canonical == "dolfinx-kubc":
-            from b3_tex.backends.dolfinx_backend import solve as solve_fn
-
-            lib_label = "DOLFINx"
-        elif canonical == "mfem-periodic":
-            from b3_tex.backends.mfem_backend import solve_periodic as solve_fn
-
-            lib_label = "PyMFEM"
-        elif canonical == "mfem-kubc":
-            from b3_tex.backends.mfem_backend import solve as solve_fn
-
-            lib_label = "PyMFEM"
-        else:
-            raise ValueError(f"unknown backend {canonical}")
-
-        result = solve_fn(problem)
-
-        C_eff = result.effective_stiffness
-        meta = {
-            "lib": lib_label,
-            "backend": canonical,
-            "size": problem.size.tolist(),
-            "mesh_resolution": list(problem.mesh_resolution),
-        }
-
-        return C_eff, meta
-
-    finally:
-        os.unlink(tmp_path)
+    backend_name = config.get("solver", {}).get("backend", "mfem-periodic")
+    canonical = _canonical_backend(backend_name)
+    problem = RVEProblem.from_config(config)
+    result = homogenize(problem, backend=canonical)
+    lib_label = "PyMFEM" if canonical.startswith("mfem") else "DOLFINx"
+    C_eff = result.effective_stiffness
+    meta = {
+        "lib": lib_label,
+        "backend": canonical,
+        "size": problem.size.tolist(),
+        "mesh_resolution": list(problem.mesh_resolution),
+    }
+    return C_eff, meta
 
 
 def _run(
-    samples: list[Sample], out_dir: Path, design_path: Path, design_space: DesignSpace
+    samples: list[Sample],
+    out_dir: Path,
+    design_path: Path,
+    design_space: DesignSpace,
+    backend: str = "mfem-periodic",
 ) -> Path:
     """Run end-to-end homogenisation for all samples. Returns the NPZ path."""
 
-    backend = _resolve_backend()
+    backend = _canonical_backend(backend)
     print(f"Using backend: {backend}")
 
     results: list[dict[str, Any]] = []
@@ -663,11 +620,6 @@ def _run(
             backend=backend,
         )
 
-        # Write temp config
-        tmp_yaml = out_dir / f"_tmp_sweep_{i}.yaml"
-        write_sweep_yaml(cfg, tmp_yaml)
-
-        # Run solve
         print(
             f"[{i + 1}/{len(samples)}] solving {sample.fibre_name}/{sample.matrix_name} "
             f"on {sample.weave_name} vf={sample.vf:.3f} "
@@ -730,9 +682,6 @@ def _run(
                     "error": str(exc),
                 }
             )
-
-        # Clean up temp
-        tmp_yaml.unlink(missing_ok=True)
 
     # Save combined output -- same schema as micromech P2a
     if all_features:
@@ -813,9 +762,9 @@ def main() -> None:
     parser.add_argument(
         "--backend",
         type=str,
-        default=None,
+        default="mfem-periodic",
         choices=["mfem-periodic", "mfem-kubc", "dolfinx-periodic", "dolfinx-kubc"],
-        help="Override solver backend (default: auto-detect).",
+        help="Solver backend (default: mfem-periodic).",
     )
     parser.add_argument(
         "--resolution",
@@ -858,9 +807,6 @@ def main() -> None:
     # Prepare output dir
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine backend (early availability check; _run resolves internally)
-    args.backend if args.backend else _resolve_backend()
 
     # Build sample configs and run
     built_samples = []
@@ -913,7 +859,7 @@ def main() -> None:
         print("No valid samples after filtering. Exiting.", file=sys.stderr)
         sys.exit(1)
 
-    npz_path = _run(built_samples, out_dir, Path(args.design_space), ds)
+    npz_path = _run(built_samples, out_dir, Path(args.design_space), ds, args.backend)
 
     # Verify output
     if npz_path.exists():

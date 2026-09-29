@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from b3_tex.fields import ParametricWeaveField
-from b3_tex.generators.braid import braid_yarns, build_braid
+from b3_tex.generators.braid import BraidGeometry, braid_yarns, build_braid
 
 # One braid unit cell (SI metres), matching examples/triaxial_braid.yaml.
 DOMAIN = (0.0017, 0.00057735, 0.0006)
@@ -15,10 +15,12 @@ DOMAIN = (0.0017, 0.00057735, 0.0006)
 def _families():
     """Return (plus_bias, minus_bias, axial) representative yarns."""
     yarns = braid_yarns(
-        domain_size=DOMAIN,
-        braid_angle_deg=30.0,
-        n_bias_per_dir=2,
-        axial_count=2,
+        BraidGeometry(
+            domain_size=DOMAIN,
+            braid_angle_deg=30.0,
+            n_bias_per_dir=2,
+            axial_count=2,
+        )
     )
     assert len(yarns) == 2 + 2 + 2
     return yarns[0], yarns[2], yarns[4]
@@ -79,8 +81,16 @@ def test_z_amplitude_keeps_bias_within_thickness():
 
 
 def test_axial_can_be_disabled():
-    yarns = braid_yarns(domain_size=DOMAIN, n_bias_per_dir=2, axial_enabled=False)
+    yarns = braid_yarns(
+        BraidGeometry(domain_size=DOMAIN, n_bias_per_dir=2, axial_enabled=False)
+    )
     assert len(yarns) == 4  # two bias families only
+
+
+def test_braid_yarns_kwargs_deprecated():
+    with pytest.warns(DeprecationWarning, match="BraidGeometry"):
+        yarns = braid_yarns(domain_size=DOMAIN, n_bias_per_dir=2, axial_enabled=False)
+    assert len(yarns) == 4
 
 
 def test_build_braid_validates_materials():

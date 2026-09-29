@@ -85,12 +85,12 @@ def test_build_typst_contains_sections(compacted_problem):
     c = np.diag([120e9, 40e9, 8e9, 3e9, 3e9, 5e9]) * 1e-6 + np.eye(6) * 2e9
     spec.c_eff_gpa = c / 1e9
     spec.engineering_constants = {
-        "E_x": 1.0 / np.linalg.inv(c)[0, 0],
-        "E_y": 1.0 / np.linalg.inv(c)[1, 1],
-        "E_z": 1.0 / np.linalg.inv(c)[2, 2],
-        "G_xy": 1.0 / np.linalg.inv(c)[5, 5],
-        "G_xz": 1.0 / np.linalg.inv(c)[4, 4],
-        "G_yz": 1.0 / np.linalg.inv(c)[3, 3],
+        "e_x": 1.0 / np.linalg.inv(c)[0, 0],
+        "e_y": 1.0 / np.linalg.inv(c)[1, 1],
+        "e_z": 1.0 / np.linalg.inv(c)[2, 2],
+        "g_xy": 1.0 / np.linalg.inv(c)[5, 5],
+        "g_xz": 1.0 / np.linalg.inv(c)[4, 4],
+        "g_yz": 1.0 / np.linalg.inv(c)[3, 3],
         "nu_xy": 0.1,
         "nu_xz": 0.2,
         "nu_yz": 0.05,

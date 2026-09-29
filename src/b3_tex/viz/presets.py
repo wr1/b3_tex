@@ -178,13 +178,8 @@ def amr_progression(
     window_size: tuple[int, int] = (900, 680),
 ) -> Path:
     """Animate the AMR refinement: one frame per pass, mesh coloured by the metric."""
-    import mfem.ser as mfem
-
-    from b3_tex.amr import (
-        cell_heterogeneity_metric_mfem,
-        flag_cells_for_refinement,
-        refine_flagged_cells_mfem,
-    )
+    from b3_tex.amr import cell_heterogeneity_metric_mfem, flag_cells_for_refinement
+    from b3_tex.backends._amr_mfem import cartesian_hex_mesh, refine_flagged_cells
     from b3_tex.viz._deps import require_imageio
 
     imageio = require_imageio()
@@ -193,7 +188,7 @@ def amr_progression(
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = base
-    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
+    mesh = cartesian_hex_mesh(nx, ny, nz, (Lx, Ly, Lz))
     frames = []
     for it in range(max_iters + 1):
         metric = cell_heterogeneity_metric_mfem(mesh, problem, n_samples_per_cell=216)
@@ -207,6 +202,6 @@ def amr_progression(
         flagged = flag_cells_for_refinement(metric, threshold)
         if it == max_iters or not flagged.any():
             break
-        refine_flagged_cells_mfem(mesh, flagged)
+        refine_flagged_cells(mesh, flagged)
     imageio.mimsave(str(out_path), frames, fps=fps, loop=0)
     return out_path

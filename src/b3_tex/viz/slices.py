@@ -13,12 +13,10 @@ from pathlib import Path
 
 import numpy as np
 
+from b3_tex.viz.sampling import _PLANE_AXES
 from b3_tex.viz.theme import DEFAULT_THEME, Theme
 
 _FIG_DPI = 150
-
-# mid-plane field panel: sweep axis -> (in-plane u-axis, in-plane v-axis)
-_PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
 _AXIS_NAME = {0: "x", 1: "y", 2: "z"}
 
 # ortho AMR snapshot: slice normal axis -> (a-axis horizontal, b-axis vertical, xlabel, ylabel)
@@ -81,67 +79,67 @@ def render_midplane_field(
     vmin, vmax = vf_clim(problem) if sampler is not None else (0.0, 1.0)
 
     s = quiver_step
-    plt.rcParams.update(
+    with plt.rc_context(
         {"font.size": 6.5, "axes.titlesize": 6.5, "axes.labelsize": 6.5}
-    )
-    scale = 2.85 / max(float(Lu), float(Lv))
-    # Room for a right Vf bar and (optionally) a bottom OOP bar.
-    fig_h = float(Lv) * scale * (1.18 if colour_oop else 1.0)
-    fig, ax = plt.subplots(figsize=(float(Lu) * scale * 1.12, fig_h))
-    mesh = ax.pcolormesh(
-        u, v, vf, cmap=theme.cmap_vf, vmin=vmin, vmax=vmax, shading="nearest"
-    )
-    Us, Vs = U[::s, ::s], V[::s, ::s]
-    EUs, EVs = eu[::s, ::s], ev[::s, ::s]
-    if colour_oop:
-        q = ax.quiver(
-            Us,
-            Vs,
-            EUs,
-            EVs,
-            en[::s, ::s],
-            cmap=theme.cmap_oop,
-            clim=theme.oop_clim,
-            scale=22,
-            width=0.0045,
-            pivot="mid",
+    ):
+        scale = 2.85 / max(float(Lu), float(Lv))
+        # Room for a right Vf bar and (optionally) a bottom OOP bar.
+        fig_h = float(Lv) * scale * (1.18 if colour_oop else 1.0)
+        fig, ax = plt.subplots(figsize=(float(Lu) * scale * 1.12, fig_h))
+        mesh = ax.pcolormesh(
+            u, v, vf, cmap=theme.cmap_vf, vmin=vmin, vmax=vmax, shading="nearest"
         )
-        fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.046, pad=0.02)
-        # Horizontal OOP bar under the axes (doesn't fight the Vf bar).
-        fig.subplots_adjust(left=0.10, right=0.88, top=0.90, bottom=0.18)
-        cax_n = fig.add_axes([0.12, 0.06, 0.62, 0.035])
-        fig.colorbar(
-            q,
-            cax=cax_n,
-            orientation="horizontal",
-            label=rf"$e_1\cdot {_AXIS_NAME[sweep]}$  (out-of-plane; short arrow = more OOP)",
-        )
-        ax.set_title(
-            f"mid-{axis}  $V_f$ + fibre  (arrow = in-plane, colour = OOP)",
-            pad=1.5,
-            fontsize=6.0,
-        )
-    else:
-        ax.quiver(
-            Us,
-            Vs,
-            EUs,
-            EVs,
-            color=theme.fibre_color,
-            scale=22,
-            width=0.0045,
-            pivot="mid",
-        )
-        fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
-        ax.set_title(f"mid-{axis}  $V_f$ + fibre", pad=1.5, fontsize=6.5)
-        fig.subplots_adjust(left=0.085, right=0.92, top=0.94, bottom=0.085)
-    ax.set_xlabel(_AXIS_NAME[u_ax])
-    ax.set_ylabel(_AXIS_NAME[v_ax])
-    ax.set_aspect("equal")
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=_FIG_DPI)
-    plt.close(fig)
+        Us, Vs = U[::s, ::s], V[::s, ::s]
+        EUs, EVs = eu[::s, ::s], ev[::s, ::s]
+        if colour_oop:
+            q = ax.quiver(
+                Us,
+                Vs,
+                EUs,
+                EVs,
+                en[::s, ::s],
+                cmap=theme.cmap_oop,
+                clim=theme.oop_clim,
+                scale=22,
+                width=0.0045,
+                pivot="mid",
+            )
+            fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.046, pad=0.02)
+            # Horizontal OOP bar under the axes (doesn't fight the Vf bar).
+            fig.subplots_adjust(left=0.10, right=0.88, top=0.90, bottom=0.18)
+            cax_n = fig.add_axes([0.12, 0.06, 0.62, 0.035])
+            fig.colorbar(
+                q,
+                cax=cax_n,
+                orientation="horizontal",
+                label=rf"$e_1\cdot {_AXIS_NAME[sweep]}$  (out-of-plane; short arrow = more OOP)",
+            )
+            ax.set_title(
+                f"mid-{axis}  $V_f$ + fibre  (arrow = in-plane, colour = OOP)",
+                pad=1.5,
+                fontsize=6.0,
+            )
+        else:
+            ax.quiver(
+                Us,
+                Vs,
+                EUs,
+                EVs,
+                color=theme.fibre_color,
+                scale=22,
+                width=0.0045,
+                pivot="mid",
+            )
+            fig.colorbar(mesh, ax=ax, label=r"$V_f$", fraction=0.05, pad=0.03)
+            ax.set_title(f"mid-{axis}  $V_f$ + fibre", pad=1.5, fontsize=6.5)
+            fig.subplots_adjust(left=0.085, right=0.92, top=0.94, bottom=0.085)
+        ax.set_xlabel(_AXIS_NAME[u_ax])
+        ax.set_ylabel(_AXIS_NAME[v_ax])
+        ax.set_aspect("equal")
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=_FIG_DPI)
+        plt.close(fig)
     return out_path
 
 
@@ -295,193 +293,195 @@ def render_midplane_orientation(
     Lx, Ly, Lz = (float(x) for x in problem.size)
     mid_z = 0.5 * Lz
 
-    plt.rcParams.update(
+    with plt.rc_context(
         {"font.size": 6.5, "axes.titlesize": 6.8, "axes.labelsize": 6.5}
-    )
-    fig, axes = plt.subplots(1, 3, figsize=(8.6, 2.85), constrained_layout=True)
-    ax_el, ax_plan, ax_side = axes
+    ):
+        fig, axes = plt.subplots(1, 3, figsize=(8.6, 2.85), constrained_layout=True)
+        ax_el, ax_plan, ax_side = axes
 
-    # --- (1) Centerline elevation: literal up/down undulation ---
-    fam_plotted = set()
-    for fam, pts in lines:
-        color = theme.family_colors[fam]
-        label = FAMILY_NAMES[fam] if fam not in fam_plotted else None
-        fam_plotted.add(fam)
-        if fam == WARP:
-            # Warp runs along x: plot z(x)
-            ax_el.plot(pts[:, 0], pts[:, 2], color=color, lw=1.4, label=label)
-        elif fam == WEFT:
-            # Weft runs along y: plot z(y) on the same horizontal "run" axis
-            ax_el.plot(pts[:, 1], pts[:, 2], color=color, lw=1.4, ls="--", label=label)
-        else:
-            # Stitch / other: arc-length parameter vs z
-            run = np.linalg.norm(np.diff(pts, axis=0), axis=1)
-            s_run = np.concatenate([[0.0], np.cumsum(run)])
-            ax_el.plot(s_run, pts[:, 2], color=color, lw=1.2, ls=":", label=label)
-    ax_el.axhline(mid_z, color="0.45", ls=":", lw=0.9, label="mid-plane")
-    # Mark peaks / troughs on warp lines for "up / down" callouts.
-    for fam, pts in lines:
-        if fam != WARP:
-            continue
-        z = pts[:, 2]
-        i_hi, i_lo = int(np.argmax(z)), int(np.argmin(z))
-        ax_el.scatter(
-            [pts[i_hi, 0]],
-            [z[i_hi]],
-            marker="^",
-            s=28,
-            c=theme.family_colors[WARP],
-            zorder=5,
-            label="up (over)" if "up" not in fam_plotted else None,
-        )
-        ax_el.scatter(
-            [pts[i_lo, 0]],
-            [z[i_lo]],
-            marker="v",
-            s=28,
-            c=theme.family_colors[WARP],
-            zorder=5,
-            label="down (under)" if "down" not in fam_plotted else None,
-        )
-        fam_plotted.add("up")
-        fam_plotted.add("down")
-        break
-    ax_el.set_xlabel("run  (warp: x · weft: y)")
-    ax_el.set_ylabel("z  (height)")
-    ax_el.set_title("yarn centerline undulation  (up / down)", pad=2)
-    ax_el.set_ylim(0.0, Lz)
-    ax_el.legend(fontsize=5.5, loc="upper right", framealpha=0.9)
-    ax_el.grid(True, alpha=0.25, lw=0.4)
-
-    # --- (2) Plan map of path height (over / under islands) ---
-    hmax = (
-        float(np.nanmax(np.abs(h["height"])))
-        if np.any(np.isfinite(h["height"]))
-        else 1e-3
-    )
-    hmax = max(hmax, 1e-6)
-    m_h = ax_plan.pcolormesh(
-        h["u"],
-        h["v"],
-        h["height"],
-        cmap=theme.cmap_oop,
-        vmin=-hmax,
-        vmax=hmax,
-        shading="nearest",
-    )
-    # In-plane quiver + △/▽ for climbing / descending (sign of e1·n).
-    Us, Vs = d["U"][::s, ::s], d["V"][::s, ::s]
-    EUs, EVs, ENs = d["eu"][::s, ::s], d["ev"][::s, ::s], d["en"][::s, ::s]
-    ax_plan.quiver(
-        Us,
-        Vs,
-        EUs,
-        EVs,
-        color=theme.fibre_color,
-        scale=22,
-        width=0.0035,
-        pivot="mid",
-        alpha=0.85,
-    )
-    # Markers at arrow locations: up-triangle = fibre climbing (+n), down = descending.
-    flat_u, flat_v = Us.ravel(), Vs.ravel()
-    flat_en = ENs.ravel()
-    ok = np.isfinite(flat_en)
-    up = ok & (flat_en > 0.08)
-    dn = ok & (flat_en < -0.08)
-    ax_plan.scatter(
-        flat_u[up],
-        flat_v[up],
-        marker="^",
-        s=10,
-        c="#b2182b",
-        linewidths=0,
-        zorder=4,
-        label="climbing (+n)",
-    )
-    ax_plan.scatter(
-        flat_u[dn],
-        flat_v[dn],
-        marker="v",
-        s=10,
-        c="#2166ac",
-        linewidths=0,
-        zorder=4,
-        label="descending (−n)",
-    )
-    fig.colorbar(
-        m_h,
-        ax=ax_plan,
-        fraction=0.046,
-        pad=0.03,
-        label=rf"path {n_name} − mid  (over + / under −)",
-    )
-    ax_plan.set_title(f"mid-{axis}  path height  (over / under)", pad=2)
-    ax_plan.set_xlabel(u_name)
-    ax_plan.set_ylabel(v_name)
-    ax_plan.set_aspect("equal")
-    ax_plan.legend(fontsize=5.2, loc="upper right", framealpha=0.85)
-
-    # --- (3) Side cut (x–z at mid-y): yarn body + undulating centerlines ---
-    y0 = 0.5 * Ly
-    nx, nz = max(80, grid), max(40, grid // 2)
-    xs = np.linspace(0, Lx, nx)
-    zs = np.linspace(0, Lz, nz)
-    X, Z = np.meshgrid(xs, zs)
-    side_pts = np.column_stack([X.ravel(), np.full(X.size, y0), Z.ravel()])
-    ids, _rot = problem.field.sample_arrays(side_pts)
-    yarn_side = (ids.reshape(X.shape) != 0).astype(float)
-    ax_side.pcolormesh(
-        xs,
-        zs,
-        yarn_side,
-        cmap="Greys",
-        vmin=0,
-        vmax=1,
-        shading="nearest",
-        alpha=0.55,
-    )
-    for fam, pts in lines:
-        # Only draw segments near this y-cut (within ~tow half-width).
-        near = np.abs(pts[:, 1] - y0) < 0.12 * Ly
-        if not np.any(near):
-            # Warp yarns (constant y) may sit at y=0.25 etc — draw full x–z if
-            # the yarn's mean y is close, else skip weft (they run along y).
-            if fam == WEFT:
+        # --- (1) Centerline elevation: literal up/down undulation ---
+        fam_plotted = set()
+        for fam, pts in lines:
+            color = theme.family_colors[fam]
+            label = FAMILY_NAMES[fam] if fam not in fam_plotted else None
+            fam_plotted.add(fam)
+            if fam == WARP:
+                # Warp runs along x: plot z(x)
+                ax_el.plot(pts[:, 0], pts[:, 2], color=color, lw=1.4, label=label)
+            elif fam == WEFT:
+                # Weft runs along y: plot z(y) on the same horizontal "run" axis
+                ax_el.plot(
+                    pts[:, 1], pts[:, 2], color=color, lw=1.4, ls="--", label=label
+                )
+            else:
+                # Stitch / other: arc-length parameter vs z
+                run = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+                s_run = np.concatenate([[0.0], np.cumsum(run)])
+                ax_el.plot(s_run, pts[:, 2], color=color, lw=1.2, ls=":", label=label)
+        ax_el.axhline(mid_z, color="0.45", ls=":", lw=0.9, label="mid-plane")
+        # Mark peaks / troughs on warp lines for "up / down" callouts.
+        for fam, pts in lines:
+            if fam != WARP:
                 continue
-            ax_side.plot(
-                pts[:, 0],
-                pts[:, 2],
-                color=theme.family_colors[fam],
-                lw=1.6,
-                alpha=0.95,
+            z = pts[:, 2]
+            i_hi, i_lo = int(np.argmax(z)), int(np.argmin(z))
+            ax_el.scatter(
+                [pts[i_hi, 0]],
+                [z[i_hi]],
+                marker="^",
+                s=28,
+                c=theme.family_colors[WARP],
+                zorder=5,
+                label="up (over)" if "up" not in fam_plotted else None,
             )
-        else:
-            ax_side.plot(
-                pts[near, 0],
-                pts[near, 2],
-                color=theme.family_colors[fam],
-                lw=1.8,
-                alpha=0.95,
+            ax_el.scatter(
+                [pts[i_lo, 0]],
+                [z[i_lo]],
+                marker="v",
+                s=28,
+                c=theme.family_colors[WARP],
+                zorder=5,
+                label="down (under)" if "down" not in fam_plotted else None,
             )
-    ax_side.axhline(mid_z, color="0.4", ls=":", lw=0.8)
-    ax_side.set_xlabel("x")
-    ax_side.set_ylabel("z")
-    ax_side.set_title(f"side cut  y = {y0:.2f}  (up / down path)", pad=2)
-    ax_side.set_xlim(0, Lx)
-    ax_side.set_ylim(0, Lz)
-    ax_side.set_aspect("auto")
+            fam_plotted.add("up")
+            fam_plotted.add("down")
+            break
+        ax_el.set_xlabel("run  (warp: x · weft: y)")
+        ax_el.set_ylabel("z  (height)")
+        ax_el.set_title("yarn centerline undulation  (up / down)", pad=2)
+        ax_el.set_ylim(0.0, Lz)
+        ax_el.legend(fontsize=5.5, loc="upper right", framealpha=0.9)
+        ax_el.grid(True, alpha=0.25, lw=0.4)
 
-    fig.suptitle(
-        "Fibre orientation: in-plane arrows · out-of-plane up/down (crimp)",
-        fontsize=7.5,
-        y=1.02,
-    )
+        # --- (2) Plan map of path height (over / under islands) ---
+        hmax = (
+            float(np.nanmax(np.abs(h["height"])))
+            if np.any(np.isfinite(h["height"]))
+            else 1e-3
+        )
+        hmax = max(hmax, 1e-6)
+        m_h = ax_plan.pcolormesh(
+            h["u"],
+            h["v"],
+            h["height"],
+            cmap=theme.cmap_oop,
+            vmin=-hmax,
+            vmax=hmax,
+            shading="nearest",
+        )
+        # In-plane quiver + △/▽ for climbing / descending (sign of e1·n).
+        Us, Vs = d["U"][::s, ::s], d["V"][::s, ::s]
+        EUs, EVs, ENs = d["eu"][::s, ::s], d["ev"][::s, ::s], d["en"][::s, ::s]
+        ax_plan.quiver(
+            Us,
+            Vs,
+            EUs,
+            EVs,
+            color=theme.fibre_color,
+            scale=22,
+            width=0.0035,
+            pivot="mid",
+            alpha=0.85,
+        )
+        # Markers at arrow locations: up-triangle = fibre climbing (+n), down = descending.
+        flat_u, flat_v = Us.ravel(), Vs.ravel()
+        flat_en = ENs.ravel()
+        ok = np.isfinite(flat_en)
+        up = ok & (flat_en > 0.08)
+        dn = ok & (flat_en < -0.08)
+        ax_plan.scatter(
+            flat_u[up],
+            flat_v[up],
+            marker="^",
+            s=10,
+            c="#b2182b",
+            linewidths=0,
+            zorder=4,
+            label="climbing (+n)",
+        )
+        ax_plan.scatter(
+            flat_u[dn],
+            flat_v[dn],
+            marker="v",
+            s=10,
+            c="#2166ac",
+            linewidths=0,
+            zorder=4,
+            label="descending (−n)",
+        )
+        fig.colorbar(
+            m_h,
+            ax=ax_plan,
+            fraction=0.046,
+            pad=0.03,
+            label=rf"path {n_name} − mid  (over + / under −)",
+        )
+        ax_plan.set_title(f"mid-{axis}  path height  (over / under)", pad=2)
+        ax_plan.set_xlabel(u_name)
+        ax_plan.set_ylabel(v_name)
+        ax_plan.set_aspect("equal")
+        ax_plan.legend(fontsize=5.2, loc="upper right", framealpha=0.85)
 
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=_FIG_DPI, bbox_inches="tight")
-    plt.close(fig)
+        # --- (3) Side cut (x–z at mid-y): yarn body + undulating centerlines ---
+        y0 = 0.5 * Ly
+        nx, nz = max(80, grid), max(40, grid // 2)
+        xs = np.linspace(0, Lx, nx)
+        zs = np.linspace(0, Lz, nz)
+        X, Z = np.meshgrid(xs, zs)
+        side_pts = np.column_stack([X.ravel(), np.full(X.size, y0), Z.ravel()])
+        ids, _rot = problem.field.sample_arrays(side_pts)
+        yarn_side = (ids.reshape(X.shape) != 0).astype(float)
+        ax_side.pcolormesh(
+            xs,
+            zs,
+            yarn_side,
+            cmap="Greys",
+            vmin=0,
+            vmax=1,
+            shading="nearest",
+            alpha=0.55,
+        )
+        for fam, pts in lines:
+            # Only draw segments near this y-cut (within ~tow half-width).
+            near = np.abs(pts[:, 1] - y0) < 0.12 * Ly
+            if not np.any(near):
+                # Warp yarns (constant y) may sit at y=0.25 etc — draw full x–z if
+                # the yarn's mean y is close, else skip weft (they run along y).
+                if fam == WEFT:
+                    continue
+                ax_side.plot(
+                    pts[:, 0],
+                    pts[:, 2],
+                    color=theme.family_colors[fam],
+                    lw=1.6,
+                    alpha=0.95,
+                )
+            else:
+                ax_side.plot(
+                    pts[near, 0],
+                    pts[near, 2],
+                    color=theme.family_colors[fam],
+                    lw=1.8,
+                    alpha=0.95,
+                )
+        ax_side.axhline(mid_z, color="0.4", ls=":", lw=0.8)
+        ax_side.set_xlabel("x")
+        ax_side.set_ylabel("z")
+        ax_side.set_title(f"side cut  y = {y0:.2f}  (up / down path)", pad=2)
+        ax_side.set_xlim(0, Lx)
+        ax_side.set_ylim(0, Lz)
+        ax_side.set_aspect("auto")
+
+        fig.suptitle(
+            "Fibre orientation: in-plane arrows · out-of-plane up/down (crimp)",
+            fontsize=7.5,
+            y=1.02,
+        )
+
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=_FIG_DPI, bbox_inches="tight")
+        plt.close(fig)
     return out_path
 
 
@@ -637,13 +637,10 @@ def render_amr_snapshot(
     shade: str = "vf",
 ) -> tuple[Path, int, int]:
     """AMR mesh with plan (xy), top (xz) and side (yz) mid-plane cuts, Vf-shaded tows."""
-    import mfem.ser as mfem
+    from dataclasses import replace
 
-    from b3_tex.amr import (
-        cell_heterogeneity_metric_mfem,
-        flag_cells_for_refinement,
-        refine_flagged_cells_mfem,
-    )
+    from b3_tex.amr import cell_heterogeneity_metric_mfem
+    from b3_tex.backends.mfem_backend import build_mesh
     from b3_tex.viz._deps import require_matplotlib
     from b3_tex.viz.sampling import vf_clim
 
@@ -653,49 +650,65 @@ def render_amr_snapshot(
     Lx, Ly, Lz = (float(s) for s in problem.size)
     x0, y0, z0 = 0.25 * Lx, 0.5 * Ly, 0.5 * Lz
     nx, ny, nz = base_mesh or problem.mesh_resolution
-    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
-
-    metric = None
-    for it in range(iters + 1):
-        metric = cell_heterogeneity_metric_mfem(mesh, problem, n_samples_per_cell=216)
-        flagged = flag_cells_for_refinement(metric, threshold)
-        if it == iters or not flagged.any():
-            break
-        refine_flagged_cells_mfem(mesh, flagged)
+    solver = problem.solver.with_overrides(
+        amr={
+            "enabled": int(iters) > 0,
+            "max_iterations": int(iters),
+            "threshold": float(threshold),
+        }
+    )
+    view = replace(
+        problem,
+        mesh_resolution=(int(nx), int(ny), int(nz)),
+        solver=solver,
+    )
+    mesh = build_mesh(view).mesh
+    metric = cell_heterogeneity_metric_mfem(
+        mesh,
+        view,
+        n_samples_per_cell=int(view.solver.amr.n_samples_per_cell),
+    )
 
     clim = vf_clim(problem) if shade == "vf" else (0.0, 1.0)
-    plt.rcParams.update(
+    with plt.rc_context(
         {"font.size": 5.5, "axes.titlesize": 5.5, "axes.labelsize": 5.5}
-    )
-    total_w, total_h = Lz + Lx, Lz + Ly
-    scale = 2.85 / max(total_w, total_h)
-    fig = plt.figure(figsize=(total_w * scale, total_h * scale))
-    gs = fig.add_gridspec(
-        2, 2, width_ratios=[Lz, Lx], height_ratios=[Lz, Ly], hspace=0.06, wspace=0.06
-    )
-    ax_top = fig.add_subplot(gs[0, 1])
-    ax_side = fig.add_subplot(gs[1, 0])
-    ax_plan = fig.add_subplot(gs[1, 1])
-    fig.add_subplot(gs[0, 0]).axis("off")
+    ):
+        total_w, total_h = Lz + Lx, Lz + Ly
+        scale = 2.85 / max(total_w, total_h)
+        fig = plt.figure(figsize=(total_w * scale, total_h * scale))
+        gs = fig.add_gridspec(
+            2,
+            2,
+            width_ratios=[Lz, Lx],
+            height_ratios=[Lz, Ly],
+            hspace=0.06,
+            wspace=0.06,
+        )
+        ax_top = fig.add_subplot(gs[0, 1])
+        ax_side = fig.add_subplot(gs[1, 0])
+        ax_plan = fig.add_subplot(gs[1, 1])
+        fig.add_subplot(gs[0, 0]).axis("off")
 
-    common = dict(theme=theme, shade=shade, vf_clim=clim)
-    pc = _draw_amr_slice_panel(ax_top, mesh, metric, field, problem, 1, y0, **common)
-    ax_top.set_title(f"top  y={y0:.2f}", pad=0.8)
-    _draw_amr_slice_panel(ax_side, mesh, metric, field, problem, 0, x0, **common)
-    ax_side.set_title(f"side  x={x0:.2f}", pad=0.8)
-    _draw_amr_slice_panel(ax_plan, mesh, metric, field, problem, 2, z0, **common)
-    ax_plan.set_title(f"plan  z={z0:.2f}  ({mesh.GetNE()} cells)", pad=0.8)
-    _annotate_cut_plane_locations(
-        ax_plan, ax_top, ax_side, x0=x0, y0=y0, z0=z0, Lx=Lx, Ly=Ly
-    )
+        common = dict(theme=theme, shade=shade, vf_clim=clim)
+        pc = _draw_amr_slice_panel(
+            ax_top, mesh, metric, field, problem, 1, y0, **common
+        )
+        ax_top.set_title(f"top  y={y0:.2f}", pad=0.8)
+        _draw_amr_slice_panel(ax_side, mesh, metric, field, problem, 0, x0, **common)
+        ax_side.set_title(f"side  x={x0:.2f}", pad=0.8)
+        _draw_amr_slice_panel(ax_plan, mesh, metric, field, problem, 2, z0, **common)
+        ax_plan.set_title(f"plan  z={z0:.2f}  ({mesh.GetNE()} cells)", pad=0.8)
+        _annotate_cut_plane_locations(
+            ax_plan, ax_top, ax_side, x0=x0, y0=y0, z0=z0, Lx=Lx, Ly=Ly
+        )
 
-    fig.subplots_adjust(left=0.06, right=0.995, top=0.95, bottom=0.135)
-    cax = fig.add_axes([0.12, 0.035, 0.78, 0.026])
-    fig.colorbar(pc, cax=cax, orientation="horizontal", label="het. score")
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=_FIG_DPI)
-    plt.close(fig)
+        fig.subplots_adjust(left=0.06, right=0.995, top=0.95, bottom=0.135)
+        cax = fig.add_axes([0.12, 0.035, 0.78, 0.026])
+        fig.colorbar(pc, cax=cax, orientation="horizontal", label="het. score")
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=_FIG_DPI)
+        plt.close(fig)
 
     n_cells = mesh.GetNE()
     return out_path, n_cells, n_cells * 8  # q=2 hex tensor GL -> 8 GP/cell

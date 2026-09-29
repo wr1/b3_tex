@@ -1,0 +1,58 @@
+name: pre-commit autoupdate
+
+on:
+  schedule:
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  autoupdate:
+    name: pre-commit autoupdate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+
+      - name: Autoupdate hooks
+        id: update
+        run: |
+          pre-commit autoupdate
+          if git diff --quiet -- .pre-commit-config.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff -- .pre-commit-config.yaml > pre-commit-autoupdate.diff
+          fi
+
+      - name: Upload diff
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pre-commit-autoupdate.diff
+          path: pre-commit-autoupdate.diff
+
+      - name: Open pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B chore/pre-commit-autoupdate
+          git add .pre-commit-config.yaml
+          git commit -m "ci: pre-commit autoupdate"
+          git push --force-with-lease origin HEAD:chore/pre-commit-autoupdate
+          gh pr create --base master --head chore/pre-commit-autoupdate \
+            --title "ci: pre-commit autoupdate" \
+            --body "Monthly \`pre-commit autoupdate\` for \`.pre-commit-config.yaml\` (ruff-pre-commit)." \
+            || gh pr view chore/pre-commit-autoupdate --json url

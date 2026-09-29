@@ -3,6 +3,10 @@ title: YAML schema
 description: Field types, materials, domain, and solver blocks.
 ---
 
+Optional **card serialisation** for CLI and frozen lineage. Prefer
+[textile-as-code](/docs/reference/textile-as-code) for authoring new fabrics;
+both load into the same `RVEProblem`.
+
 Top-level keys:
 
 ```yaml
@@ -19,7 +23,7 @@ solver: { backend: ..., ... }
 
 | Type | Architecture | Example |
 |------|--------------|---------|
-| `woven` | 2D plain / twill / satin / basket | `weave_twill_2x2.yaml` |
+| `woven` | 2D plain / twill / satin / basket | `weave_twill_2x2.yaml` (or `.py`) |
 | `orthogonal` | 3D orthogonal | `woven_3d_orthogonal.yaml` |
 | `layer_to_layer` | 3D L2L interlock | `woven_layer_to_layer.yaml` |
 | `ncf` | Multi-axial NCF + stitch | `ncf_tricot_stitched.yaml` |

@@ -132,24 +132,6 @@ class HomogenizationResult:
             raise ValueError(
                 "effective_stiffness is not set; cannot compute engineering constants"
             )
-        S = np.linalg.inv(self.effective_stiffness)
-        e_x = 1.0 / S[0, 0]
-        e_y = 1.0 / S[1, 1]
-        e_z = 1.0 / S[2, 2]
-        nu_xy = -S[0, 1] / S[0, 0]
-        nu_xz = -S[0, 2] / S[0, 0]
-        nu_yz = -S[1, 2] / S[1, 1]
-        g_yz = 1.0 / S[3, 3]
-        g_xz = 1.0 / S[4, 4]
-        g_xy = 1.0 / S[5, 5]
-        return {
-            "e_x": float(e_x),
-            "e_y": float(e_y),
-            "e_z": float(e_z),
-            "nu_xy": float(nu_xy),
-            "nu_xz": float(nu_xz),
-            "nu_yz": float(nu_yz),
-            "g_yz": float(g_yz),
-            "g_xz": float(g_xz),
-            "g_xy": float(g_xy),
-        }
+        from b3_tex.tensors import engineering_constants
+
+        return engineering_constants(self.effective_stiffness)

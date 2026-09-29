@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from b3_tex.geometry.centerlines import (
-    PiecewiseLinearCenterline,
-    SinusoidalCenterline,
-)
+from b3_tex.geometry.centerlines import SinusoidalCenterline
 from b3_tex.geometry.cross_sections import SuperellipseSection
 from b3_tex.geometry.frames import (
     orthonormal_frame_along,
@@ -21,7 +18,10 @@ from b3_tex.geometry.yarn import ParametricYarn
 
 __all__ = [
     "CylinderYarnField",
+    "LayeredCrossplyField",
     "MultiStraightYarnField",
+    "FeatureSizeField",
+    "LocalVfField",
     "ParametricWeaveField",
     "PhaseField",
     "PhaseSample",
@@ -30,9 +30,11 @@ __all__ = [
     "WeaveField",
     "orthonormal_frame_along",
     "orthonormal_frame_along_batch",
-    "plain_weave_yarns",
-    "satin_weave_yarns",
-    "stitched_biaxial_yarns",
+    # Resolved by __getattr__ (removed in 0.3.0); not defined in this module.
+    "parametric_plain_weave_yarns",  # noqa: F822
+    "plain_weave_yarns",  # noqa: F822
+    "satin_weave_yarns",  # noqa: F822
+    "stitched_biaxial_yarns",  # noqa: F822
 ]
 
 
@@ -65,6 +67,20 @@ class PhaseField(Protocol):
         ...
 
     def sample(self, points: ArrayLike) -> list[PhaseSample]: ...
+
+
+@runtime_checkable
+class LocalVfField(Protocol):
+    """A phase field that reports in-tow fibre volume fraction."""
+
+    def sample_local_vf(self, points: ArrayLike) -> NDArray[np.float64]: ...
+
+
+@runtime_checkable
+class FeatureSizeField(Protocol):
+    """A phase field that knows its thinnest geometric feature."""
+
+    def min_feature_size(self) -> float: ...
 
 
 def _as_points_2d(points: ArrayLike) -> NDArray[np.float64]:
@@ -406,32 +422,36 @@ class ParametricWeaveField:
         inside = min_vals <= 1.0
         return best_k, inside, min_vals
 
-    def sample_arrays(
+    def sample_with_vf(
         self, points: ArrayLike
-    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64], NDArray[np.float64]]:
+        """One ``_winner`` pass: ``(ids, rotations, local_vf)``.
+
+        ``local_vf`` is ``nan`` on matrix points.
+        """
         pts = _as_points_2d(points)
         n = pts.shape[0]
         best_k, inside, _min_vals = self._winner(pts)
         rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
-        for k, yarn in enumerate(self.yarns):
-            mask = inside & (best_k == k)
-            if not np.any(mask):
-                continue
-            rotations[mask] = yarn.rotation_at(pts[mask])
-        ids = inside.astype(np.intp)
-        return ids, rotations
-
-    def sample_local_vf(self, points: ArrayLike) -> NDArray[np.float64]:
-        """Per-point local fibre volume fraction; ``nan`` where the point is matrix."""
-        pts = _as_points_2d(points)
-        n = pts.shape[0]
-        best_k, inside, _min_vals = self._winner(pts)
         vf = np.full(n, np.nan)
         for k, yarn in enumerate(self.yarns):
             mask = inside & (best_k == k)
             if not np.any(mask):
                 continue
+            rotations[mask] = yarn.rotation_at(pts[mask])
             vf[mask] = yarn.local_vf(pts[mask])
+        ids = inside.astype(np.intp)
+        return ids, rotations, vf
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+        ids, rotations, _vf = self.sample_with_vf(points)
+        return ids, rotations
+
+    def sample_local_vf(self, points: ArrayLike) -> NDArray[np.float64]:
+        """Per-point local fibre volume fraction; ``nan`` where the point is matrix."""
+        _ids, _rot, vf = self.sample_with_vf(points)
         return vf
 
     def sample(self, points: ArrayLike) -> list[PhaseSample]:
@@ -449,331 +469,6 @@ class ParametricWeaveField:
     def min_feature_size(self) -> float:
         """Smallest through-thickness across all yarns (thinnest semi-axis x2)."""
         return 2.0 * min(yarn.min_half_extent() for yarn in self.yarns)
-
-
-def _compacted_height(
-    half_height: float, compaction: float, period: float, phase: float
-):
-    """Section half-height that thins toward the undulation extremes (crossovers).
-
-    ``half_height(s) = h0 * (1 - compaction * sin(2*pi*s/period + phase)**2)``, so the
-    tow is least compressed mid-float and most compressed where it dips over/under
-    its neighbour — exactly where real tows are squeezed. ``compaction = 0`` returns
-    the constant nominal height.
-    """
-    if compaction <= 0.0:
-        return float(half_height)
-    h0 = float(half_height)
-
-    def fn(s: NDArray[np.float64]) -> NDArray[np.float64]:
-        return h0 * (1.0 - compaction * np.sin(2 * np.pi * s / period + phase) ** 2)
-
-    return fn
-
-
-def parametric_plain_weave_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    n_warp: int,
-    n_weft: int,
-    yarn_half_width: float,
-    yarn_half_height: float,
-    amplitude: float,
-    power: float = 2.0,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.9,
-    compaction: float = 0.0,
-    nest_crossover: bool = False,
-) -> tuple[ParametricYarn, ...]:
-    """Plain weave as :class:`ParametricYarn`s, optionally with a compressed
-    cross-section at crossovers (``compaction`` in ``[0, 1)``).
-
-    Geometry matches :func:`plain_weave_yarns`; the difference is that each yarn
-    carries a (possibly s-varying) super-ellipse section plus a nominal fibre
-    volume fraction, enabling the local-Vf pipeline.
-
-    With ``nest_crossover`` the centerline ``amplitude`` is *derived* from the
-    compacted section so the interlacing tows just touch at the crossovers
-    instead of leaving a matrix gap. At a crossover both tows sit at their
-    undulation extreme (``sin^2 = 1``), so their compacted half-height is
-    ``yarn_half_height * (1 - compaction)``; setting the amplitude equal to that
-    puts each tow's facing surface exactly on the mid-plane ``z_mid`` (warp
-    bottom == weft top). The passed ``amplitude`` is ignored in this mode.
-    """
-    if n_warp < 2 or n_weft < 2 or n_warp % 2 or n_weft % 2:
-        raise ValueError("n_warp and n_weft must both be even and >= 2")
-    if nest_crossover:
-        amplitude = yarn_half_height * (1.0 - compaction)
-    Lx, Ly, Lz = domain_size
-    z_mid = 0.5 * Lz
-    period_x = 2.0 * Lx / n_weft
-    period_y = 2.0 * Ly / n_warp
-
-    yarns: list[ParametricYarn] = []
-    for j in range(n_warp):
-        y_pos = (j + 0.5) * Ly / n_warp
-        phase = (j % 2) * np.pi
-        cl = SinusoidalCenterline(
-            axis="x",
-            inplane_position=y_pos,
-            z_mid=z_mid,
-            amplitude=amplitude,
-            period=period_x,
-            phase=phase,
-            s_min=0.0,
-            s_max=Lx,
-        )
-        sec = SuperellipseSection(
-            half_width=yarn_half_width,
-            half_height=_compacted_height(
-                yarn_half_height, compaction, period_x, phase
-            ),
-            power=power,
-        )
-        yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
-    for i in range(n_weft):
-        x_pos = (i + 0.5) * Lx / n_weft
-        phase = (i % 2) * np.pi + np.pi
-        cl = SinusoidalCenterline(
-            axis="y",
-            inplane_position=x_pos,
-            z_mid=z_mid,
-            amplitude=amplitude,
-            period=period_y,
-            phase=phase,
-            s_min=0.0,
-            s_max=Ly,
-        )
-        sec = SuperellipseSection(
-            half_width=yarn_half_width,
-            half_height=_compacted_height(
-                yarn_half_height, compaction, period_y, phase
-            ),
-            power=power,
-        )
-        yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
-    return tuple(yarns)
-
-
-def satin_weave_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    n_harness: int,
-    shift: int = 2,
-    yarn_half_width: float,
-    yarn_half_height: float,
-    amplitude: float,
-    power: float = 2.0,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.9,
-) -> tuple[ParametricYarn, ...]:
-    """N-harness satin weave as :class:`ParametricYarn`s (long floats, low crimp).
-
-    An ``n_harness`` satin on an ``N x N`` repeat: each warp floats *over* ``N-1``
-    wefts and dips *under* exactly one, the interlacing point stepping by ``shift``
-    columns per row (``shift`` must be coprime with ``N``: e.g. 5H/step-2, 8H/step-3).
-    Wefts are the complement. Centerlines are float-and-dip polylines, so the
-    crimp is concentrated at the single interlacing point rather than spread over
-    every crossing (the defining feature of a satin vs a plain weave).
-    """
-    N = int(n_harness)
-    if N < 4:
-        raise ValueError("n_harness must be >= 4 (use plain_weave for N<=2)")
-    if np.gcd(N, int(shift)) != 1:
-        raise ValueError(f"shift={shift} must be coprime with n_harness={N}")
-    Lx, Ly, Lz = domain_size
-    z_mid = 0.5 * Lz
-    z_hi, z_lo = z_mid + amplitude, z_mid - amplitude
-    cols = [(i + 0.5) * Lx / N for i in range(N)]
-    rows = [(j + 0.5) * Ly / N for j in range(N)]
-    inv_shift = pow(int(shift), -1, N)
-
-    sec = SuperellipseSection(
-        half_width=yarn_half_width, half_height=yarn_half_height, power=power
-    )
-
-    def _polyline(running: str, fixed: float, sample_positions, dip_index, span):
-        """Build a polyline yarn: z_lo at the single dip index, z_hi elsewhere."""
-        pts = []
-        for idx, t in enumerate(sample_positions):
-            z = z_lo if idx == dip_index else z_hi
-            pts.append((t, z))
-        # Periodic-ish endpoints (z_hi floats dominate the seam).
-        pts = [(0.0, z_hi), *pts, (span, z_hi)]
-        coords = np.zeros((len(pts), 3))
-        run_ax = _AXIS_INDEX[running]
-        fix_ax = _AXIS_INDEX["y" if running == "x" else "x"]
-        for r, (t, z) in enumerate(pts):
-            coords[r, run_ax] = t
-            coords[r, fix_ax] = fixed
-            coords[r, 2] = z
-        return PiecewiseLinearCenterline(coords)
-
-    yarns: list[ParametricYarn] = []
-    # Warps along x: dip under at weft column c_j = (j*shift) % N.
-    for j in range(N):
-        c_j = (j * int(shift)) % N
-        cl = _polyline("x", rows[j], cols, c_j, Lx)
-        yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
-    # Wefts along y: rise over at warp row r_i = (i*inv_shift) % N (complement pattern).
-    for i in range(N):
-        r_i = (i * inv_shift) % N
-        # Weft is z_hi only at its single over-point; build with inverted default.
-        coords = np.zeros((N + 2, 3))
-        coords[1:-1, 1] = rows
-        coords[1:-1, 0] = cols[i]
-        coords[1:-1, 2] = np.where(np.arange(N) == r_i, z_hi, z_lo)
-        coords[0] = [cols[i], 0.0, z_lo]
-        coords[-1] = [cols[i], Ly, z_lo]
-        cl = PiecewiseLinearCenterline(coords)
-        yarns.append(ParametricYarn(cl, sec, nominal_vf=nominal_vf, max_vf=max_vf))
-    return tuple(yarns)
-
-
-def plain_weave_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    n_warp: int,
-    n_weft: int,
-    yarn_half_width: float,
-    yarn_half_height: float,
-    amplitude: float,
-    power: float = 2.0,
-) -> tuple[SinusoidalYarn, ...]:
-    """Build a tuple of SinusoidalYarn matching a plain-weave (1x1) pattern.
-
-    Yarn count: ``n_warp`` warp yarns evenly spaced in y, plus ``n_weft`` weft
-    yarns evenly spaced in x. Adjacent warps alternate phase 0 / pi so each
-    crosses the wefts in opposite phase. The weft phase is offset by pi
-    relative to the warp so warp and weft are over/under at every crossing.
-
-    Yarn cross-section is an ellipse with in-plane semi-axis ``yarn_half_width``
-    and out-of-plane semi-axis ``yarn_half_height`` (typically half_width >
-    half_height for woven textiles).
-    """
-    if n_warp < 2 or n_weft < 2 or n_warp % 2 or n_weft % 2:
-        # Half-sine between adjacent crossings is only single-cell periodic when the
-        # number of crossings per axis is even; otherwise the warp z at x=0 and x=Lx
-        # differ by sign and the RVE is not periodic.
-        raise ValueError("n_warp and n_weft must both be even and >= 2")
-    Lx, Ly, Lz = domain_size
-    z_mid = 0.5 * Lz
-
-    # Period = 2 * (crossing spacing) so the warp goes from +amp at one weft to
-    # -amp at the next adjacent weft (one half-sine per crossing-to-crossing
-    # span). With period = Lx/n_weft the warp would instead complete a full
-    # sine between adjacent wefts and pass through z_mid at every crossing,
-    # making warps and wefts coincide on the median plane.
-    period_x = 2.0 * Lx / n_weft
-    period_y = 2.0 * Ly / n_warp
-
-    yarns: list[SinusoidalYarn] = []
-    for j in range(n_warp):
-        y_pos = (j + 0.5) * Ly / n_warp
-        phase = (j % 2) * np.pi
-        yarns.append(
-            SinusoidalYarn(
-                axis="x",
-                inplane_position=y_pos,
-                z_mid=z_mid,
-                amplitude=amplitude,
-                period=period_x,
-                phase=phase,
-                half_width=yarn_half_width,
-                half_height=yarn_half_height,
-                power=power,
-            )
-        )
-    for i in range(n_weft):
-        x_pos = (i + 0.5) * Lx / n_weft
-        phase = (i % 2) * np.pi + np.pi
-        yarns.append(
-            SinusoidalYarn(
-                axis="y",
-                inplane_position=x_pos,
-                z_mid=z_mid,
-                amplitude=amplitude,
-                period=period_y,
-                phase=phase,
-                half_width=yarn_half_width,
-                half_height=yarn_half_height,
-                power=power,
-            )
-        )
-    return tuple(yarns)
-
-
-def stitched_biaxial_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    ply_z_centers: tuple[float, float],
-    n_warp: int,
-    n_weft: int,
-    tow_radius: float,
-    n_stitches_x: int,
-    n_stitches_y: int,
-    stitch_radius: float,
-) -> tuple[StraightYarn, ...]:
-    """Build a tuple of StraightYarn for a stitched biaxial NCF (non-crimp fabric).
-
-    Layout (idealised, in the style of TexGen's stitched NCF test fixtures):
-
-      * ``n_warp`` straight tows running along **x** at ``z = ply_z_centers[0]``,
-        evenly spaced in y at positions ``(j + 0.5) * Ly / n_warp``.
-      * ``n_weft`` straight tows running along **y** at ``z = ply_z_centers[1]``,
-        evenly spaced in x at positions ``(i + 0.5) * Lx / n_weft``.
-      * An ``n_stitches_x x n_stitches_y`` grid of through-thickness stitches
-        running along **z**, with axis points on the same ``(i+0.5)/n``-style
-        grid so the layout is RVE-periodic.
-
-    Stitches are appended **after** the plies so that
-    :class:`MultiStraightYarnField`'s first-contains-wins resolution treats any
-    overlap region as ply (the physically dominant phase) rather than stitch.
-    """
-    if n_warp <= 0 or n_weft <= 0:
-        raise ValueError("n_warp and n_weft must be positive")
-    if n_stitches_x <= 0 or n_stitches_y <= 0:
-        raise ValueError("n_stitches_x and n_stitches_y must be positive")
-    if tow_radius <= 0 or stitch_radius <= 0:
-        raise ValueError("tow_radius and stitch_radius must be positive")
-    Lx, Ly, Lz = domain_size
-    if Lx <= 0 or Ly <= 0 or Lz <= 0:
-        raise ValueError("domain_size components must be positive")
-    z_warp, z_weft = ply_z_centers
-    if not (0.0 <= z_warp <= Lz) or not (0.0 <= z_weft <= Lz):
-        raise ValueError("ply_z_centers must lie within [0, Lz]")
-
-    yarns: list[StraightYarn] = []
-    for j in range(n_warp):
-        y_pos = (j + 0.5) * Ly / n_warp
-        yarns.append(
-            StraightYarn(
-                axis_point=np.array([0.0, y_pos, z_warp]),
-                axis_direction=np.array([1.0, 0.0, 0.0]),
-                radius=tow_radius,
-            )
-        )
-    for i in range(n_weft):
-        x_pos = (i + 0.5) * Lx / n_weft
-        yarns.append(
-            StraightYarn(
-                axis_point=np.array([x_pos, 0.0, z_weft]),
-                axis_direction=np.array([0.0, 1.0, 0.0]),
-                radius=tow_radius,
-            )
-        )
-    for i in range(n_stitches_x):
-        for j in range(n_stitches_y):
-            x_pos = (i + 0.5) * Lx / n_stitches_x
-            y_pos = (j + 0.5) * Ly / n_stitches_y
-            yarns.append(
-                StraightYarn(
-                    axis_point=np.array([x_pos, y_pos, 0.0]),
-                    axis_direction=np.array([0.0, 0.0, 1.0]),
-                    radius=stitch_radius,
-                )
-            )
-    return tuple(yarns)
 
 
 @dataclass(frozen=True)
@@ -824,3 +519,118 @@ class MultiStraightYarnField:
         names = self.material_names()
         ids, rotations = self.sample_arrays(pts)
         return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
+
+
+@dataclass(frozen=True)
+class LayeredCrossplyField:
+    """Continuum [0/90] slabs stacked in *z* (method-validation / packing-matched).
+
+    With ``yarn_vf=1`` the RVE is pure ply material (fibre // x then // y).
+    With ``0 < yarn_vf < 1`` and ``matrix_material`` set, plies occupy a centered
+    fraction ``yarn_vf`` of the thickness (equal 0°/90° split) and matrix fills
+    the skins — so RVE fibre content can match a weave (``vf_f ≈ yarn_vf * vf_tow``).
+    """
+
+    ply_material: str
+    z_min: float
+    z_max: float
+    # Among the *ply* stack only: fraction for 0° vs 90° (usually 0.5).
+    z_split_fraction: float = 0.5
+    # Total thickness fraction occupied by plies (rest is matrix skins if matrix set).
+    yarn_vf: float = 1.0
+    matrix_material: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.z_max <= self.z_min:
+            raise ValueError("z_max must exceed z_min")
+        f = float(self.z_split_fraction)
+        if not 0.0 < f < 1.0:
+            raise ValueError("z_split_fraction must be in (0, 1)")
+        yv = float(self.yarn_vf)
+        if not 0.0 < yv <= 1.0:
+            raise ValueError("yarn_vf must be in (0, 1]")
+        if yv < 1.0 and not self.matrix_material:
+            raise ValueError("matrix_material required when yarn_vf < 1")
+        object.__setattr__(self, "z_split_fraction", f)
+        object.__setattr__(self, "yarn_vf", yv)
+
+    @property
+    def yarn_material(self) -> str:
+        return self.ply_material
+
+    def material_names(self) -> tuple[str, ...]:
+        if self.matrix_material and self.yarn_vf < 1.0:
+            return (self.matrix_material, self.ply_material)
+        return (self.ply_material,)
+
+    def _ply_z_bounds(self) -> tuple[float, float, float]:
+        """Return ``(z_ply0, z_mid, z_ply1)`` edges of the centered ply stack."""
+        H = self.z_max - self.z_min
+        z_mid = 0.5 * (self.z_min + self.z_max)
+        half = 0.5 * self.yarn_vf * H
+        z0 = z_mid - half
+        z1 = z_mid + half
+        z_split = z0 + self.z_split_fraction * (z1 - z0)
+        return z0, z_split, z1
+
+    def sample_arrays(
+        self, points: ArrayLike
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+        pts = _as_points_2d(points)
+        n = pts.shape[0]
+        z0, z_split, z1 = self._ply_z_bounds()
+        R0 = np.eye(3)
+        R90 = np.array(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float
+        )
+        rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
+        z = pts[:, 2]
+        in_ply = (z >= z0) & (z < z1)
+        upper = in_ply & (z >= z_split)
+        lower = in_ply & (z < z_split)
+        if np.any(lower):
+            rotations[lower] = R0
+        if np.any(upper):
+            rotations[upper] = R90
+        if self.matrix_material and self.yarn_vf < 1.0:
+            # 0 = matrix, 1 = ply
+            ids = in_ply.astype(np.intp)
+        else:
+            ids = np.zeros(n, dtype=np.intp)
+        return ids, rotations
+
+    def sample(self, points: ArrayLike) -> list[PhaseSample]:
+        pts = _as_points_2d(points)
+        names = self.material_names()
+        ids, rotations = self.sample_arrays(pts)
+        return [PhaseSample(names[ids[i]], rotations[i]) for i in range(pts.shape[0])]
+
+
+_LEGACY_YARN_BUILDERS = frozenset(
+    {
+        "parametric_plain_weave_yarns",
+        "plain_weave_yarns",
+        "satin_weave_yarns",
+        "stitched_biaxial_yarns",
+    }
+)
+
+
+def __getattr__(name: str):
+    """Deprecated yarn builders now live in :mod:`b3_tex.generators.legacy`.
+
+    Removed in 0.3.0.
+    """
+    if name in _LEGACY_YARN_BUILDERS:
+        import warnings
+
+        warnings.warn(
+            f"b3_tex.fields.{name} is deprecated; "
+            f"use b3_tex.generators.legacy.{name}. Removed in 0.3.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        import b3_tex.generators.legacy as legacy
+
+        return getattr(legacy, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

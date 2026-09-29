@@ -11,6 +11,9 @@ Everything is the *sampled implicit field* — no tow mesh is constructed.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +33,8 @@ from b3_tex.viz.sampling import sample_volume, vf_clim
 from b3_tex.viz.scene import WeaveScene
 from b3_tex.viz.theme import Theme, classify_family
 
+logger = logging.getLogger(__name__)
+
 _TITLE = "Implicit AMR modelling of woven composites"
 
 
@@ -38,16 +43,40 @@ _TITLE = "Implicit AMR modelling of woven composites"
 # ----------------------------------------------------------------------------
 
 
-def _resolve_c_eff(problem, c_eff) -> np.ndarray:
-    if c_eff is None:
-        from b3_tex.datasheet import solve_homogenization
+def _explainer_cache(cache_dir, problem, kind: str, *parts: object) -> Path | None:
+    """Cache path keyed by problem size, mesh, backend, and the extra parts.
 
-        print("Homogenizing once for the stiffness-surface finale...", flush=True)
-        C = solve_homogenization(problem).effective_stiffness
-        cache = Path("results/weave_explainer_C_eff.npz")
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(cache, effective_stiffness=C)
-        return np.asarray(C, dtype=float)
+    Returns None when ``cache_dir`` is unset. The explainer does not write
+    under the caller's working directory.
+    """
+    if cache_dir is None:
+        return None
+    payload = {
+        "kind": kind,
+        "size": [float(v) for v in problem.size],
+        "mesh": [int(v) for v in problem.mesh_resolution],
+        "backend": str(problem.solver.backend),
+        "sampling": problem.solver.material_sampling.to_dict(),
+        "parts": [str(part) for part in parts],
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    root = Path(cache_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{kind}-{digest[:16]}.npz"
+
+
+def _resolve_c_eff(problem, c_eff, cache_dir=None) -> np.ndarray:
+    if c_eff is None:
+        cache = _explainer_cache(cache_dir, problem, "C_eff")
+        if cache is not None and cache.is_file():
+            return np.asarray(np.load(cache)["effective_stiffness"], dtype=float)
+        from b3_tex.api import homogenize
+
+        logger.info("homogenizing for the stiffness-surface finale")
+        C = np.asarray(homogenize(problem).effective_stiffness, dtype=float)
+        if cache is not None:
+            np.savez(cache, effective_stiffness=C)
+        return C
     if isinstance(c_eff, (str, Path)):
         return np.asarray(np.load(c_eff)["effective_stiffness"], dtype=float)
     return np.asarray(c_eff, dtype=float)
@@ -105,28 +134,30 @@ def _cross_section_mesh(yarn, cl, s_val, *, hw, hv, nu=84, nv=44):
     return disc if disc.n_points else None
 
 
-def _loadcase_fibre_strain(problem, surf_pts, *, res, solve_mesh=(24, 24, 6)):
+def _loadcase_fibre_strain(
+    problem, surf_pts, *, res, solve_mesh=(24, 24, 6), cache_dir=None
+):
     """Fibre-axial *microscale* strain on the iso surface for all 6 loadcases.
 
     Solves the 6 periodic unit-strain loadcases (one session, reused), projects the
     per-GP total micro-strain onto the local fibre direction (e1.eps.e1 — signed),
-    and maps it to the surface by nearest Gauss point. Returns (6, n_surf). Cached
-    by ``res`` so re-renders skip the solve.
+    and maps it to the surface by nearest Gauss point. Returns (6, n_surf).
+    A file cache is written only when ``cache_dir`` is set.
     """
     import dataclasses
 
-    cache = Path(f"results/weave_explainer_lcstrain_res{res}.npz")
-    if cache.is_file():
+    cache = _explainer_cache(cache_dir, problem, "lcstrain", res, solve_mesh)
+    if cache is not None and cache.is_file():
         data = np.load(cache)
         if data["eps"].shape[1] == len(surf_pts):
             return data["eps"]
 
     from scipy.spatial import cKDTree
 
-    from b3_tex.backends.mfem_backend import make_periodic_session
+    from b3_tex.backends.registry import get_backend
 
     pr = dataclasses.replace(problem, mesh_resolution=tuple(solve_mesh))
-    session = make_periodic_session(pr)
+    session = get_backend("mfem-periodic").load().make_session(pr)
     gp = np.asarray(session.gp_coords)
     _, rot = pr.field.sample_arrays(gp)
     e1 = np.asarray(rot)[:, :, 0]
@@ -148,8 +179,8 @@ def _loadcase_fibre_strain(problem, surf_pts, *, res, solve_mesh=(24, 24, 6)):
             + eps[:, 5] * e1[:, 0] * e1[:, 1]
         )
         out[k] = ax[idx]
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(cache, eps=out)
+    if cache is not None:
+        np.savez(cache, eps=out)
     return out
 
 
@@ -197,18 +228,13 @@ def _amr_pass_actors(
     plotter, problem, theme, *, base=(10, 10, 3), max_iters=3, threshold=0.2
 ):
     """One clipped, het-coloured grid actor per refinement pass (for a crossfade)."""
-    import mfem.ser as mfem
-
-    from b3_tex.amr import (
-        cell_heterogeneity_metric_mfem,
-        flag_cells_for_refinement,
-        refine_flagged_cells_mfem,
-    )
+    from b3_tex.amr import cell_heterogeneity_metric_mfem, flag_cells_for_refinement
+    from b3_tex.backends._amr_mfem import cartesian_hex_mesh, refine_flagged_cells
     from b3_tex.viz.mesh_bridge import to_pyvista_grid
 
     Lx, Ly, Lz = (float(s) for s in problem.size)
     nx, ny, nz = base
-    mesh = mfem.Mesh.MakeCartesian3D(nx, ny, nz, mfem.Element.HEXAHEDRON, Lx, Ly, Lz)
+    mesh = cartesian_hex_mesh(nx, ny, nz, (Lx, Ly, Lz))
     actors = []
     for it in range(max_iters + 1):
         metric = cell_heterogeneity_metric_mfem(mesh, problem, n_samples_per_cell=216)
@@ -228,7 +254,7 @@ def _amr_pass_actors(
         flagged = flag_cells_for_refinement(metric, threshold)
         if it == max_iters or not flagged.any():
             break
-        refine_flagged_cells_mfem(mesh, flagged)
+        refine_flagged_cells(mesh, flagged)
     return actors
 
 
@@ -247,6 +273,7 @@ def weave_explainer(
     title: str = _TITLE,
     handle: str | None = None,
     c_eff=None,
+    cache_dir: str | Path | None = None,
     logo: str | Path | None = None,
     captions: bool = True,
     window_px: int = 1080,
@@ -255,11 +282,11 @@ def weave_explainer(
     from b3_tex.viz._deps import require_pyvista
 
     pv = require_pyvista()
-    C = _resolve_c_eff(problem, c_eff)
-    from b3_tex.postprocess import engineering_constants_from_S
+    C = _resolve_c_eff(problem, c_eff, cache_dir=cache_dir)
+    from b3_tex.tensors import engineering_constants
 
-    ec = engineering_constants_from_S(np.linalg.inv(C))
-    Ex, Ey, Ez = ec["E_x"] / 1e9, ec["E_y"] / 1e9, ec["E_z"] / 1e9
+    ec = engineering_constants(C)
+    Ex, Ey, Ez = ec["e_x"] / 1e9, ec["e_y"] / 1e9, ec["e_z"] / 1e9
 
     L = np.asarray(problem.size, dtype=float)
     Lx, Ly, Lz = (float(v) for v in L)
@@ -342,7 +369,9 @@ def weave_explainer(
     iso_pts = np.asarray(iso_data.points, dtype=float)
     # colour each loadcase by the FE microscale fibre-axial strain (signed, O(1) and
     # heterogeneous for every loadcase) so all six read as the same strain field.
-    eps_axial = _loadcase_fibre_strain(problem, iso_pts, res=res)  # (6, npts)
+    eps_axial = _loadcase_fibre_strain(
+        problem, iso_pts, res=res, cache_dir=cache_dir
+    )  # (6, npts)
     # shared diverging scale set to the *typical* loadcase (median per-panel range) so
     # every panel reads as the same strain field — tension saturates, shears stay legible.
     m = float(np.median(np.percentile(np.abs(eps_axial), 99, axis=1)))

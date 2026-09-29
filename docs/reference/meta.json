@@ -2,6 +2,7 @@
   "title": "Reference",
   "pages": [
     "architecture",
+    "textile-as-code",
     "cli",
     "micromechanics",
     "yaml-schema"

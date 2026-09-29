@@ -38,6 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
+from b3_tex.api import homogenize
+from b3_tex.backends.registry import BackendUnavailableError
 from b3_tex.problem import RVEProblem
 
 EXAMPLES = Path(__file__).resolve().parent
@@ -86,38 +88,39 @@ def engineering_constants(c_eff: np.ndarray) -> dict[str, float]:
     }
 
 
-def _load_solver(backend: str):
-    if "mfem" in backend and "kubc" not in backend:
-        from b3_tex.backends.mfem_backend import solve_periodic
-
-        return solve_periodic
-    if "mfem" in backend:
-        from b3_tex.backends.mfem_backend import solve
-
-        return solve
-    if "dolfinx" in backend and "kubc" not in backend:
-        from b3_tex.backends.dolfinx_periodic_backend import solve
-
-        return solve
-    from b3_tex.backends.dolfinx_backend import solve
-
-    return solve
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
 
 
 def try_solve(problem: RVEProblem, backend: str):
     """Solve with the configured backend; fall back to dolfinx-periodic if it is
     unavailable. Returns the result or None if no backend is installed."""
-    for candidate in (backend, "dolfinx-periodic"):
+    requested = _canonical_backend(backend)
+    for candidate in (requested, "dolfinx-periodic"):
         try:
-            solve = _load_solver(candidate)
-            result = solve(problem)
-            if candidate != backend:
+            result = homogenize(problem, backend=candidate)
+            if candidate != requested:
                 print(
                     f"    (configured backend {backend!r} unavailable; "
                     f"used {candidate!r})"
                 )
             return result
-        except Exception as exc:  # backends are optional at runtime
+        except BackendUnavailableError as exc:
             print(f"    [skip {candidate}] {type(exc).__name__}: {exc}")
     return None
 
@@ -139,7 +142,7 @@ def main() -> None:
             )
         entry = {"yarn_vf": vf, "local_vf": lvf, "config": fname}
 
-        backend = problem.solver.get("backend", "mfem-periodic")
+        backend = problem.solver.backend
         result = try_solve(problem, backend)
         if result is not None:
             c_eff = np.asarray(result.effective_stiffness)

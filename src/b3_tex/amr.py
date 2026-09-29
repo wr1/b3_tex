@@ -30,7 +30,10 @@ type or FE framework.
 
 from __future__ import annotations
 
+import importlib
 import logging
+import warnings
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -41,6 +44,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# mfem.Geometry.TETRAHEDRON and CUBE. Compared as ints so scoring stays import-free.
+_MFEM_TET = 4
+_MFEM_CUBE = 5
+
+
+@dataclass
+class AMRRun:
+    """Mesh after heterogeneity refinement, plus how many passes actually ran."""
+
+    mesh: Any
+    iterations_performed: int = 0
+
 
 # Default marker density: 6^3 tensor grid. Dense enough for interface scoring
 # on typical base meshes; spacing-aware guard still raises N for thin features
@@ -56,32 +72,32 @@ DEFAULT_CELLS_ACROSS: int = 4
 DEFAULT_MAX_SUB_SAMPLES: int = 32_768  # M <= 32 per cell when the spacing guard fires
 
 
-def amr_loop_kwargs(amr_cfg: dict, *, mfem: bool = False) -> dict:
-    """Translate a ``solver.amr`` config dict into ``iteratively_refine``[``_mfem``]
-    keyword arguments. Absent keys fall back to package defaults;
-    ``min_feature_size`` is only forwarded when set explicitly, otherwise the
-    loop auto-derives it from the field.
+def amr_loop_kwargs(cfg: Any, *, mfem: bool = False) -> dict:
+    """Translate ``solver.amr`` into ``iteratively_refine``[``_mfem``] kwargs.
 
-    Set ``mfem=True`` to include MFEM-only knobs (``two_pass``, ``coarse_n_samples``).
+    ``min_feature_size`` is forwarded only when set, otherwise the loop
+    derives it from the field. ``mfem=True`` adds MFEM-only knobs.
+    Defaults live on :class:`b3_tex.config.AMRConfig` (threshold 0.20,
+    max_iterations 2).
     """
+    from b3_tex.config import AMRConfig
+
+    if not isinstance(cfg, AMRConfig):
+        cfg = AMRConfig.from_mapping(cfg)
     kwargs = {
-        "threshold": float(amr_cfg.get("threshold", 0.15)),
-        "max_iterations": int(amr_cfg.get("max_iterations", 4)),
-        "dof_budget": int(amr_cfg.get("dof_budget", 200_000)),
-        "n_samples_per_cell": int(
-            amr_cfg.get("n_samples_per_cell", DEFAULT_AMR_SUB_SAMPLES)
-        ),
-        "cells_across": int(amr_cfg.get("cells_across", DEFAULT_CELLS_ACROSS)),
-        "max_sub_samples": int(amr_cfg.get("max_sub_samples", DEFAULT_MAX_SUB_SAMPLES)),
-        "band": float(amr_cfg.get("band", 0.0)),
+        "threshold": float(cfg.threshold),
+        "max_iterations": int(cfg.max_iterations),
+        "dof_budget": int(cfg.dof_budget),
+        "n_samples_per_cell": int(cfg.n_samples_per_cell),
+        "cells_across": int(cfg.cells_across),
+        "max_sub_samples": int(cfg.max_sub_samples),
+        "band": float(cfg.band),
     }
-    if amr_cfg.get("min_feature_size") is not None:
-        kwargs["min_feature_size"] = float(amr_cfg["min_feature_size"])
+    if cfg.min_feature_size is not None:
+        kwargs["min_feature_size"] = float(cfg.min_feature_size)
     if mfem:
-        kwargs["two_pass"] = bool(amr_cfg.get("two_pass", True))
-        kwargs["coarse_n_samples"] = int(
-            amr_cfg.get("coarse_n_samples", COARSE_AMR_SUB_SAMPLES)
-        )
+        kwargs["two_pass"] = bool(cfg.two_pass)
+        kwargs["coarse_n_samples"] = int(cfg.coarse_n_samples)
     return kwargs
 
 
@@ -331,7 +347,9 @@ def _resolve_feature_guard(
     """Resolve the effective feature size (explicit value, else the field's own
     ``min_feature_size()``) and the cell-size floor ``h_min``. Returns
     ``(min_feature_size, h_min)``; both ``None`` disables the presence floor."""
-    if min_feature_size is None and hasattr(field, "min_feature_size"):
+    from b3_tex.fields import FeatureSizeField
+
+    if min_feature_size is None and isinstance(field, FeatureSizeField):
         min_feature_size = float(field.min_feature_size())
     if not min_feature_size or min_feature_size <= 0.0:
         return None, None
@@ -371,20 +389,9 @@ def _signals_dolfinx(
 
 
 def refine_flagged_cells(mesh: Any, flagged: NDArray[np.bool_]) -> Any:
-    """One Plaza red-green pass on edges incident to flagged cells, via
-    ``dolfinx.mesh.refine`` (tet only in DOLFINx 0.10). Returns the refined
-    mesh."""
-    import dolfinx
-
-    tdim = mesh.topology.dim
-    mesh.topology.create_connectivity(tdim, 1)
-    c2e = mesh.topology.connectivity(tdim, 1)
-    edges_to_refine: set[int] = set()
-    for c in np.where(flagged)[0]:
-        edges_to_refine.update(int(e) for e in c2e.links(c))
-    edge_indices = np.fromiter(sorted(edges_to_refine), dtype=np.int32)
-    refined_mesh, *_ = dolfinx.mesh.refine(mesh, edge_indices)
-    return refined_mesh
+    """One Plaza red-green pass. Implemented in ``backends._amr_dolfinx``."""
+    mod = importlib.import_module("b3_tex.backends._amr_dolfinx")
+    return mod.refine_flagged_cells(mesh, flagged)
 
 
 def iteratively_refine(
@@ -409,6 +416,40 @@ def iteratively_refine(
     added so thin tows a coarse cell under-counts are still refined, down to a
     cell size of ``min_feature_size / cells_across``. With no feature size the
     loop reduces exactly to the original ``metric > threshold`` rule."""
+    warnings.warn(
+        "amr.iteratively_refine is deprecated; use backends._amr_dolfinx.iteratively_refine. "
+        "Removed in 0.3.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _iteratively_refine_loop(
+        initial_mesh,
+        problem,
+        threshold=threshold,
+        max_iterations=max_iterations,
+        dof_budget=dof_budget,
+        n_samples_per_cell=n_samples_per_cell,
+        min_feature_size=min_feature_size,
+        cells_across=cells_across,
+        max_sub_samples=max_sub_samples,
+        band=band,
+    )
+
+
+def _iteratively_refine_loop(
+    initial_mesh: Any,
+    problem: "RVEProblem",
+    *,
+    threshold: float = 0.15,
+    max_iterations: int = 4,
+    dof_budget: int = 200_000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
+    min_feature_size: float | None = None,
+    cells_across: int = DEFAULT_CELLS_ACROSS,
+    max_sub_samples: int = DEFAULT_MAX_SUB_SAMPLES,
+    band: float = 0.0,
+) -> Any:
+    """DOLFINx AMR loop without the public-wrapper deprecation warning."""
     mesh = initial_mesh
     field = problem.field
     min_feature_size, h_min = _resolve_feature_guard(
@@ -488,19 +529,17 @@ def cell_heterogeneity_metric_mfem(
     sub-point pattern is the same for every cell (one reference-space
     draw, reused), so cells related by mesh symmetries receive identical
     metric values and the AMR refinement preserves problem symmetries."""
-    import mfem.ser as mfem
-
     rng = np.random.default_rng(seed)
     n_cells = mesh.GetNE()
 
     geom = mesh.GetElement(0).GetGeometryType()
     cell_verts = _mfem_all_cell_vertices(mesh)  # (n_cells, n_verts, 3)
-    if geom == mfem.Geometry.CUBE:
+    if geom == _MFEM_CUBE:
         unit = _hex_reference_unit_points(n_samples_per_cell, rng)  # (n, 3)
         lo = cell_verts.min(axis=1)  # (n_cells, 3)
         hi = cell_verts.max(axis=1)
         all_pts = lo[:, None, :] + unit[None, :, :] * (hi - lo)[:, None, :]
-    elif geom == mfem.Geometry.TETRAHEDRON:
+    elif geom == _MFEM_TET:
         bary = _tet_barycentric_weights(n_samples_per_cell, rng)  # (n, 4)
         all_pts = np.einsum("nb,cbd->cnd", bary, cell_verts)
     else:
@@ -534,16 +573,14 @@ def _signals_mfem(
     If ``cell_mask`` is given, only those cells are sampled at ``default_n``
     density; other cells receive metric 0 and present=False (caller merges).
     """
-    import mfem.ser as mfem
-
     n_cells = mesh.GetNE()
     geom = mesh.GetElement(0).GetGeometryType()
     cell_verts = _mfem_all_cell_vertices(mesh)
-    if geom == mfem.Geometry.CUBE:
+    if geom == _MFEM_CUBE:
         lo = cell_verts.min(axis=1)
         hi = cell_verts.max(axis=1)
         h_cell = (hi - lo).max(axis=1)
-    elif geom == mfem.Geometry.TETRAHEDRON:
+    elif geom == _MFEM_TET:
         h_cell = _tet_h_cell(cell_verts)
     else:
         raise NotImplementedError(
@@ -556,7 +593,7 @@ def _signals_mfem(
     if capped:
         _warn_spacing_cap(h_max, n_samples, min_feature_size)
     rng = np.random.default_rng(seed)
-    if geom == mfem.Geometry.CUBE:
+    if geom == _MFEM_CUBE:
         unit = _hex_reference_unit_points(n_samples, rng)
         all_pts = lo[:, None, :] + unit[None, :, :] * (hi - lo)[:, None, :]
     else:
@@ -584,20 +621,9 @@ def _signals_mfem(
 
 
 def refine_flagged_cells_mfem(mesh: Any, flagged: NDArray[np.bool_]) -> Any:
-    """One refinement pass on the flagged cells via
-    ``mfem.Mesh.GeneralRefinement``. For hex meshes this is non-conforming
-    octree subdivision (hanging nodes handled automatically by NCMesh);
-    for tet meshes it is conforming refinement. The mesh is refined IN
-    PLACE and returned."""
-    import mfem.ser as mfem
-
-    if mesh.ncmesh is None:
-        mesh.EnsureNCMesh()
-    refs = mfem.intArray()
-    for c in np.where(flagged)[0]:
-        refs.Append(int(c))
-    mesh.GeneralRefinement(refs)
-    return mesh
+    """One MFEM refinement pass. Implemented in ``backends._amr_mfem``."""
+    mod = importlib.import_module("b3_tex.backends._amr_mfem")
+    return mod.refine_flagged_cells(mesh, flagged)
 
 
 def iteratively_refine_mfem(
@@ -624,6 +650,49 @@ def iteratively_refine_mfem(
     each iteration first marks with a cheap coarse grid, then re-samples only
     candidate cells (score > threshold/2 or interface present) at full density.
     """
+    warnings.warn(
+        "amr.iteratively_refine_mfem is deprecated; use mfem_backend.build_mesh. "
+        "Removed in 0.3.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    mesh, _performed = _iteratively_refine_mfem_loop(
+        initial_mesh,
+        problem,
+        threshold=threshold,
+        max_iterations=max_iterations,
+        dof_budget=dof_budget,
+        n_samples_per_cell=n_samples_per_cell,
+        min_feature_size=min_feature_size,
+        cells_across=cells_across,
+        max_sub_samples=max_sub_samples,
+        band=band,
+        two_pass=two_pass,
+        coarse_n_samples=coarse_n_samples,
+    )
+    return mesh
+
+
+def _iteratively_refine_mfem_loop(
+    initial_mesh: Any,
+    problem: "RVEProblem",
+    *,
+    threshold: float = 0.15,
+    max_iterations: int = 4,
+    dof_budget: int = 200_000,
+    n_samples_per_cell: int = DEFAULT_AMR_SUB_SAMPLES,
+    min_feature_size: float | None = None,
+    cells_across: int = DEFAULT_CELLS_ACROSS,
+    max_sub_samples: int = DEFAULT_MAX_SUB_SAMPLES,
+    band: float = 0.0,
+    two_pass: bool = True,
+    coarse_n_samples: int = COARSE_AMR_SUB_SAMPLES,
+) -> tuple[Any, int]:
+    """MFEM AMR loop without the public-wrapper deprecation warning.
+
+    Returns ``(mesh, passes)`` where ``passes`` is how many times a flagged
+    set was actually refined.
+    """
     mesh = initial_mesh
     field = problem.field
     min_feature_size, h_min = _resolve_feature_guard(
@@ -631,6 +700,7 @@ def iteratively_refine_mfem(
     )
     want_floor = h_min is not None
     use_two_pass = bool(two_pass) and int(n_samples_per_cell) > int(coarse_n_samples)
+    performed = 0
     for _ in range(max_iterations):
         if use_two_pass:
             metric, present, h_cell = _signals_mfem(
@@ -694,4 +764,5 @@ def iteratively_refine_mfem(
         if 3 * (mesh.GetNV() + 8 * n_flag) > dof_budget:
             break
         refine_flagged_cells_mfem(mesh, flagged)
-    return mesh
+        performed += 1
+    return mesh, performed

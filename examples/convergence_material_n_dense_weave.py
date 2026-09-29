@@ -36,8 +36,8 @@ from typing import Any
 
 import numpy as np
 
+from b3_tex.api import homogenize
 from b3_tex.problem import RVEProblem
-from b3_tex.quadrature import _resolve_material_sampling_spec
 
 
 # --- Dense plain weave parameters (from plain_weave_dense.yaml) ---
@@ -107,21 +107,23 @@ def dense_weave_config(
     }
 
 
-def get_backend_solver(backend: str):
-    """Return the appropriate solve function for the chosen backend."""
-    if backend.startswith("dolfinx"):
-        if backend.endswith("periodic"):
-            from b3_tex.backends.dolfinx_periodic_backend import solve as solve_fn
-        else:
-            from b3_tex.backends.dolfinx_backend import solve as solve_fn
-    elif backend.startswith("mfem"):
-        if backend.endswith("periodic"):
-            from b3_tex.backends.mfem_backend import solve_periodic as solve_fn
-        else:
-            from b3_tex.backends.mfem_backend import solve as solve_fn
-    else:
-        raise ValueError(f"Unknown backend {backend}")
-    return solve_fn
+def _canonical_backend(name: str) -> str:
+    aliases = {
+        "mfem": "mfem-periodic",
+        "mfem_periodic": "mfem-periodic",
+        "mfem-periodic": "mfem-periodic",
+        "mfem_kubc": "mfem-kubc",
+        "mfem-kubc": "mfem-kubc",
+        "dolfinx": "dolfinx-periodic",
+        "dolfinx_periodic": "dolfinx-periodic",
+        "dolfinx-periodic": "dolfinx-periodic",
+        "dolfinx_kubc": "dolfinx-kubc",
+        "dolfinx-kubc": "dolfinx-kubc",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown backend {name}") from exc
 
 
 def run_one(
@@ -133,16 +135,15 @@ def run_one(
     qdeg: int = 2,
 ) -> dict[str, Any]:
     """Run one solve with the given material sampling resolution."""
+    backend = _canonical_backend(backend)
     cfg = dense_weave_config(n_xy, n_z, material_resolution, backend, cell_type, qdeg)
     problem = RVEProblem.from_config(cfg)
 
-    solve_fn = get_backend_solver(backend)
-
     t0 = time.perf_counter()
-    result = solve_fn(problem)
+    result = homogenize(problem, backend=backend)
     elapsed = time.perf_counter() - t0
 
-    spec = _resolve_material_sampling_spec(problem.solver)
+    spec = problem.solver.material_sampling
 
     return {
         "n_xy": n_xy,
@@ -154,7 +155,7 @@ def run_one(
         "C": result.effective_stiffness.tolist(),
         "elapsed_s": elapsed,
         "engineering": result.engineering_constants(),
-        "material_strategy": spec["strategy"],
+        "material_strategy": spec.strategy,
     }
 
 

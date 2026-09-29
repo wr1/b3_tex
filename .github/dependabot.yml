@@ -1,4 +1,8 @@
 # Dependabot: GitHub Actions + pip (pyproject.toml / hatch). Weekly; cap concurrent PRs.
+# Actions minor/patch updates are grouped. Major bumps stay individual PRs.
+# The six open majors as of 2026-09-29 (checkout 7, setup-python 7,
+# upload-artifact 7, download-artifact 8, git-auto-commit-action 7,
+# action-gh-release 3) are pinned in the workflows instead of merged.
 version: 2
 updates:
   - package-ecosystem: github-actions

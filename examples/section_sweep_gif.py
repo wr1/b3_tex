@@ -41,11 +41,11 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 from b3_tex.problem import RVEProblem
+from b3_tex.viz.sampling import _PLANE_AXES
 from b3_tex.viz.theme import panel_rc
 
 EXAMPLES = Path(__file__).resolve().parent
 OUT_DIR = EXAMPLES.parent / "results"
-_PLANE_AXES = {0: (1, 2), 1: (0, 2), 2: (0, 1)}  # sweep axis -> in-plane (u, v)
 _AXIS_NAME = {0: "x", 1: "y", 2: "z"}
 
 

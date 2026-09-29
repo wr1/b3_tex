@@ -1,0 +1,91 @@
+---
+title: Textile-as-code
+description: Typed Python builders for fabrics — preferred authoring surface.
+---
+
+**Prefer Python builders** for new fabrics, parameter sweeps, and custom yarns.
+YAML is an optional **card serialisation** for CLI lineage, not the fabric model.
+
+```text
+Material + WeavePattern + WeaveGeometry
+  → textile.woven / ncf / braid
+  → textile.rve(...)
+  → textile.solve(problem)   # or b3-tex solve card.py
+```
+
+## Quick example (twill 2×2)
+
+```python
+from b3_tex import Material, WeaveGeometry, WeavePattern, textile
+
+matrix = Material.isotropic("matrix", youngs_modulus=3.5e9, poisson_ratio=0.35)
+fibre = Material.transverse_isotropic(
+    "fibre", e_l=230e9, e_t=15e9, g_lt=15e9, nu_lt=0.20, nu_tt=0.30
+)
+yarn = textile.micromechanical(
+    "yarn", matrix=matrix, fibre=fibre, micromodel="chamis",
+    nominal_vf=0.55, max_vf=0.90,
+)
+domain = (0.02, 0.02, 0.0024)
+field = textile.woven(
+    WeavePattern.twill(2, 2, n_warp=4, n_weft=4),
+    WeaveGeometry(
+        domain_size=domain,
+        warp_width=0.004,
+        warp_height=0.0008,
+        power=4.0,
+        compaction=0.3,
+        nest=True,
+    ),
+    matrix=matrix,
+    yarn=yarn,
+)
+problem = textile.rve(
+    field,
+    [matrix, fibre, yarn],
+    size=domain,
+    mesh_resolution=(24, 24, 6),
+    solver=textile.solver_config(amr=True),
+)
+# result = textile.solve(problem)
+```
+
+Runnable card (same geometry as the YAML twin):
+`examples/weave_twill_2x2.py` — exposes `build() -> RVEProblem`.
+
+```bash
+b3-tex validate examples/weave_twill_2x2.py
+b3-tex solve    examples/weave_twill_2x2.py -o results/weave_twill_2x2
+```
+
+## API surface (`b3_tex.textile`)
+
+| Function | Role |
+|----------|------|
+| `micromechanical(...)` | Yarn with pluggable micromodel + local-Vf LUT |
+| `woven(pattern, geom, matrix=, yarn=)` | 2D pattern-driven weave field |
+| `ncf(...)` / `braid(...)` | NCF and triaxial braid fields |
+| `solver_config(amr=True\|False\|dict)` | Production solver knobs |
+| `rve(field, materials, size=, mesh_resolution=, solver=)` | Build `RVEProblem` |
+| `solve(problem)` | Homogenize via problem backend |
+| `load_problem(path)` | Load `.yaml` / `.yml` or `.py` card |
+
+Package exports: `Material`, `WeavePattern`, `WeaveGeometry`, `RVEProblem`, `textile`.
+
+## Python card contract
+
+A `.py` card used with the CLI must define either:
+
+- `build() -> RVEProblem`, or
+- `problem` — an `RVEProblem` instance or zero-arg callable
+
+## When to use YAML
+
+| Use YAML | Use code |
+|----------|----------|
+| Frozen CLI card / datasheet path (datasheet still takes YAML) | New architecture, custom centerlines |
+| Copy-paste materials block for a fixed fabric | Parameter sweeps / FD / optimization |
+| CI goldens that are pure data | Anything needing callables (section laws) |
+
+See [YAML schema](/docs/reference/yaml-schema) for the card format.
+Do **not** grow a richer YAML DSL — express extensions in Python.

@@ -18,6 +18,8 @@ braids), assembled into a :class:`ParametricWeaveField` with one yarn material.
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +48,54 @@ class BraidGeometry:
     axial_height: float = 0.00015
     nominal_vf: float = 0.55
     max_vf: float = 0.9
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> BraidGeometry:
+        """Parse a ``field: {type: braid}`` block. Short Vf keys warn."""
+        from b3_tex.config import canonical_vf
+
+        axial = dict(config.get("axial", {}))
+        return cls(
+            domain_size=tuple(float(s) for s in config["domain_size"]),
+            braid_angle_deg=float(config.get("braid_angle_deg", 30.0)),
+            n_bias_per_dir=int(config.get("n_bias_per_dir", 3)),
+            bias_width=float(config.get("bias_width", 0.00045)),
+            bias_height=float(config.get("bias_height", 0.00013)),
+            z_amplitude=float(config.get("z_amplitude", 0.00006)),
+            axial_enabled=bool(axial.get("enabled", True)),
+            axial_count=int(axial.get("count", 2)),
+            axial_width=float(axial.get("width", 0.0006)),
+            axial_height=float(axial.get("height", 0.00015)),
+            nominal_vf=canonical_vf(
+                config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55
+            ),
+            max_vf=canonical_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
+        )
+
+    @classmethod
+    def from_kwargs(cls, kwargs: Mapping[str, Any]) -> BraidGeometry:
+        if "domain_size" not in kwargs:
+            raise TypeError("braid_yarns() missing required argument: 'domain_size'")
+        data = dict(kwargs)
+        data["domain_size"] = tuple(float(v) for v in data["domain_size"])
+        for key in (
+            "braid_angle_deg",
+            "bias_width",
+            "bias_height",
+            "z_amplitude",
+            "axial_width",
+            "axial_height",
+            "nominal_vf",
+            "max_vf",
+        ):
+            if key in data and data[key] is not None:
+                data[key] = float(data[key])
+        for key in ("n_bias_per_dir", "axial_count"):
+            if key in data and data[key] is not None:
+                data[key] = int(data[key])
+        if "axial_enabled" in data and data["axial_enabled"] is not None:
+            data["axial_enabled"] = bool(data["axial_enabled"])
+        return cls(**data)
 
 
 def _bias_family(
@@ -99,40 +149,28 @@ def _bias_family(
 
 
 def braid_yarns(
-    *,
-    domain_size: tuple[float, float, float],
-    braid_angle_deg: float = 30.0,
-    n_bias_per_dir: int = 3,
-    bias_width: float = 0.00045,
-    bias_height: float = 0.00013,
-    z_amplitude: float = 0.00006,
-    axial_enabled: bool = True,
-    axial_count: int = 2,
-    axial_width: float = 0.0006,
-    axial_height: float = 0.00015,
-    nominal_vf: float = 0.55,
-    max_vf: float = 0.9,
+    geom: BraidGeometry | None = None, **kwargs: Any
 ) -> tuple[ParametricYarn, ...]:
     """Triaxial braid tows: ``+bias`` family, ``-bias`` family, and axial tows.
 
-    Pure function (no YAML / material lookup) so it can be unit-tested directly.
-    The braid axis is ``y``; bias tows run at ``+/- braid_angle`` to it and
-    interlace via opposite ``z`` phase; axial tows run straight along ``y``.
+    Canonical call is ``braid_yarns(geom)``. Keyword arguments build a
+    :class:`BraidGeometry` and are deprecated; removed in 0.3.0.
     """
-    geom = BraidGeometry(
-        domain_size=tuple(float(v) for v in domain_size),
-        braid_angle_deg=float(braid_angle_deg),
-        n_bias_per_dir=int(n_bias_per_dir),
-        bias_width=float(bias_width),
-        bias_height=float(bias_height),
-        z_amplitude=float(z_amplitude),
-        axial_enabled=bool(axial_enabled),
-        axial_count=int(axial_count),
-        axial_width=float(axial_width),
-        axial_height=float(axial_height),
-        nominal_vf=float(nominal_vf),
-        max_vf=float(max_vf),
-    )
+    if isinstance(geom, BraidGeometry):
+        if kwargs:
+            raise TypeError(
+                "braid_yarns() takes a BraidGeometry or keyword arguments, not both"
+            )
+    elif geom is not None:
+        raise TypeError("braid_yarns() expected a BraidGeometry or keyword arguments")
+    else:
+        warnings.warn(
+            "braid_yarns(**kwargs) is deprecated; pass a BraidGeometry. "
+            "Removed in 0.3.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        geom = BraidGeometry.from_kwargs(kwargs)
     Lx, Ly, Lz = geom.domain_size
     z_mid = 0.5 * Lz
 
@@ -178,26 +216,7 @@ def build_braid(
         if name not in materials:
             raise ValueError(f"{key} {name!r} is not in materials")
 
-    axial = dict(config.get("axial", {}))
-    nominal_vf = float(
-        config.get("nominal_fibre_volume_fraction", config.get("nominal_vf", 0.55))
-    )
-    max_vf = float(config.get("max_fibre_volume_fraction", config.get("max_vf", 0.9)))
-
-    yarns = braid_yarns(
-        domain_size=tuple(float(s) for s in config["domain_size"]),
-        braid_angle_deg=float(config.get("braid_angle_deg", 30.0)),
-        n_bias_per_dir=int(config.get("n_bias_per_dir", 3)),
-        bias_width=float(config.get("bias_width", 0.00045)),
-        bias_height=float(config.get("bias_height", 0.00013)),
-        z_amplitude=float(config.get("z_amplitude", 0.00006)),
-        axial_enabled=bool(axial.get("enabled", True)),
-        axial_count=int(axial.get("count", 2)),
-        axial_width=float(axial.get("width", 0.0006)),
-        axial_height=float(axial.get("height", 0.00015)),
-        nominal_vf=nominal_vf,
-        max_vf=max_vf,
-    )
+    yarns = braid_yarns(BraidGeometry.from_config(config))
     return ParametricWeaveField(
         matrix_material=str(config["matrix_material"]),
         yarn_material=str(config["yarn_material"]),

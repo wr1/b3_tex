@@ -1,26 +1,31 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "b3-tex"
-version = "0.1.2"
-description = "Implicit modelling and periodic homogenization of textile composite RVEs on FEniCSx."
+version = "0.2.0"
+description = "Implicit modelling and periodic homogenization of textile composite RVEs."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+license-files = ["LICENSE"]
 authors = [{ name = "wr1" }]
 dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
   "treeparse>=0.2.5",
   "scipy>=1.10",
-  "mfem",       # PyMFEM — required for the recommended default mfem-* backends
-  "numba>=0.59",  # offline MFEM elasticity CSR assembly (solver.assembly=numba)
   "matplotlib>=3.7",  # common plotting dep for examples, convergence studies, and result visualization
 ]
 
+# dolfinx, dolfinx_mpc, ufl, basix, mpi4py, and petsc4py are conda-forge
+# packages. Do not pip-require them.
 [project.optional-dependencies]
+mfem = [
+  "mfem>=4.8,<4.11",  # PyPI name is mfem (not pymfem). 3.10 resolves 4.8 inside this range.
+  "numba>=0.59",  # offline MFEM elasticity CSR assembly (solver.assembly=numba)
+]
 test = ["pytest>=8.0", "pytest-cov>=5.0"]
 viz = [
   "pyvista>=0.43",      # 3D scene: volume render, level-set isosurface, glyphs
@@ -29,6 +34,7 @@ viz = [
   "imageio-ffmpeg>=0.4", # mp4 via imageio (the explainer also uses the ffmpeg CLI)
   # matplotlib and scipy are already core dependencies; scikit-image is optional
 ]
+all = ["b3-tex[mfem,viz,test]"]
 
 [project.scripts]
 b3-tex = "b3_tex.cli:main"
@@ -36,21 +42,19 @@ b3-tex = "b3_tex.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/b3_tex"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["docs/images", "results", "public"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
   "fenicsx: requires a working DOLFINx and dolfinx_mpc installation",
-  "mfem: requires a working PyMFEM (mfem) installation (now a core dependency)",
+  "mfem: requires a working PyMFEM (mfem) installation (the [mfem] extra, not a core dependency)",
 ]
 
 [tool.coverage.run]
 branch = true
 source = ["b3_tex"]
-# FE backends need dolfinx/mfem; CI measures the pure-Python surface + skips.
-omit = [
-  "*/b3_tex/backends/dolfinx*.py",
-  "*/b3_tex/backends/*_dolfinx*",
-]
 
 [tool.coverage.report]
 show_missing = true
@@ -71,3 +75,44 @@ ignore = ["E741"]
 "tests/test_dolfinx_periodic_solve.py" = ["E402"]
 "tests/test_dolfinx_solve.py" = ["E402"]
 "tests/test_mfem.py" = ["E402"]
+
+# The lint CI job runs ``lint-imports``. No layers contract: backends import
+# problem, postprocess, and amr, while
+# problem imports config which imports backends.registry. That cycle cannot
+# be expressed as layers without forbidding viz → backends (which is allowed).
+[tool.importlinter]
+root_package = "b3_tex"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "FE libraries only in backends"
+type = "forbidden"
+source_modules = [
+  "b3_tex.api",
+  "b3_tex.amr",
+  "b3_tex.cli",
+  "b3_tex.config",
+  "b3_tex.datasheet",
+  "b3_tex.fabric_registry",
+  "b3_tex.fields",
+  "b3_tex.generators",
+  "b3_tex.geometry",
+  "b3_tex.io",
+  "b3_tex.laminate_ref",
+  "b3_tex.materials",
+  "b3_tex.metrics",
+  "b3_tex.micromechanics",
+  "b3_tex.micromodels",
+  "b3_tex.postprocess",
+  "b3_tex.problem",
+  "b3_tex.provenance",
+  "b3_tex.quadrature",
+  "b3_tex.reference",
+  "b3_tex.result",
+  "b3_tex.tensors",
+  "b3_tex.textile",
+  "b3_tex.viz",
+]
+forbidden_modules = ["mfem", "dolfinx", "dolfinx_mpc", "ufl", "basix", "mpi4py", "petsc4py"]
+# viz → backends.mfem_backend → mfem is indirect and allowed. Direct imports are not.
+allow_indirect_imports = true

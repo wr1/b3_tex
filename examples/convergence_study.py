@@ -29,6 +29,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from b3_tex.api import homogenize
 from b3_tex.materials import Material
 from b3_tex.problem import RVEProblem
 from b3_tex.reference import mori_tanaka_cylinder
@@ -68,7 +69,7 @@ def _ud_tow_config(mesh_n: int, sampling: str, qdeg: int = 2) -> dict:
             "radius": RADIUS,
         },
         "solver": {
-            "backend": "dolfinx_periodic",
+            "backend": "dolfinx-periodic",
             "stiffness_sampling": sampling,
             "quadrature_degree": qdeg,
         },
@@ -76,11 +77,9 @@ def _ud_tow_config(mesh_n: int, sampling: str, qdeg: int = 2) -> dict:
 
 
 def run_one(n: int, sampling: str, qdeg: int = 2) -> dict:
-    from b3_tex.backends.dolfinx_periodic_backend import solve
-
     problem = RVEProblem.from_config(_ud_tow_config(n, sampling, qdeg))
     t0 = time.perf_counter()
-    result = solve(problem)
+    result = homogenize(problem)
     elapsed = time.perf_counter() - t0
     return {
         "n": n,

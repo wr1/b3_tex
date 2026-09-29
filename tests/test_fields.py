@@ -13,8 +13,8 @@ from b3_tex.fields import (
     WeaveField,
     orthonormal_frame_along,
     orthonormal_frame_along_batch,
-    plain_weave_yarns,
 )
+from b3_tex.generators.legacy import plain_weave_yarns
 
 
 def test_orthonormal_frame_first_column_matches_axis():
@@ -35,6 +35,23 @@ def test_orthonormal_frame_handles_oblique_axis():
 def test_orthonormal_frame_rejects_zero_axis():
     with pytest.raises(ValueError):
         orthonormal_frame_along(np.zeros(3))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "plain_weave_yarns",
+        "satin_weave_yarns",
+        "parametric_plain_weave_yarns",
+        "stitched_biaxial_yarns",
+    ],
+)
+def test_fields_legacy_yarn_builders_warn(name: str):
+    import b3_tex.fields as fields
+    import b3_tex.generators.legacy as legacy
+
+    with pytest.warns(DeprecationWarning, match=rf"generators\.legacy\.{name}"):
+        assert getattr(fields, name) is getattr(legacy, name)
 
 
 def test_cylinder_yarn_inside_returns_yarn():

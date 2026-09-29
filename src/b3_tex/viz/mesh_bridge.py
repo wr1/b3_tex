@@ -31,10 +31,10 @@ def to_pyvista_grid(
         from b3_tex.backends.mfem_backend import mfem_mesh_to_pyvista_grid
 
         grid = mfem_mesh_to_pyvista_grid(mesh)
-    else:  # assume a DOLFINx mesh
-        import dolfinx
+    else:
+        from b3_tex.backends._dolfinx_common import vtk_mesh
 
-        cells, types, points = dolfinx.plot.vtk_mesh(mesh)
+        cells, types, points = vtk_mesh(mesh)
         grid = pv.UnstructuredGrid(cells, types, points)
 
     if metric is not None:

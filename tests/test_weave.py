@@ -5,13 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from b3_tex.fields import (
-    MultiStraightYarnField,
-    SinusoidalYarn,
-    WeaveField,
-    plain_weave_yarns,
-    stitched_biaxial_yarns,
-)
+from b3_tex.fields import MultiStraightYarnField, SinusoidalYarn, WeaveField
+from b3_tex.generators.legacy import plain_weave_yarns, stitched_biaxial_yarns
 from b3_tex.problem import RVEProblem
 
 
@@ -240,7 +235,8 @@ def test_problem_from_config_plain_weave():
             "amplitude": 0.08,
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="field type"):
+        problem = RVEProblem.from_config(cfg)
     assert isinstance(problem.field, WeaveField)
     assert len(problem.field.yarns) == 4
 
@@ -301,7 +297,8 @@ def test_problem_from_config_weave_explicit_yarns():
             ],
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="field type"):
+        problem = RVEProblem.from_config(cfg)
     assert isinstance(problem.field, WeaveField)
     assert len(problem.field.yarns) == 2
 
@@ -505,7 +502,8 @@ def test_problem_from_config_plain_weave_with_power():
             "power": 4.0,
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="field type"):
+        problem = RVEProblem.from_config(cfg)
     assert all(y.power == 4.0 for y in problem.field.yarns)
 
 
@@ -674,7 +672,8 @@ def test_problem_from_config_stitched_biaxial():
             "stitch_radius": 0.015,
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="field type"):
+        problem = RVEProblem.from_config(cfg)
     assert isinstance(problem.field, MultiStraightYarnField)
     assert len(problem.field.yarns) == 4 + 4 + 4
 
@@ -736,6 +735,7 @@ def test_problem_from_config_weave_per_yarn_power():
             ],
         },
     }
-    problem = RVEProblem.from_config(cfg)
+    with pytest.warns(DeprecationWarning, match="field type"):
+        problem = RVEProblem.from_config(cfg)
     assert problem.field.yarns[0].power == 4.0
     assert problem.field.yarns[1].power == 2.0

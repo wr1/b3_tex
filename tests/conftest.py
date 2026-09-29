@@ -14,7 +14,7 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_marker)
     if importlib.util.find_spec("mfem") is None:
         skip_marker = pytest.mark.skip(
-            reason="mfem not importable (optional pip extra)"
+            reason="mfem not importable (install the [mfem] extra; not a core dependency)"
         )
         for item in items:
             if "mfem" in item.keywords:

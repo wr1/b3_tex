@@ -19,6 +19,8 @@ local-Vf pipeline via fibre-area conservation in :class:`ParametricYarn`.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -191,3 +193,65 @@ def woven_yarns(
             )
         )
     return tuple(yarns)
+
+
+def _weave_pattern(spec: dict[str, Any]):
+    from b3_tex.geometry.weave_pattern import WeavePattern
+
+    kind = str(spec["kind"])
+    if kind == "plain":
+        return WeavePattern.plain(
+            int(spec.get("n_warp", 2)), int(spec.get("n_weft", 2))
+        )
+    if kind == "twill":
+        return WeavePattern.twill(
+            int(spec["n_over"]),
+            int(spec["n_under"]),
+            n_warp=spec.get("n_warp"),
+            n_weft=spec.get("n_weft"),
+            step=int(spec.get("step", 1)),
+        )
+    if kind == "satin":
+        return WeavePattern.satin(
+            int(spec["n"]),
+            int(spec["shift"]),
+            warp_faced=bool(spec.get("warp_faced", True)),
+        )
+    if kind == "basket":
+        return WeavePattern.basket(
+            int(spec["n"]), n_warp=spec.get("n_warp"), n_weft=spec.get("n_weft")
+        )
+    if kind == "matrix":
+        return WeavePattern.from_matrix(spec["matrix"])
+    raise ValueError(f"unknown weave pattern kind {kind!r}")
+
+
+def build_woven(config: dict[str, Any], materials: dict[str, Any]):
+    """``type: woven`` — pattern-driven 2D weave (plain/twill/satin/basket/custom)."""
+    from b3_tex.fabric_registry import _check_materials, _vf
+    from b3_tex.fields import ParametricWeaveField
+
+    _check_materials(config, materials, ("matrix_material", "yarn_material"))
+    pattern = _weave_pattern(config["pattern"])
+    geom = WeaveGeometry(
+        domain_size=tuple(float(s) for s in config["domain_size"]),
+        warp_width=float(config["warp_width"]),
+        warp_height=float(config["warp_height"]),
+        weft_width=config.get("weft_width"),
+        weft_height=config.get("weft_height"),
+        power=float(config.get("power", 2.0)),
+        compaction=float(config.get("compaction", 0.0)),
+        nest=bool(config.get("nest", False)),
+        amplitude=(
+            float(config["amplitude"]) if config.get("amplitude") is not None else None
+        ),
+        nominal_vf=_vf(config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55),
+        max_vf=_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
+        smooth=bool(config.get("smooth", True)),
+    )
+    yarns = woven_yarns(pattern, geom)
+    return ParametricWeaveField(
+        matrix_material=str(config["matrix_material"]),
+        yarn_material=str(config["yarn_material"]),
+        yarns=yarns,
+    )
