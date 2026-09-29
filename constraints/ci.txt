@@ -1,13 +1,8 @@
 # CI pins for packages the pure-Python and test jobs install.
 # From `uv pip freeze --python .venv/bin/python` on 2026-09-29
 # (.venv has no pip module). Not a freeze of the whole environment.
-#
-# numpy 2.4 and scipy 1.17 publish no cp310 wheels (Python >=3.11).
-# The 3.10 job stays on the last releases that do.
-numpy==2.4.4; python_version >= "3.11"
-numpy==2.2.6; python_version < "3.11"
-scipy==1.17.1; python_version >= "3.11"
-scipy==1.15.3; python_version < "3.11"
+numpy==2.4.4
+scipy==1.17.1
 pyyaml==6.0.3
 treeparse==0.2.5
 matplotlib==3.10.9
@@ -17,4 +12,4 @@ coverage==7.13.5
 
 # The test-mfem job also installs mfem and numba via the [mfem] extra
 # (mfem>=4.8,<4.11 and numba>=0.59). They are not pinned here: mfem wheels
-# are Python-version-specific (3.10 resolves 4.8).
+# are Python-version-specific.
