@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default `b3-tex solve --out` is `results/<config-stem>/`.
 - `mfem` and `numba` moved from core dependencies to the `[mfem]` extra; `mfem` pinned `>=4.8,<4.11`.
 - Engineering-constant keys are lowercase everywhere (`e_x`, `g_xy`, `nu_xy`).
+- Requires Python 3.11+.
 - Datasheet AMR panel shows the solved mesh; datasheet announces the 24x24x8 fast mesh.
 
 ### Deprecated

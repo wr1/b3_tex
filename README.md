@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/wr1/b3_tex/actions/workflows/ci.yml/badge.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
 [![coverage](docs/badges/coverage.svg)](https://github.com/wr1/b3_tex/actions/workflows/ci.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
@@ -379,7 +379,7 @@ refinement progresses ([`amr_development_gif.py`](examples/amr_development_gif.p
 
 ## Tests
 
-The non-DOLFINx suite is the PR gate (`test` on Python 3.10–3.12 without MFEM,
+The non-DOLFINx suite is the PR gate (`test` on Python 3.11–3.12 without MFEM,
 and `test-mfem` on 3.12). DOLFINx (`-m fenicsx`) runs weekly, on
 `workflow_dispatch`, and when DOLFINx backend files change — not on every push.
 The coverage badge is pure-Python plus the MFEM job; DOLFINx runs weekly and

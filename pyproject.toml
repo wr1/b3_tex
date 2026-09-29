@@ -7,7 +7,7 @@ name = "b3-tex"
 version = "0.2.0"
 description = "Implicit modelling and periodic homogenization of textile composite RVEs."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 license-files = ["LICENSE"]
 authors = [{ name = "wr1" }]
@@ -23,7 +23,7 @@ dependencies = [
 # packages. Do not pip-require them.
 [project.optional-dependencies]
 mfem = [
-  "mfem>=4.8,<4.11",  # PyPI name is mfem (not pymfem). 3.10 resolves 4.8 inside this range.
+  "mfem>=4.8,<4.11",  # PyPI name is mfem (not pymfem).
   "numba>=0.59",  # offline MFEM elasticity CSR assembly (solver.assembly=numba)
 ]
 test = ["pytest>=8.0", "pytest-cov>=5.0"]
