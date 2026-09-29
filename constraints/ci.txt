@@ -1,8 +1,13 @@
 # CI pins for packages the pure-Python and test jobs install.
 # From `uv pip freeze --python .venv/bin/python` on 2026-09-29
 # (.venv has no pip module). Not a freeze of the whole environment.
-numpy==2.4.4
-scipy==1.17.1
+#
+# numpy 2.4 and scipy 1.17 publish no cp310 wheels (Python >=3.11).
+# The 3.10 job stays on the last releases that do.
+numpy==2.4.4; python_version >= "3.11"
+numpy==2.2.6; python_version < "3.11"
+scipy==1.17.1; python_version >= "3.11"
+scipy==1.15.3; python_version < "3.11"
 pyyaml==6.0.3
 treeparse==0.2.5
 matplotlib==3.10.9
