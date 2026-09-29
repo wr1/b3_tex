@@ -250,7 +250,7 @@ jobs:
 
       # Sketch: conda-forge FE stack. numpy ABI vs constraints/ci.txt is not
       # pinned here so a conda numpy required by fenics-dolfinx is left alone.
-      - uses: mamba-org/setup-micromamba@v2
+      - uses: mamba-org/setup-micromamba@v3
         with:
           environment-name: b3-tex
           channels: conda-forge
