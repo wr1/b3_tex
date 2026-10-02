@@ -8,7 +8,7 @@ treeparse==0.2.5
 matplotlib==3.10.9
 pytest==9.0.3
 pytest-cov==7.1.0
-coverage==7.13.5
+coverage==7.16.2
 
 # The test-mfem job also installs mfem and numba via the [mfem] extra
 # (mfem>=4.8,<4.11 and numba>=0.59). They are not pinned here: mfem wheels
