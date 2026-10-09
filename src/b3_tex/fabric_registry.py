@@ -1,7 +1,7 @@
 """Registry mapping YAML ``field.type`` to a fabric builder.
 
-Every field type resolves here: modern families (``woven``, ``ncf``, ``braid``,
-``orthogonal``, ``layer_to_layer``), straight tows (``cylinder_yarn``,
+Every field type resolves here: modern families (``woven``, ``ncf``,
+``ncf_multiaxial``, ``ud_backed``, ``braid``, ``orthogonal``, ``layer_to_layer``), straight tows (``cylinder_yarn``,
 ``multi_straight_yarn``), and legacy types (``plain_weave``, ``weave``,
 ``parametric_plain_weave``, ``satin_weave``, ``stitched_biaxial``). Unknown
 types raise ``ValueError``.
@@ -22,6 +22,8 @@ FABRIC_GENERATORS: dict[str, str] = {
     "orthogonal": "b3_tex.generators.woven3d:build_orthogonal",
     "layer_to_layer": "b3_tex.generators.woven3d:build_layer_to_layer",
     "ncf": "b3_tex.generators.ncf:build_ncf",
+    "ncf_multiaxial": "b3_tex.generators.ncf:build_ncf_multiaxial",
+    "ud_backed": "b3_tex.generators.ncf:build_ud_backed",
     "braid": "b3_tex.generators.braid:build_braid",
     "cylinder_yarn": "b3_tex.generators.simple:build_cylinder_yarn",
     "multi_straight_yarn": "b3_tex.generators.simple:build_multi_straight_yarn",
