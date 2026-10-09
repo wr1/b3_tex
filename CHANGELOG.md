@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `mfem-periodic` raises `PeriodicPairingError` when a max-face vertex has no periodic partner, instead of silently leaving it unconstrained. Periodic masters are now chosen independently of vertex order.
 - `treeparse` capped at `<0.5`.
-- CI: `timeout-minutes` on every job.
 
 ## [0.2.0] - 2026-09-29
 
