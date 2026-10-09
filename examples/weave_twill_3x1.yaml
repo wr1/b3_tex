@@ -1,0 +1,33 @@
+# 3/1 twill (warp-faced diagonal), 4 x 4 repeat.
+# units: m (SI); E-glass/epoxy. Built by the field.type shown below.
+
+domain:
+  size: [0.02, 0.02, 0.0024]
+  mesh_resolution: [24, 24, 6]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.2e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 80.0e9, e_t: 80.0e9, g_lt: 33.0e9, nu_lt: 0.22, nu_tt: 0.22}  # E-glass
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.60, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: woven
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.02, 0.02, 0.0024]
+  pattern: {kind: twill, n_over: 3, n_under: 1}
+  warp_width: 0.004
+  warp_height: 0.0008
+  power: 4.0
+  compaction: 0.3
+  nest: true
+  nominal_fibre_volume_fraction: 0.60
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}
