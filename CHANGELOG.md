@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Card metadata: `git_dirty`, `generated_utc`, `library_versions` (python, numpy, scipy, installed FE libraries).
+- `report` extra (`typst` Python package); `compile_datasheet` falls back to it when the typst CLI is not on PATH.
+- `ROADMAP.md`.
+
+### Changed
+- `mfem-periodic` raises `PeriodicPairingError` when a max-face vertex has no periodic partner, instead of silently leaving it unconstrained. Periodic masters are now chosen independently of vertex order.
+- `treeparse` capped at `<0.5`.
+- CI: `timeout-minutes` on every job.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
