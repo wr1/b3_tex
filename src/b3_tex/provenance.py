@@ -1,7 +1,11 @@
 """Card provenance, schema version 1.
 
 ``git_sha`` is recorded only when this install's package directory sits inside
-a git work tree. The caller's working directory is never inspected.
+a git work tree, together with ``git_dirty`` (uncommitted tracked changes).
+The caller's working directory is never inspected. Every record also carries
+``generated_utc`` and ``library_versions`` (python, numpy, scipy and whichever
+FE libraries are installed). These are additive keys; the schema version is
+unchanged.
 """
 
 from __future__ import annotations
@@ -9,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+from datetime import UTC, datetime
+import platform
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -53,6 +59,80 @@ def package_git_sha() -> str | None:
         sha = out.stdout.strip()
         return sha or None
     return None
+
+
+def _package_git_dir() -> Path | None:
+    import b3_tex
+
+    start = Path(b3_tex.__file__).resolve().parent
+    for directory in (start, *start.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
+def package_git_dirty() -> bool | None:
+    """``True`` if the editable checkout has uncommitted changes; else ``None``
+    when ``b3_tex`` is not a git checkout."""
+    directory = _package_git_dir()
+    if directory is None:
+        return None
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return bool(out.stdout.strip())
+
+
+_LIBRARY_DISTS = {
+    "numpy": "numpy",
+    "scipy": "scipy",
+    "mfem": "mfem",
+    "dolfinx": "fenics-dolfinx",
+    "dolfinx_mpc": "dolfinx_mpc",
+    "petsc4py": "petsc4py",
+}
+
+
+def library_versions() -> dict[str, str]:
+    """Versions of installed numerical libraries (absent ones are omitted)."""
+    import importlib
+
+    versions: dict[str, str] = {"python": platform.python_version()}
+    for module, dist in _LIBRARY_DISTS.items():
+        version = None
+        try:
+            version = importlib.metadata.version(dist)
+        except importlib.metadata.PackageNotFoundError:
+            pass
+        if version is None and module in ("dolfinx", "dolfinx_mpc"):
+            try:
+                mod = importlib.import_module(module)
+                version = getattr(mod, "__version__", None)
+            except Exception:  # noqa: BLE001 - optional, best effort
+                version = None
+        if version:
+            versions[module] = str(version)
+    return versions
+
+
+def generated_utc() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def yarn_micromechanics_info(problem: RVEProblem) -> dict[str, Any]:
@@ -153,6 +233,11 @@ def build_metadata(
     sha = package_git_sha()
     if sha is not None:
         meta["git_sha"] = sha
+        dirty = package_git_dirty()
+        if dirty is not None:
+            meta["git_dirty"] = dirty
+    meta["generated_utc"] = generated_utc()
+    meta["library_versions"] = library_versions()
     if solver.profile or "profile" in backend_meta:
         profile = backend_meta.get("profile")
         if profile:
