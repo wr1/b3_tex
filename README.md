@@ -93,11 +93,15 @@ helpers); in YAML set `field.type`:
 
 | Family | Code / YAML | Examples |
 |--------|-------------|----------|
-| 2D weave | `textile.woven` / `woven` | plain, twill, satin, basket, custom matrix — `weave_twill_2x2.py`, `weave_satin_4h`, `weave_basket_2x2` |
+| 2D weave | `textile.woven` / `woven` | plain, twill (any n/m, e.g. 2/2, 3/1), broken twill, satin, crowfoot, basket / hopsack, rib, custom matrix — `weave_twill_2x2.py`, `weave_twill_3x1`, `weave_broken_twill_2x2`, `weave_satin_4h`, `weave_crowfoot`, `weave_basket_2x2`, `weave_basket_3x3`, `weave_rib_2`, `weave_spread_tow_plain` |
 | 3D woven | YAML `orthogonal` / `layer_to_layer` | `woven_3d_orthogonal`, `woven_layer_to_layer` |
 | NCF | `textile.ncf` / `ncf` | multi-axial inlays + tricot/pillar — `ncf_tricot_stitched` |
-| Braid | `textile.braid` / `braid` | triaxial axial + ±bias — `triaxial_braid` |
+| Multiaxial NCF | `textile.ncf_multiaxial` / `ncf_multiaxial` | angle list with periodic tow spacing — `ncf_biax_pm45`, `ncf_triax` (0/±45), `ncf_quadrax` (0/±45/90) |
+| UD with backing | `textile.ud_backed` / `ud_backed` | UD tows on a light 90° (or ±45°) backing — `ud_backed` |
+| Braid | `textile.braid`, `textile.biaxial_braid` / `braid` | triaxial axial + ±bias — `triaxial_braid`; periodic k/k biaxial (`interlace`: diamond 1/1, regular 2/2, hercules 3/3) — `braid_diamond`, `braid_regular`, `braid_hercules` |
 | UD / manual | YAML `cylinder_yarn` / `multi_straight_yarn` | `ud_tow.yaml` |
+
+Details and parameters: [textile library](docs/reference/textile-library.mdx).
 
 Crimp, compaction, and nesting for 2D weaves come from the interlacing pattern.
 The example set mirrors [TexGenScripts](https://github.com/louisepb/TexGenScripts)

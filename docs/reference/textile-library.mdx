@@ -1,0 +1,67 @@
+---
+title: Textile library
+description: Available textile architectures, their parameters, and how periodicity is guaranteed.
+---
+
+All structures build a `ParametricWeaveField` from existing generators: 2D weaves from a `WeavePattern` plus `woven_yarns`, multiaxial and UD-backed fabrics from `ncf_yarns`, and braids from `braid_yarns`. Units are SI metres. Example cards live in `examples/` and every one is tested for in-plane face periodicity (`tests/test_textile_library.py`).
+
+## 2D weaves (`type: woven`)
+
+Set `pattern.kind`:
+
+| kind | Parameters | Notes |
+|---|---|---|
+| `plain` | `n_warp`, `n_weft` | |
+| `twill` | `n_over`, `n_under`, `step`, `n_warp`, `n_weft` | 2/2, 3/1, 2/1, ... |
+| `broken_twill` | `n_over`, `n_under` (even repeat ≥ 4) | diagonal reverses every half repeat |
+| `satin` | `n`, `shift` (coprime), `warp_faced` | 5H, 8H, ... |
+| `crowfoot` | `warp_faced` (default true) | 4-harness broken satin (1/3) |
+| `basket` / `hopsack` | `n` | n×n groups |
+| `rib` | `n`, `direction: warp\|weft` | one family grouped n at a time |
+| `matrix` | `matrix` | any boolean interlacing |
+
+Geometry keys: `warp_width`, `warp_height`, optional `weft_width`/`weft_height`, `power`, `compaction`, `nest`, `amplitude`, `smooth`. Cell size = number of weft (x) and warp (y) tows times the tow pitch. A spread-tow fabric is a plain weave with wide, thin tapes (`weave_spread_tow_plain`).
+
+## Multiaxial NCF (`type: ncf_multiaxial`)
+
+```yaml
+angles: [0, 45, -45, 90]   # bottom to top
+ply_height: 0.00025         # scalar or list
+tow_spacing: 0.001          # target, snapped per angle
+width_fraction: 0.95        # tow width / spacing
+snap_spacing: true
+stitch: {...}               # optional, as for type: ncf
+```
+
+A straight-tow ply at angle θ is periodic in an Lx × Ly cell only if `Lx·|sin θ|` and `Ly·|cos θ|` are both integer multiples of the tow spacing. `periodic_spacing()` picks the closest spacing that satisfies this, and raises if none exists (use a cell whose aspect ratio matches the angle, e.g. square for ±45°). The plies are stacked bottom-to-top and centred in the thickness, and the stack must fit inside `Lz`.
+
+## UD with backing (`type: ud_backed`)
+
+```yaml
+ud:      {angle_deg: 0, height: 0.0006, spacing: 0.0025, width_fraction: 0.95}
+backing: {angles: [90], height: 0.00008, spacing: 0.0025, width_fraction: 0.5, side: bottom}
+```
+
+Typical of spar-cap and root UD fabrics. All tows share `yarn_material` today.
+
+## Braids (`type: braid`)
+
+Without `interlace`, you get the original triaxial model. With `interlace: k` (`1`/`diamond`, `2`/`regular`, `3`/`hercules`), each bias tow passes over k and then under k tows of the other family:
+
+- crossings are `d = Lx / (2 n sin θ)` apart along a tow;
+- the undulation is `z = A cos(π (s − (k−1) d/2) / (k d))`;
+- the cell is periodic only for `Ly = k·Lx / (n·tan θ)` (`periodic_braid_length()`), and other values raise;
+- `crossing_clearance_amplitude(h, k)` gives the smallest `z_amplitude` for which crossing tows don't overlap.
+
+`textile.biaxial_braid(pattern=...)` derives the cell, tow width and amplitude for you.
+
+## Roadmap (textile library)
+
+- Separate yarn materials per family (hybrid glass/carbon, a glass backing on carbon UD). This needs a multi-material `ParametricWeaveField`.
+- A periodic stitch thread: the tricot/pillar spline isn't periodic across y faces today (`ncf_tricot_stitched` has about 8% face mismatch).
+- The legacy `triaxial_braid` card isn't in-plane periodic. Port it to the `interlace` path (axial tows plus k/k bias with `periodic_braid_length`).
+- `woven_layer_to_layer` shows about 9% x-face mismatch. Investigate.
+- Leno weaves (warp tows twisting around each other) need crossing-warp centerlines that the current axis-aligned weave generator can't express.
+- Angle-interlock variants beyond `layer_to_layer`.
+- Sheared/draped cells (see the sheared-cell roadmap entry).
+- Add the new structures to the fabric montage (`make fabric-gifs` stems).
