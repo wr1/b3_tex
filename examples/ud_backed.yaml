@@ -1,0 +1,30 @@
+# Unidirectional glass on a light 90 deg backing (spar-cap / root UD).
+# units: m (SI); E-glass/epoxy. Built by the field.type shown below.
+
+domain:
+  size: [0.005, 0.005, 0.0007]
+  mesh_resolution: [20, 20, 8]
+
+periodic_tolerance: 1.0e-8
+
+materials:
+  - {name: matrix, type: isotropic, youngs_modulus: 3.2e9, poisson_ratio: 0.35}
+  - {name: fibre, type: transverse_isotropic, e_l: 80.0e9, e_t: 80.0e9, g_lt: 33.0e9, nu_lt: 0.22, nu_tt: 0.22}  # E-glass
+  - {name: yarn, type: micromechanical, matrix: matrix, fibre: fibre, micromodel: chamis,
+     nominal_fibre_volume_fraction: 0.60, max_fibre_volume_fraction: 0.90}
+
+field:
+  type: ud_backed
+  matrix_material: matrix
+  yarn_material: yarn
+  domain_size: [0.005, 0.005, 0.0007]
+  ud: {angle_deg: 0, height: 0.0006, spacing: 0.0025, width_fraction: 0.95}
+  backing: {angles: [90], height: 0.00008, spacing: 0.0025, width_fraction: 0.5, side: bottom}
+  power: 2.0
+  nominal_fibre_volume_fraction: 0.60
+  max_fibre_volume_fraction: 0.90
+
+solver:
+  backend: mfem-periodic
+  cell_type: hexahedron
+  material_sampling: {strategy: local_cloud, resolution: 6}
