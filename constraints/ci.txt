@@ -1,7 +1,7 @@
 # CI pins for packages the pure-Python and test jobs install.
 # From `uv pip freeze --python .venv/bin/python` on 2026-09-29
 # (.venv has no pip module). Not a freeze of the whole environment.
-numpy==2.4.4
+numpy==2.4.6
 scipy==1.17.1
 pyyaml==6.0.3
 treeparse==0.2.5
