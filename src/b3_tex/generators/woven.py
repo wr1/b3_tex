@@ -35,26 +35,37 @@ from b3_tex.geometry.yarn import ParametricYarn
 from b3_tex.generators._geom import WeaveGeometry
 
 
-def _compacted_half_height(
-    centerline, h0: float, compaction: float, z_mid: float, amp: float
-):
-    """Section half-height callable that thins toward z-extremes (any centerline).
+class CompactedHalfHeight:
+    """Section half-height that thins toward z-extremes (any centerline).
 
     ``b(s) = h0 * (1 - compaction * ((z(s) - z_mid) / amp)^2)`` — full mid-float,
     most compressed at the crossovers. Reduces to the old ``sin^2`` law for a
-    sinusoidal path and works unchanged for polyline/spline crimp.
+    sinusoidal path and works unchanged for polyline/spline crimp. A callable
+    object (not a closure) so fused kernels can read its parameters.
     """
+
+    def __init__(self, centerline, h0: float, compaction: float, z_mid: float, amp: float):
+        self.centerline = centerline
+        self.h0 = float(h0)
+        self.compaction = float(compaction)
+        self.z_mid = float(z_mid)
+        self.amp = float(amp)
+
+    def __call__(self, s: NDArray[np.float64]) -> NDArray[np.float64]:
+        z = np.asarray(
+            self.centerline.position(np.asarray(s, dtype=float))[:, 2], dtype=float
+        )
+        w = np.clip(((z - self.z_mid) / self.amp) ** 2, 0.0, 1.0)
+        return self.h0 * (1.0 - self.compaction * w)
+
+
+def _compacted_half_height(
+    centerline, h0: float, compaction: float, z_mid: float, amp: float
+):
+    """Half-height parameter: scalar ``h0`` or a :class:`CompactedHalfHeight`."""
     if compaction <= 0.0 or amp <= 0.0:
         return float(h0)
-
-    def b(s: NDArray[np.float64]) -> NDArray[np.float64]:
-        z = np.asarray(
-            centerline.position(np.asarray(s, dtype=float))[:, 2], dtype=float
-        )
-        w = np.clip(((z - z_mid) / amp) ** 2, 0.0, 1.0)
-        return h0 * (1.0 - compaction * w)
-
-    return b
+    return CompactedHalfHeight(centerline, h0, compaction, z_mid, amp)
 
 
 def _fit_sine_phase(

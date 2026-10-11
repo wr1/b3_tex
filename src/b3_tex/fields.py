@@ -430,6 +430,31 @@ class ParametricWeaveField:
         ``local_vf`` is ``nan`` on matrix points.
         """
         pts = _as_points_2d(points)
+        packed = self._fused_packed()
+        if packed is not None:
+            from b3_tex.geometry._fused import fused_winner
+
+            _bk, inside, _mv, rotations, vf = fused_winner(packed, pts, want_rot=True)
+            return inside.astype(np.intp), rotations, vf
+        return self._sample_with_vf_numpy(pts)
+
+    def _fused_packed(self):
+        """Packed arrays for the fused numba kernel, or ``None`` (numpy path)."""
+        from b3_tex.geometry import _fused
+
+        if not _fused.kernel_enabled():
+            return None
+        if "_fused_cache" in self.__dict__:
+            cache = self.__dict__["_fused_cache"]
+        else:
+            cache = _fused.pack_field(self)
+            object.__setattr__(self, "_fused_cache", cache)
+        return cache
+
+    def _sample_with_vf_numpy(
+        self, pts: NDArray[np.float64]
+    ) -> tuple[NDArray[np.intp], NDArray[np.float64], NDArray[np.float64]]:
+        """Numpy reference implementation of :meth:`sample_with_vf`."""
         n = pts.shape[0]
         best_k, inside, _min_vals = self._winner(pts)
         rotations = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
@@ -463,6 +488,11 @@ class ParametricWeaveField:
     def surface_proximity(self, points: ArrayLike) -> NDArray[np.float64]:
         """Per-point ``min_k ellipse_value`` over yarns (<=1 inside any yarn)."""
         pts = _as_points_2d(points)
+        packed = self._fused_packed()
+        if packed is not None:
+            from b3_tex.geometry._fused import fused_winner
+
+            return fused_winner(packed, pts, want_rot=False)[2]
         _best_k, _inside, min_vals = self._winner(pts)
         return min_vals
 

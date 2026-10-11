@@ -109,6 +109,20 @@ def _bond_stress_matrix_batch(R: NDArray[np.float64]) -> NDArray[np.float64]:
     return M
 
 
+def _numba_rotate():
+    """Parallel numba Bond rotation (C' = M C M^T); ``None`` without numba or
+    with ``B3_TEX_GEOM_KERNEL=numpy``."""
+    import os
+
+    if os.environ.get("B3_TEX_GEOM_KERNEL", "").strip().lower() == "numpy":
+        return None
+    try:
+        from b3_tex._rotate_numba import rotate_bond_numba
+    except ImportError:
+        return None
+    return rotate_bond_numba
+
+
 def rotate_stiffness_batch(
     c_voigt: ArrayLike, rotations: ArrayLike
 ) -> NDArray[np.float64]:
@@ -121,6 +135,9 @@ def rotate_stiffness_batch(
     if not np.allclose(RtR, eye, atol=1e-8):
         raise ValueError("each rotation must be orthogonal (R^T R = I)")
     c = np.asarray(c_voigt, dtype=float)
+    fn = _numba_rotate()
+    if fn is not None:
+        return fn(np.ascontiguousarray(c), np.ascontiguousarray(R), False)
     M = _bond_stress_matrix_batch(R)
     return M @ c @ M.transpose(0, 2, 1)
 
@@ -156,6 +173,9 @@ def rotate_stiffness_batch_varying(
         raise ValueError(f"rotations must have shape (N, 3, 3), got {R.shape}")
     if c.shape[0] != R.shape[0]:
         raise ValueError("c_voigt and rotations must have matching leading dim")
+    fn = _numba_rotate()
+    if fn is not None:
+        return fn(np.ascontiguousarray(c), np.ascontiguousarray(R), True)
     M = _bond_stress_matrix_batch(R)
     return M @ c @ M.transpose(0, 2, 1)
 
