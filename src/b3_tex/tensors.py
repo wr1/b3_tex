@@ -94,6 +94,21 @@ def stiffness_tensor_to_voigt_batch(c_tensor: ArrayLike) -> NDArray[np.float64]:
     return voigt
 
 
+
+def _bond_stress_matrix_batch(R: NDArray[np.float64]) -> NDArray[np.float64]:
+    """(N, 3, 3) rotations -> (N, 6, 6) stress Bond matrices M with
+    C' = M C M^T (Voigt order VOIGT_PAIRS, engineering shear strain)."""
+    n = R.shape[0]
+    M = np.empty((n, 6, 6), dtype=float)
+    for a, (i, j) in enumerate(VOIGT_PAIRS):
+        for b, (k, m) in enumerate(VOIGT_PAIRS):
+            if k == m:
+                M[:, a, b] = R[:, i, k] * R[:, j, m]
+            else:
+                M[:, a, b] = R[:, i, k] * R[:, j, m] + R[:, i, m] * R[:, j, k]
+    return M
+
+
 def rotate_stiffness_batch(
     c_voigt: ArrayLike, rotations: ArrayLike
 ) -> NDArray[np.float64]:
@@ -105,9 +120,9 @@ def rotate_stiffness_batch(
     RtR = np.einsum("nji,njk->nik", R, R)
     if not np.allclose(RtR, eye, atol=1e-8):
         raise ValueError("each rotation must be orthogonal (R^T R = I)")
-    c = stiffness_voigt_to_tensor(c_voigt)
-    rotated = np.einsum("nia,njb,nkc,nld,abcd->nijkl", R, R, R, R, c, optimize=True)
-    return stiffness_tensor_to_voigt_batch(rotated)
+    c = np.asarray(c_voigt, dtype=float)
+    M = _bond_stress_matrix_batch(R)
+    return M @ c @ M.transpose(0, 2, 1)
 
 
 def stiffness_voigt_to_tensor_batch(c_voigt: ArrayLike) -> NDArray[np.float64]:
@@ -141,11 +156,8 @@ def rotate_stiffness_batch_varying(
         raise ValueError(f"rotations must have shape (N, 3, 3), got {R.shape}")
     if c.shape[0] != R.shape[0]:
         raise ValueError("c_voigt and rotations must have matching leading dim")
-    tensor = stiffness_voigt_to_tensor_batch(c)
-    rotated = np.einsum(
-        "nia,njb,nkc,nld,nabcd->nijkl", R, R, R, R, tensor, optimize=True
-    )
-    return stiffness_tensor_to_voigt_batch(rotated)
+    M = _bond_stress_matrix_batch(R)
+    return M @ c @ M.transpose(0, 2, 1)
 
 
 def voigt_b_matrix(

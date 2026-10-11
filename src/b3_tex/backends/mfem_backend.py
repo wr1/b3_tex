@@ -173,6 +173,50 @@ def _build_cell_vertices_mfem(mesh) -> np.ndarray:
     return _mfem_all_cell_vertices(mesh)
 
 
+def _resolve_linear_solver(solver_cfg: object | None) -> str:
+    """``solver.linear_solver`` / env ``B3_TEX_LINEAR_SOLVER``: auto|pardiso|splu.
+    ``auto`` uses PARDISO (pypardiso) when importable, else SuperLU."""
+    import os
+
+    choice = os.environ.get("B3_TEX_LINEAR_SOLVER", "").strip().lower()
+    if not choice and solver_cfg is not None:
+        choice = str(getattr(solver_cfg, "linear_solver", "") or "").lower()
+    choice = choice or "auto"
+    if choice not in ("auto", "pardiso", "splu"):
+        raise ValueError(f"unknown linear solver {choice!r}")
+    if choice in ("auto", "pardiso"):
+        try:
+            import pypardiso  # noqa: F401
+        except ImportError:
+            if choice == "pardiso":
+                raise
+            return "splu"
+        return "pardiso"
+    return "splu"
+
+
+class _PardisoFactor:
+    """Factor-once / solve-many wrapper with the ``SuperLU.solve`` surface."""
+
+    def __init__(self, A):
+        import pypardiso
+
+        self._A = A.tocsr()
+        self._solver = pypardiso.PyPardisoSolver()
+        self._solver.factorize(self._A)
+
+    def solve(self, b):
+        return self._solver.solve(self._A, np.asarray(b, dtype=float))
+
+
+def _factorize_saddle(A, solver_cfg: object | None):
+    import scipy.sparse.linalg as spla
+
+    if _resolve_linear_solver(solver_cfg) == "pardiso":
+        return _PardisoFactor(A)
+    return spla.splu(A.tocsc())
+
+
 def _periodic_vertex_master_map(
     mesh,
     domain_size: tuple[float, float, float],
@@ -533,8 +577,8 @@ class MfemPeriodicSession:
 
             C = sp.coo_matrix((vals, (rows, cols)), shape=(n_constraints, n_T)).tocsr()
             Z = sp.csr_matrix((n_constraints, n_constraints))
-            A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr").tocsc()
-            lu = spla.splu(A_aug)
+            A_aug = sp.bmat([[K_T, C.T], [C, Z]], format="csr")
+            lu = _factorize_saddle(A_aug, problem.solver)
 
         self.mesh = mesh
         self.fespace = fespace

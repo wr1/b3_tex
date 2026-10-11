@@ -26,6 +26,7 @@ mfem = [
   "mfem>=4.8,<4.11",  # PyPI name is mfem (not pymfem).
   "numba>=0.59",  # offline MFEM elasticity CSR assembly (solver.assembly=numba)
 ]
+pardiso = ["pypardiso>=0.4"]  # MKL PARDISO for the periodic MPC solve (auto-used when importable)
 test = ["pytest>=8.0", "pytest-cov>=5.0"]
 viz = [
   "pyvista>=0.43",      # 3D scene: volume render, level-set isosurface, glyphs
