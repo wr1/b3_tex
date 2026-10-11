@@ -44,7 +44,9 @@ class CompactedHalfHeight:
     object (not a closure) so fused kernels can read its parameters.
     """
 
-    def __init__(self, centerline, h0: float, compaction: float, z_mid: float, amp: float):
+    def __init__(
+        self, centerline, h0: float, compaction: float, z_mid: float, amp: float
+    ):
         self.centerline = centerline
         self.h0 = float(h0)
         self.compaction = float(compaction)
