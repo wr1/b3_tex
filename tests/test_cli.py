@@ -194,6 +194,10 @@ def test_build_metadata_records_schema():
         assert "git_sha" not in meta
     else:
         assert meta["git_sha"] == sha
+        assert isinstance(meta.get("git_dirty", False), bool)
+    assert meta["generated_utc"].endswith("Z")
+    libs = meta["library_versions"]
+    assert libs["python"] and libs["numpy"]
 
 
 def test_package_git_sha_is_repo_head_or_absent():

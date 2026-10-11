@@ -112,3 +112,33 @@ def test_compile_minimal_typst(tmp_path):
     out = tmp_path / "smoke.pdf"
     compile_datasheet(doc, out)
     assert out.is_file() and out.stat().st_size > 500
+
+
+def test_compile_errors_clearly_without_typst(tmp_path, monkeypatch):
+    import builtins
+
+    from b3_tex import datasheet
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "typst":
+            raise ImportError("no typst")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(datasheet.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(RuntimeError, match=r"b3-tex\[report\]"):
+        datasheet.compile_datasheet("Hello", tmp_path / "x.pdf")
+
+
+def test_compile_with_python_typst(tmp_path, monkeypatch):
+    pytest.importorskip("typst")
+    from b3_tex import datasheet
+
+    monkeypatch.setattr(datasheet.shutil, "which", lambda _name: None)
+    out = tmp_path / "x.pdf"
+    png = tmp_path / "x.png"
+    datasheet.compile_datasheet("= Hello", out, out_png=png)
+    assert out.stat().st_size > 0
+    assert png.stat().st_size > 0

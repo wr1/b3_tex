@@ -217,6 +217,56 @@ def _factorize_saddle(A, solver_cfg: object | None):
     return spla.splu(A.tocsc())
 
 
+class PeriodicPairingError(RuntimeError):
+    """Vertices on a max face have no periodic partner on the opposite face.
+
+    Node-pair periodicity needs matching vertices on opposing faces. A
+    missing partner silently drops a periodic tie and corrupts C_eff, so it
+    is an error rather than a warning.
+    """
+
+
+def periodic_master_map_from_coords(
+    coords: NDArray[np.float64],
+    domain_size: tuple[float, float, float],
+    tol: float = 1e-9,
+) -> tuple[NDArray[np.intp], dict[str, int]]:
+    """Pure-numpy periodic master map plus tie statistics.
+
+    ``coords`` is (nv, 3). Returns ``(master_of, stats)`` where ``stats`` has
+    ``boundary_vertices`` (vertices on any max face), ``tied`` (those mapped to
+    a different master) and ``unmatched`` (those with no partner).
+    """
+    L = np.asarray([float(s) for s in domain_size])
+    coords = np.asarray(coords, dtype=float).reshape(-1, 3)
+    nv = coords.shape[0]
+    on_max = np.abs(coords - L) < tol
+    canon = np.where(on_max, 0.0, coords)
+    keys = [tuple(int(round(c / tol)) for c in row) for row in canon]
+    # Vertices not on any max face are the canonical owners of their key.
+    owner: dict[tuple[int, int, int], int] = {}
+    for v in range(nv):
+        if not on_max[v].any():
+            owner.setdefault(keys[v], v)
+    # Master = the min-face/interior owner when one exists (order-independent);
+    # otherwise the first vertex seen with that key (unmatched case).
+    first_seen: dict[tuple[int, int, int], int] = {}
+    master_of = np.empty(nv, dtype=np.intp)
+    for v in range(nv):
+        key = keys[v]
+        if key not in first_seen:
+            first_seen[key] = owner.get(key, v)
+        master_of[v] = first_seen[key]
+    boundary = np.flatnonzero(on_max.any(axis=1))
+    unmatched = int(sum(1 for v in boundary if keys[v] not in owner))
+    stats = {
+        "boundary_vertices": int(boundary.size),
+        "tied": int(np.count_nonzero(master_of[boundary] != boundary)),
+        "unmatched": unmatched,
+    }
+    return master_of, stats
+
+
 def _periodic_vertex_master_map(
     mesh,
     domain_size: tuple[float, float, float],
@@ -226,28 +276,23 @@ def _periodic_vertex_master_map(
 
     Master = the vertex whose coordinates, after shifting any coordinate at
     L_d back to 0 (within tol), match this vertex's canonical position.
-    Each vertex is its own master if no shift is needed."""
-    Lx, Ly, Lz = (float(s) for s in domain_size)
+    Each vertex is its own master if no shift is needed.
+
+    Raises :class:`PeriodicPairingError` if any max-face vertex has no
+    partner on the opposite face (e.g. non-matching or non-conforming mesh).
+    """
     nv = mesh.GetNV()
-    master_of = np.empty(nv, dtype=np.intp)
-    canonical_to_master: dict[tuple[int, int, int], int] = {}
-    for v in range(nv):
-        coords = np.asarray(mesh.GetVertexArray(v), dtype=float)
-        canon = coords.copy()
-        if abs(canon[0] - Lx) < tol:
-            canon[0] = 0.0
-        if abs(canon[1] - Ly) < tol:
-            canon[1] = 0.0
-        if abs(canon[2] - Lz) < tol:
-            canon[2] = 0.0
-        key = (
-            round(canon[0] / tol),
-            round(canon[1] / tol),
-            round(canon[2] / tol),
+    coords = np.array(
+        [np.asarray(mesh.GetVertexArray(v), dtype=float) for v in range(nv)]
+    ).reshape(nv, 3)
+    master_of, stats = periodic_master_map_from_coords(coords, domain_size, tol)
+    if stats["unmatched"]:
+        raise PeriodicPairingError(
+            f"node-pair periodicity: {stats['unmatched']} of "
+            f"{stats['boundary_vertices']} max-face vertices have no partner on "
+            "the opposite face; the mesh is not periodic-conforming. Use the "
+            "dolfinx-periodic backend for non-matching meshes."
         )
-        if key not in canonical_to_master:
-            canonical_to_master[key] = v
-        master_of[v] = canonical_to_master[key]
     return master_of
 
 

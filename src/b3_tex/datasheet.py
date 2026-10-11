@@ -506,6 +506,61 @@ def build_typst(spec: DatasheetSpec) -> str:
     )
 
 
+_TYPST_MISSING = (
+    "Compiling the datasheet needs Typst: install the 'report' extra "
+    "(pip install 'b3-tex[report]', which provides the typst Python package) "
+    "or put the typst CLI on PATH."
+)
+
+
+def _typst_backend() -> str:
+    """``"cli"`` if the typst binary is on PATH, else ``"python"`` if the
+    ``typst`` package imports; raises ``RuntimeError`` if neither."""
+    if shutil.which("typst") is not None:
+        return "cli"
+    try:
+        import typst  # noqa: F401
+    except ImportError:
+        raise RuntimeError(_TYPST_MISSING) from None
+    return "python"
+
+
+def _typst_compile(
+    backend: str,
+    root: Path,
+    src_name: str,
+    output: Path | str,
+    *,
+    fmt: str | None = None,
+    ppi: int | None = None,
+) -> None:
+    if backend == "python":
+        import typst
+
+        kwargs: dict[str, object] = {"root": str(root)}
+        if fmt is not None:
+            kwargs["format"] = fmt
+        if ppi is not None:
+            kwargs["ppi"] = float(ppi)
+        out = Path(output)
+        if not out.is_absolute():
+            out = root / out
+        try:
+            typst.compile(str(root / src_name), output=str(out), **kwargs)
+        except Exception as exc:  # typst raises its own error types
+            raise RuntimeError(f"typst compile failed:\n{exc}") from exc
+        return
+    cmd = ["typst", "compile"]
+    if fmt is not None:
+        cmd += ["--format", fmt]
+    if ppi is not None:
+        cmd += ["--ppi", str(ppi)]
+    cmd += [src_name, str(output)]
+    proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"typst compile failed ({proc.returncode}):\n{proc.stderr}")
+
+
 def compile_datasheet(
     typst_src: str,
     out_pdf: Path,
@@ -513,47 +568,22 @@ def compile_datasheet(
     out_png: Path | None = None,
     root: Path | None = None,
 ) -> None:
-    """Compile Typst; ``root`` is the directory holding figure PNGs (and the .typ file)."""
-    if shutil.which("typst") is None:
-        raise RuntimeError(
-            "typst is not on PATH. Install typst to compile the datasheet."
-        )
+    """Compile Typst; ``root`` is the directory holding figure PNGs (and the .typ file).
+
+    Uses the typst CLI when on PATH, otherwise the ``typst`` Python package
+    (the ``report`` extra).
+    """
+    backend = _typst_backend()
     out_pdf = Path(out_pdf)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     root = Path(root or out_pdf.parent)
     src = root / "datasheet.typ"
     src.write_text(typst_src)
-    proc = subprocess.run(
-        ["typst", "compile", str(src.name), str(out_pdf.resolve())],
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"typst compile failed ({proc.returncode}):\n{proc.stderr}")
+    _typst_compile(backend, root, src.name, out_pdf.resolve())
     if out_png is not None:
         for stale in root.glob("datasheet-*.png"):
             stale.unlink()
-        png_pattern = root / "datasheet-{p}.png"
-        proc2 = subprocess.run(
-            [
-                "typst",
-                "compile",
-                "--format",
-                "png",
-                "--ppi",
-                "150",
-                str(src.name),
-                str(png_pattern.name),
-            ],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
-        if proc2.returncode != 0:
-            raise RuntimeError(
-                f"typst png export failed ({proc2.returncode}):\n{proc2.stderr}"
-            )
+        _typst_compile(backend, root, src.name, "datasheet-{p}.png", fmt="png", ppi=150)
         rendered = root / "datasheet-1.png"
         if not rendered.is_file():
             pages = sorted(root.glob("datasheet-*.png"))
