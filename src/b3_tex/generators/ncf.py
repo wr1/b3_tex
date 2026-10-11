@@ -46,7 +46,18 @@ from b3_tex.geometry.centerlines import SplineCenterline, StraightCenterline
 from b3_tex.geometry.cross_sections import PowerEllipseSection, SuperellipseSection
 from b3_tex.geometry.yarn import ParametricYarn
 
-__all__ = ["NcfGeometry", "build_ncf", "ncf_yarns"]
+__all__ = [
+    "NcfGeometry",
+    "build_ncf",
+    "build_ncf_multiaxial",
+    "build_ud_backed",
+    "multiaxial_plies",
+    "ncf_yarns",
+    "periodic_spacing",
+    "ply_periodicity_residual",
+    "stacked_plies",
+    "ud_backed_plies",
+]
 
 
 def _ply_directions(
@@ -331,3 +342,215 @@ def build_ncf(
         yarn_material=yarn_name,
         yarns=yarns,
     )
+
+
+# ---------------------------------------------------------------------------
+# Periodicity helpers and multiaxial / UD-backed presets (built on ncf_yarns)
+# ---------------------------------------------------------------------------
+
+
+def ply_periodicity_residual(
+    angle_deg: float, spacing: float, domain_size: tuple[float, float, float]
+) -> float:
+    """How far a straight-tow ply is from fitting the RVE periodically.
+
+    A ply of tows at ``angle_deg`` with perpendicular ``spacing`` is periodic in
+    an ``Lx x Ly`` cell iff the in-plane-perpendicular offsets of the cell
+    translations, ``Lx*|sin(theta)|`` and ``Ly*|cos(theta)|``, are both integer
+    multiples of ``spacing``. Returns the larger distance to the nearest integer
+    (0 = periodic, 0.5 = worst).
+    """
+    Lx, Ly = float(domain_size[0]), float(domain_size[1])
+    theta = np.deg2rad(float(angle_deg))
+    worst = 0.0
+    for offset in (Lx * abs(np.sin(theta)), Ly * abs(np.cos(theta))):
+        ratio = offset / float(spacing)
+        worst = max(worst, abs(ratio - round(ratio)))
+    return float(worst)
+
+
+def periodic_spacing(
+    angle_deg: float,
+    target_spacing: float,
+    domain_size: tuple[float, float, float],
+    *,
+    tol: float = 1e-6,
+    search: int = 64,
+) -> float:
+    """Spacing closest to ``target_spacing`` that makes the ply periodic.
+
+    Raises ``ValueError`` if no spacing with up to ``search`` tows across the
+    cell works (e.g. 30 deg plies in a square cell); choose a cell whose aspect
+    ratio matches the ply angle.
+    """
+    Lx, Ly = float(domain_size[0]), float(domain_size[1])
+    theta = np.deg2rad(float(angle_deg))
+    a, b = Lx * abs(np.sin(theta)), Ly * abs(np.cos(theta))
+    base = a if a > b else b  # the larger offset sets the candidate grid
+    best: float | None = None
+    for m in range(1, search + 1):
+        s = base / m
+        if ply_periodicity_residual(angle_deg, s, domain_size) <= tol:
+            if best is None or abs(s - target_spacing) < abs(best - target_spacing):
+                best = s
+    if best is None:
+        raise ValueError(
+            f"no periodic tow spacing for a {angle_deg} deg ply in a "
+            f"{Lx:g} x {Ly:g} cell; adjust the cell aspect ratio"
+        )
+    return float(best)
+
+
+def _as_list(value: Any, n: int, name: str) -> list[float]:
+    if isinstance(value, (list, tuple)):
+        if len(value) != n:
+            raise ValueError(f"{name} must have one entry per ply ({n})")
+        return [float(v) for v in value]
+    return [float(value)] * n
+
+
+def stacked_plies(
+    *,
+    domain_size: tuple[float, float, float],
+    angles: list[float],
+    heights: float | list[float],
+    spacings: float | list[float],
+    width_fraction: float = 0.95,
+    z_start: float | None = None,
+    snap: bool = True,
+) -> list[dict[str, float]]:
+    """Ply dicts for :func:`ncf_yarns` stacked bottom-to-top without overlap.
+
+    ``spacings`` are targets; with ``snap`` they are moved to the nearest
+    periodic value (:func:`periodic_spacing`). Each tow is
+    ``width_fraction * spacing`` wide. Plies are centred in the cell thickness
+    unless ``z_start`` is given.
+    """
+    n = len(angles)
+    if n == 0:
+        raise ValueError("at least one ply angle is required")
+    hs = _as_list(heights, n, "heights")
+    ss = _as_list(spacings, n, "spacings")
+    Lz = float(domain_size[2])
+    total = sum(hs)
+    if total > Lz * (1.0 + 1e-9):
+        raise ValueError(
+            f"ply heights sum to {total:g} which exceeds the cell thickness {Lz:g}"
+        )
+    z = 0.5 * (Lz - total) if z_start is None else float(z_start)
+    plies: list[dict[str, float]] = []
+    for angle, h, s in zip(angles, hs, ss, strict=True):
+        spacing = periodic_spacing(angle, s, domain_size) if snap else s
+        plies.append(
+            {
+                "angle_deg": float(angle),
+                "z_center": z + 0.5 * h,
+                "width": float(width_fraction) * spacing,
+                "height": h,
+                "spacing": spacing,
+            }
+        )
+        z += h
+    return plies
+
+
+def _preset_field(config: dict[str, Any], materials: dict[str, Any], plies):
+    matrix_name = str(config["matrix_material"])
+    yarn_name = str(config["yarn_material"])
+    for key, name in (("matrix_material", matrix_name), ("yarn_material", yarn_name)):
+        if name not in materials:
+            raise ValueError(f"{key} {name!r} is not in materials")
+    data = dict(config)
+    data["plies"] = plies
+    return ParametricWeaveField(
+        matrix_material=matrix_name,
+        yarn_material=yarn_name,
+        yarns=ncf_yarns(NcfGeometry.from_config(data)),
+    )
+
+
+def multiaxial_plies(config: Mapping[str, Any]) -> list[dict[str, float]]:
+    """Ply list for ``type: ncf_multiaxial`` (see :func:`build_ncf_multiaxial`)."""
+    size = tuple(float(s) for s in config["domain_size"])
+    return stacked_plies(
+        domain_size=size,  # type: ignore[arg-type]
+        angles=[float(a) for a in config["angles"]],
+        heights=config["ply_height"],
+        spacings=config["tow_spacing"],
+        width_fraction=float(config.get("width_fraction", 0.95)),
+        snap=bool(config.get("snap_spacing", True)),
+    )
+
+
+def build_ncf_multiaxial(
+    config: dict[str, Any], materials: dict[str, Any]
+) -> ParametricWeaveField:
+    """``type: ncf_multiaxial`` — biax/triax/quadrax NCF from an angle list.
+
+    Schema::
+
+        field:
+          type: ncf_multiaxial
+          matrix_material: matrix
+          yarn_material: yarn
+          domain_size: [L, L, Lz]       # square cell for 0/+-45/90
+          angles: [0, 45, -45, 90]      # bottom to top
+          ply_height: 0.00025           # scalar or one per ply
+          tow_spacing: 0.0012           # target; snapped to a periodic value
+          width_fraction: 0.95          # tow width / spacing
+          snap_spacing: true
+          stitch: {...}                 # optional, as for type: ncf
+    """
+    return _preset_field(config, materials, multiaxial_plies(config))
+
+
+def ud_backed_plies(config: Mapping[str, Any]) -> list[dict[str, float]]:
+    """Ply list for ``type: ud_backed`` (see :func:`build_ud_backed`)."""
+    size = tuple(float(s) for s in config["domain_size"])
+    ud = dict(config.get("ud", {}))
+    backing = dict(config.get("backing", {}))
+    b_angles = [float(a) for a in backing.get("angles", [90.0])]
+    angles = [float(ud.get("angle_deg", 0.0)), *b_angles]
+    heights = [float(ud["height"])] + [float(backing["height"])] * len(b_angles)
+    spacings = [float(ud["spacing"])] + [float(backing["spacing"])] * len(b_angles)
+    plies = stacked_plies(
+        domain_size=size,  # type: ignore[arg-type]
+        angles=angles,
+        heights=heights,
+        spacings=spacings,
+        snap=bool(config.get("snap_spacing", True)),
+    )
+    plies[0]["width"] = float(ud.get("width_fraction", 0.95)) * plies[0]["spacing"]
+    for ply in plies[1:]:
+        ply["width"] = float(backing.get("width_fraction", 0.5)) * ply["spacing"]
+    if str(backing.get("side", "bottom")) == "bottom":
+        # Put the backing below the UD layer, preserving the total stack.
+        z0 = min(p["z_center"] - 0.5 * p["height"] for p in plies)
+        z = z0
+        for ply in [*plies[1:], plies[0]]:
+            ply["z_center"] = z + 0.5 * ply["height"]
+            z += ply["height"]
+    return plies
+
+
+def build_ud_backed(
+    config: dict[str, Any], materials: dict[str, Any]
+) -> ParametricWeaveField:
+    """``type: ud_backed`` — UD tows on a light backing (e.g. blade spar-cap UD).
+
+    Schema::
+
+        field:
+          type: ud_backed
+          matrix_material: matrix
+          yarn_material: yarn
+          domain_size: [Lx, Ly, Lz]
+          ud: {height: 0.0006, spacing: 0.0025, width_fraction: 0.95, angle_deg: 0}
+          backing: {angles: [90], height: 0.00008, spacing: 0.0025,
+                    width_fraction: 0.5, side: bottom}
+          stitch: {...}                 # optional, as for type: ncf
+
+    All tows share ``yarn_material`` (the backing is usually a lighter glass
+    tow of the same fibre; separate materials are on the roadmap).
+    """
+    return _preset_field(config, materials, ud_backed_plies(config))

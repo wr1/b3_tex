@@ -234,13 +234,27 @@ def _weave_pattern(spec: dict[str, Any]):
         return WeavePattern.basket(
             int(spec["n"]), n_warp=spec.get("n_warp"), n_weft=spec.get("n_weft")
         )
+    if kind == "broken_twill":
+        return WeavePattern.broken_twill(int(spec["n_over"]), int(spec["n_under"]))
+    if kind == "crowfoot":
+        return WeavePattern.crowfoot(warp_faced=bool(spec.get("warp_faced", True)))
+    if kind == "rib":
+        return WeavePattern.rib(
+            int(spec["n"]), direction=str(spec.get("direction", "warp"))
+        )
+    if kind == "hopsack":
+        return WeavePattern.hopsack(int(spec.get("n", 2)))
     if kind == "matrix":
         return WeavePattern.from_matrix(spec["matrix"])
     raise ValueError(f"unknown weave pattern kind {kind!r}")
 
 
 def build_woven(config: dict[str, Any], materials: dict[str, Any]):
-    """``type: woven`` — pattern-driven 2D weave (plain/twill/satin/basket/custom)."""
+    """``type: woven`` — pattern-driven 2D weave.
+
+    ``pattern.kind``: plain, twill, broken_twill, satin, crowfoot, basket,
+    hopsack, rib, matrix.
+    """
     from b3_tex.fabric_registry import _check_materials, _vf
     from b3_tex.fields import ParametricWeaveField
 

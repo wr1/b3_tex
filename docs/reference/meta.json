@@ -3,6 +3,7 @@
   "pages": [
     "architecture",
     "textile-as-code",
+    "textile-library",
     "cli",
     "micromechanics",
     "yaml-schema"

@@ -55,14 +55,17 @@ from b3_tex.problem import PeriodicPair, RVEProblem
 from b3_tex.result import HomogenizationResult
 
 __all__ = [
+    "biaxial_braid",
     "braid",
     "layered_crossply",
     "load_problem",
     "micromechanical",
     "ncf",
+    "ncf_multiaxial",
     "rve",
     "solve",
     "solver_config",
+    "ud_backed",
     "woven",
 ]
 
@@ -194,8 +197,16 @@ def braid(
     axial_height: float = 0.00015,
     nominal_vf: float = 0.55,
     max_vf: float = 0.9,
+    interlace: int | str | None = None,
 ) -> ParametricWeaveField:
-    """Triaxial braid field (axial + ±bias families)."""
+    """Braid field: ±bias families plus optional axial tows.
+
+    ``interlace=None`` keeps the original triaxial model. ``1``/``"diamond"``,
+    ``2``/``"regular"``, ``3``/``"hercules"`` build a periodic k/k interlaced
+    braid; ``domain_size[1]`` must then equal
+    :func:`b3_tex.generators.braid.periodic_braid_length`.
+    """
+    from b3_tex.generators.braid import _interlace
     from b3_tex.generators.braid import BraidGeometry, braid_yarns
 
     size = tuple(float(s) for s in domain_size)
@@ -215,12 +226,134 @@ def braid(
             axial_height=float(axial_height),
             nominal_vf=float(nominal_vf),
             max_vf=float(max_vf),
+            interlace=_interlace(interlace),
         )
     )
     return ParametricWeaveField(
         matrix_material=_mat_name(matrix),
         yarn_material=_mat_name(yarn),
         yarns=yarns,
+    )
+
+
+def biaxial_braid(
+    *,
+    matrix: Material | str,
+    yarn: Material | str,
+    pattern: int | str = "regular",
+    braid_angle_deg: float = 45.0,
+    n_bias_per_dir: int = 2,
+    lx: float = 0.0024,
+    bias_height: float = 0.0002,
+    width_fraction: float = 0.95,
+    nominal_vf: float = 0.55,
+    max_vf: float = 0.9,
+) -> ParametricWeaveField:
+    """Periodic biaxial braid (no axial tows): diamond, regular or hercules.
+
+    The cell length along the braid axis, the tow width
+    (``width_fraction`` of the perpendicular tow spacing), the undulation
+    amplitude (just clearing at crossings) and the thickness are derived.
+    """
+    import numpy as np
+
+    from b3_tex.generators.braid import (
+        _interlace,
+        crossing_clearance_amplitude,
+        periodic_braid_length,
+    )
+
+    k = _interlace(pattern)
+    assert k is not None
+    ly = periodic_braid_length(lx, braid_angle_deg, n_bias_per_dir, k)
+    amp = 1.05 * crossing_clearance_amplitude(bias_height, k)
+    width = width_fraction * (lx / n_bias_per_dir) * np.cos(np.deg2rad(braid_angle_deg))
+    return braid(
+        matrix=matrix,
+        yarn=yarn,
+        domain_size=(lx, ly, 2.0 * amp + bias_height),
+        braid_angle_deg=braid_angle_deg,
+        n_bias_per_dir=n_bias_per_dir,
+        bias_width=float(width),
+        bias_height=bias_height,
+        z_amplitude=amp,
+        axial_enabled=False,
+        nominal_vf=nominal_vf,
+        max_vf=max_vf,
+        interlace=k,
+    )
+
+
+def ncf_multiaxial(
+    *,
+    domain_size: Sequence[float],
+    angles: Sequence[float],
+    ply_height: float | Sequence[float],
+    tow_spacing: float | Sequence[float],
+    matrix: Material | str,
+    yarn: Material | str,
+    width_fraction: float = 0.95,
+    stitch: Mapping[str, Any] | None = None,
+    power: float = 0.5,
+    nominal_vf: float = 0.55,
+    max_vf: float = 0.9,
+) -> ParametricWeaveField:
+    """Biax / triax / quadrax NCF from an angle list (bottom to top).
+
+    Tow spacings are snapped to periodic values for the cell.
+    """
+    from b3_tex.generators.ncf import stacked_plies
+
+    size = tuple(float(s) for s in domain_size)
+    plies = stacked_plies(
+        domain_size=size,  # type: ignore[arg-type]
+        angles=[float(a) for a in angles],
+        heights=list(ply_height) if isinstance(ply_height, Sequence) else ply_height,
+        spacings=list(tow_spacing)
+        if isinstance(tow_spacing, Sequence)
+        else tow_spacing,
+        width_fraction=width_fraction,
+    )
+    return ncf(
+        domain_size=size,
+        plies=plies,
+        matrix=matrix,
+        yarn=yarn,
+        stitch=stitch,
+        power=power,
+        nominal_vf=nominal_vf,
+        max_vf=max_vf,
+    )
+
+
+def ud_backed(
+    *,
+    domain_size: Sequence[float],
+    ud: Mapping[str, Any],
+    backing: Mapping[str, Any],
+    matrix: Material | str,
+    yarn: Material | str,
+    stitch: Mapping[str, Any] | None = None,
+    power: float = 0.5,
+    nominal_vf: float = 0.55,
+    max_vf: float = 0.9,
+) -> ParametricWeaveField:
+    """UD tows on a light backing ply (same keys as ``type: ud_backed``)."""
+    from b3_tex.generators.ncf import ud_backed_plies
+
+    size = tuple(float(s) for s in domain_size)
+    plies = ud_backed_plies(
+        {"domain_size": size, "ud": dict(ud), "backing": dict(backing)}
+    )
+    return ncf(
+        domain_size=size,
+        plies=plies,
+        matrix=matrix,
+        yarn=yarn,
+        stitch=stitch,
+        power=power,
+        nominal_vf=nominal_vf,
+        max_vf=max_vf,
     )
 
 

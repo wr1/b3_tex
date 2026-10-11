@@ -48,6 +48,10 @@ class BraidGeometry:
     axial_height: float = 0.00015
     nominal_vf: float = 0.55
     max_vf: float = 0.9
+    # ``None`` keeps the original single-undulation triaxial model. An integer
+    # ``k`` builds a periodic k/k interlaced braid: 1 = diamond, 2 = regular,
+    # 3 = hercules (see :func:`periodic_braid_length`).
+    interlace: int | None = None
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> BraidGeometry:
@@ -70,6 +74,7 @@ class BraidGeometry:
                 config, "nominal_fibre_volume_fraction", "nominal_vf", 0.55
             ),
             max_vf=canonical_vf(config, "max_fibre_volume_fraction", "max_vf", 0.9),
+            interlace=_interlace(config.get("interlace")),
         )
 
     @classmethod
@@ -96,6 +101,55 @@ class BraidGeometry:
         if "axial_enabled" in data and data["axial_enabled"] is not None:
             data["axial_enabled"] = bool(data["axial_enabled"])
         return cls(**data)
+
+
+BRAID_PATTERNS = {"diamond": 1, "regular": 2, "hercules": 3}
+
+
+def _interlace(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if value not in BRAID_PATTERNS:
+            raise ValueError(
+                f"interlace must be one of {sorted(BRAID_PATTERNS)} or an integer, "
+                f"got {value!r}"
+            )
+        return BRAID_PATTERNS[value]
+    k = int(value)
+    if k < 1:
+        raise ValueError("interlace must be >= 1")
+    return k
+
+
+def crossing_spacing(geom: BraidGeometry) -> float:
+    """Distance along a bias tow between crossings with the opposite family."""
+    theta = np.deg2rad(geom.braid_angle_deg)
+    return geom.domain_size[0] / (
+        2.0 * max(int(geom.n_bias_per_dir), 1) * np.sin(theta)
+    )
+
+
+def periodic_braid_length(
+    lx: float, braid_angle_deg: float, n_bias_per_dir: int, interlace: int
+) -> float:
+    """Cell length along the braid axis (``Ly``) that makes a k/k braid periodic.
+
+    ``Ly = k * Lx / (n * tan(theta))``: one full over-k/under-k cycle of every
+    bias tow per cell, and the bias tows re-enter at a tow position.
+    """
+    theta = np.deg2rad(float(braid_angle_deg))
+    return float(interlace) * float(lx) / (float(n_bias_per_dir) * np.tan(theta))
+
+
+def crossing_clearance_amplitude(bias_height: float, interlace: int) -> float:
+    """Smallest ``z_amplitude`` for which crossing bias tows just touch.
+
+    At a crossing the two tows sit at ``+/- A cos(pi (k-1) / (2k))``, so they
+    clear each other when that is at least half the tow height.
+    """
+    k = int(interlace)
+    return 0.5 * float(bias_height) / float(np.cos(np.pi * (k - 1) / (2 * k)))
 
 
 def _bias_family(
@@ -127,6 +181,20 @@ def _bias_family(
     n = max(int(geom.n_bias_per_dir), 1)
     x0 = (np.arange(n) + 0.5) * Lx / n
     period = Ly  # one undulation up-and-over per cell traversal along the axis
+    if geom.interlace is not None:
+        # k/k interlacing: crossings every d along the tow; over k, under k.
+        # z = A cos(pi (s - (k-1) d / 2) / (k d)) puts every crossing at
+        # |z| = A cos(pi (k-1) / (2k)) with the sign pattern of a k/k braid.
+        # Image tows one cell either side in x keep the field periodic.
+        k = int(geom.interlace)
+        d = crossing_spacing(geom)
+        period = 2.0 * k * d
+        phase = phase + 0.5 * np.pi - 2.0 * np.pi * (0.5 * (k - 1) * d) / period
+        reach = int(np.ceil(Ly * np.tan(theta) / Lx)) + 1
+        x0 = np.concatenate([x0 + j * Lx for j in range(-reach, reach + 1)])
+        s_max = (reach + 1) * Lx / max(np.sin(theta), 1e-12) + Ly / max(
+            np.cos(theta), 1e-12
+        )
 
     yarns: list[ParametricYarn] = []
     for x_origin in x0:
@@ -173,6 +241,15 @@ def braid_yarns(
         geom = BraidGeometry.from_kwargs(kwargs)
     Lx, Ly, Lz = geom.domain_size
     z_mid = 0.5 * Lz
+    if geom.interlace is not None:
+        expected = periodic_braid_length(
+            Lx, geom.braid_angle_deg, geom.n_bias_per_dir, geom.interlace
+        )
+        if abs(Ly - expected) > 1e-6 * expected:
+            raise ValueError(
+                f"interlaced braid is periodic only for Ly = k*Lx/(n*tan(angle)) = "
+                f"{expected:.9g} (got {Ly:.9g}); see periodic_braid_length()"
+            )
 
     yarns: list[ParametricYarn] = []
     # +bias family undulates up (phase 0); -bias family undulates down (phase pi)
