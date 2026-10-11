@@ -28,9 +28,32 @@ _KIND_SINE = 0
 _KIND_BSPLINE = 1
 # per-yarn float parameter layout
 (
-    P_KIND, P_RUN, P_INP, P_INPOS, P_LO, P_SPAN, P_ZMID, P_AMPL, P_PERIOD, P_PHASE,
-    P_A, P_POW, P_HKIND, P_H0, P_COMP, P_HZMID, P_HAMP, P_NOM, P_MAXVF, P_REF,
-    P_GFAC, P_CULL, P_DEG, P_NT, P_DDEG, P_NDT,
+    P_KIND,
+    P_RUN,
+    P_INP,
+    P_INPOS,
+    P_LO,
+    P_SPAN,
+    P_ZMID,
+    P_AMPL,
+    P_PERIOD,
+    P_PHASE,
+    P_A,
+    P_POW,
+    P_HKIND,
+    P_H0,
+    P_COMP,
+    P_HZMID,
+    P_HAMP,
+    P_NOM,
+    P_MAXVF,
+    P_REF,
+    P_GFAC,
+    P_CULL,
+    P_DEG,
+    P_NT,
+    P_DDEG,
+    P_NDT,
 ) = range(26)
 NPARAM = 26
 
@@ -79,12 +102,18 @@ def pack_field(field: Any):
             if np.ndim(spl.c) != 1:
                 return None
             splines.append((spl.t, spl.c, spl.k, dspl.t, dspl.c, dspl.k))
-            slope_max = float(np.max(np.abs(dspl(np.linspace(cl.s_min, cl.s_max, 4097)))))
+            slope_max = float(
+                np.max(np.abs(dspl(np.linspace(cl.s_min, cl.s_max, 4097))))
+            )
             slope_max *= 1.05  # sampling margin
         elif type(cl) is SinusoidalCenterline:
             pr[P_KIND] = _KIND_SINE
             pr[P_ZMID], pr[P_AMPL], pr[P_PERIOD], pr[P_PHASE] = (
-                cl.z_mid, cl.amplitude, cl.period, cl.phase)
+                cl.z_mid,
+                cl.amplitude,
+                cl.period,
+                cl.phase,
+            )
             splines.append(None)
             slope_max = abs(cl.amplitude) * 2 * np.pi / cl.period
         else:
@@ -97,7 +126,12 @@ def pack_field(field: Any):
             if hh.centerline is not cl:
                 return None
             pr[P_HKIND], pr[P_H0], pr[P_COMP], pr[P_HZMID], pr[P_HAMP] = (
-                1, hh.h0, hh.compaction, hh.z_mid, hh.amp)
+                1,
+                hh.h0,
+                hh.compaction,
+                hh.z_mid,
+                hh.amp,
+            )
         elif np.ndim(hh) == 0 and not callable(hh):
             pr[P_HKIND], pr[P_H0] = 0, float(hh)
         else:
@@ -109,7 +143,10 @@ def pack_field(field: Any):
         # |e1_z| < 0.9  <=>  |z'| < 0.9/sqrt(1-0.81)
         pr[P_CULL] = 1.0 if slope_max < 0.9 / np.sqrt(0.19) * 0.999 else 0.0
     L = max([len(s[0]) for s in splines if s is not None] + [1])
-    T = np.zeros((ny, L)); Cc = np.zeros((ny, L)); DT = np.zeros((ny, L)); DC = np.zeros((ny, L))
+    T = np.zeros((ny, L))
+    Cc = np.zeros((ny, L))
+    DT = np.zeros((ny, L))
+    DC = np.zeros((ny, L))
     for k, s in enumerate(splines):
         if s is None:
             continue
@@ -156,12 +193,14 @@ if nb is not None:
 
     @nb.njit(cache=True, inline="always")
     def yarn_eval(pr, Tk, Ck, DTk, DCk, px, py, pz, out_frame):
-        run = int(pr[P_RUN]); inp = int(pr[P_INP])
+        run = int(pr[P_RUN])
+        inp = int(pr[P_INP])
         prun = px if run == 0 else py
         pinp = py if run == 0 else px
         s = prun
         if pr[P_KIND] == _KIND_BSPLINE:
-            lo = pr[P_LO]; span = pr[P_SPAN]
+            lo = pr[P_LO]
+            span = pr[P_SPAN]
             sw = lo + ((s - lo) - np.floor((s - lo) / span) * span)
             z = bspl(Tk, Ck, int(pr[P_NT]), int(pr[P_DEG]), sw)
             dz = bspl(DTk, DCk, int(pr[P_NDT]), int(pr[P_DDEG]), sw)
@@ -171,9 +210,12 @@ if nb is not None:
             dz = pr[P_AMPL] * w * np.cos(w * s + pr[P_PHASE])
         # tangent (graph): run component 1, z component dz; normalise twice as numpy
         tn = np.sqrt(1.0 + dz * dz)
-        t0 = 1.0 / tn; t2 = dz / tn
+        t0 = 1.0 / tn
+        t2 = dz / tn
         n2 = np.sqrt(t0 * t0 + t2 * t2)
-        e1 = np.zeros(3); e1[run] = t0 / n2; e1[2] = t2 / n2
+        e1 = np.zeros(3)
+        e1[run] = t0 / n2
+        e1[2] = t2 / n2
         h = np.zeros(3)
         if abs(e1[2]) >= 0.9:
             h[1] = 1.0
@@ -195,7 +237,8 @@ if nb is not None:
         # rel[run] = 0 exactly (graph projection)
         u = rel[0] * e2[0] + rel[1] * e2[1] + rel[2] * e2[2]
         v = rel[0] * e3[0] + rel[1] * e3[1] + rel[2] * e3[2]
-        a = pr[P_A]; p = pr[P_POW]
+        a = pr[P_A]
+        p = pr[P_POW]
         if pr[P_HKIND] == 1:
             ww = ((z - pr[P_HZMID]) / pr[P_HAMP]) ** 2
             ww = min(max(ww, 0.0), 1.0)
@@ -204,7 +247,9 @@ if nb is not None:
             b = pr[P_H0]
         val = (abs(u) / a) ** p + (abs(v) / b) ** p
         for i in range(3):
-            out_frame[i, 0] = e1[i]; out_frame[i, 1] = e2[i]; out_frame[i, 2] = e3[i]
+            out_frame[i, 0] = e1[i]
+            out_frame[i, 1] = e2[i]
+            out_frame[i, 2] = e3[i]
         area = 4.0 * a * b * pr[P_GFAC]
         vf = pr[P_NOM] * pr[P_REF] / max(area, 1e-30)
         vf = min(max(vf, pr[P_NOM]), pr[P_MAXVF])
@@ -225,7 +270,9 @@ if nb is not None:
                     lb[k] = 0.0
             order = np.argsort(lb)
             fr = np.empty((3, 3))
-            best = np.inf; bk = -1; bvf = np.nan
+            best = np.inf
+            bk = -1
+            bvf = np.nan
             bfr = np.eye(3)
             for jj in range(ny):
                 k = order[jj]
@@ -233,7 +280,9 @@ if nb is not None:
                     break
                 val, vf = yarn_eval(params[k], T[k], C[k], DT[k], DC[k], px, py, pz, fr)
                 if val < best or (val == best and k < bk):
-                    best = val; bk = k; bvf = vf
+                    best = val
+                    bk = k
+                    bvf = vf
                     bfr[:, :] = fr
             best_k[i] = bk
             min_vals[i] = best
@@ -262,4 +311,10 @@ def fused_winner(packed, pts: np.ndarray, want_rot: bool = True):
     vf = np.empty(n if want_rot else 0)
     _KERNEL(pts, params, T, C, DT, DC, best_k, min_vals, rot, vf, want_rot)
     inside = min_vals <= 1.0
-    return best_k, inside, min_vals, (rot if want_rot else None), (vf if want_rot else None)
+    return (
+        best_k,
+        inside,
+        min_vals,
+        (rot if want_rot else None),
+        (vf if want_rot else None),
+    )

@@ -486,7 +486,6 @@ class MfemPeriodicSession:
     def __init__(self, problem: RVEProblem):
         import mfem.ser as mfem
         import scipy.sparse as sp
-        import scipy.sparse.linalg as spla
 
         self._mfem = mfem
         self.problem = problem

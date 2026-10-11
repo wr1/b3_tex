@@ -94,7 +94,6 @@ def stiffness_tensor_to_voigt_batch(c_tensor: ArrayLike) -> NDArray[np.float64]:
     return voigt
 
 
-
 def _bond_stress_matrix_batch(R: NDArray[np.float64]) -> NDArray[np.float64]:
     """(N, 3, 3) rotations -> (N, 6, 6) stress Bond matrices M with
     C' = M C M^T (Voigt order VOIGT_PAIRS, engineering shear strain)."""

@@ -16,9 +16,11 @@ def _rotate(c, R, varying, pairs, out):
     for q in nb.prange(n):
         M = np.empty((6, 6))
         for a in range(6):
-            i = pairs[a, 0]; j = pairs[a, 1]
+            i = pairs[a, 0]
+            j = pairs[a, 1]
             for b in range(6):
-                k = pairs[b, 0]; m = pairs[b, 1]
+                k = pairs[b, 0]
+                m = pairs[b, 1]
                 if k == m:
                     M[a, b] = R[q, i, k] * R[q, j, m]
                 else:
