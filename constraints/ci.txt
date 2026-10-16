@@ -4,7 +4,7 @@
 numpy==2.4.6
 scipy==1.17.1
 pyyaml==6.0.3
-treeparse==0.3.4
+treeparse==0.4.0
 matplotlib==3.11.2
 pytest==9.1.1
 pytest-cov==7.1.0
